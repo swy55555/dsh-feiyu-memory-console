@@ -13,16 +13,23 @@
 | 长期记忆、记忆图、语义搜索 | memvec 服务在跑（`npm run start:memvec`） |
 | 原文层、摘要层、会话轮换 | memvec 新版 + **给桥接打上下文补丁**（`node bridge/install.mjs --apply`） |
 | 整理队列、轻量记忆、性格、情绪、日记 | QQ 桥接在跑；桥接缺少对应 capability 时页面会提示 |
-| 主动联系、催睡 | 需要带 `owner-contact` capability 的桥接；当前发布包不包含这段桥接改动 |
+| 主动联系、催睡 | **给桥接打 owner-contact 补丁**（`node bridge/install-owner-contact.mjs --apply`） |
 
 桥接补丁安装（在插件目录执行）：
 
 ```powershell
+# 上下文层（原文/摘要）
 node bridge/install.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
 node bridge/install.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
+
+# 主动联系 / 催睡（可选）
+node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
+node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
 ```
 
 `--check` 报 `incompatible` 就不要 `--apply`：说明你的 `bridge.js` 和补丁版本对不上，先看 [UPGRADE.md](UPGRADE.md)。打完补丁要重启桥接。
+
+owner-contact 补丁会写回执 `owner-contact-install.json`，撤销用 `--undo`；如果桥接本身已经内置这段逻辑（`ownerContactCfg`），`--check` 会直接报 `already-inline`，不会重复插入。
 
 控制台「启动检查」只会提示缺什么；真正的修复步骤以这张表为准。
 
