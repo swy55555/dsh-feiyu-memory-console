@@ -17,6 +17,7 @@
 - [功能](#功能)
 - [环境要求](#环境要求)
 - [安装](#安装)
+- [启动与检查](#启动与检查)
 - [配置](#配置)
 - [使用](#使用)
 - [数据目录](#数据目录)
@@ -145,6 +146,67 @@ node bin/preview.mjs
 ```
 
 访问 `http://127.0.0.1:3999`。
+
+---
+
+## 启动与检查
+
+### memvec（记忆库）
+
+`memvec` 是独立 Python 服务，不在 DSH 里自动启动：
+
+```powershell
+cd ~/.dsh/memvec
+.\start.cmd
+```
+
+或者用包内源码：
+
+```powershell
+cd <插件目录>\memvec
+python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
+.\.venv\Scripts\python server.py
+```
+
+检查：
+
+```powershell
+curl.exe http://127.0.0.1:9881/stats
+```
+
+返回 `{"ok":true,...}` 就正常。控制台顶部「记忆库」红点 = 9881 没在跑。
+
+### QQ 桥接
+
+桥接也是独立进程：
+
+```powershell
+cd ~/.dsh/qq-bridge
+node src/bridge.js
+```
+
+检查：
+
+```powershell
+curl.exe http://127.0.0.1:3100/api/status
+```
+
+控制台顶部「桥接」红点 = 3100 没在跑。
+
+### 控制台
+
+- 已装 DSH：`http://127.0.0.1:3080/dsh-feiyu-memory/`，或设置左侧栏「可塑性记忆」
+- 没装 DSH：`node bin/preview.mjs`，访问 `http://127.0.0.1:3999`
+
+### 常见红点
+
+| 现象 | 原因 |
+|---|---|
+| 记忆库红 | memvec 9881 没启动 |
+| 桥接红 | QQ 桥接 3100 没启动 |
+| QQ 红 | 桥接连不上 SnowLuma，或 QQ 没登录 |
+| 3999 打不开 | 预览进程没运行，`node bin/preview.mjs` |
 
 ---
 
