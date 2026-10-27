@@ -219,6 +219,36 @@ curl.exe http://127.0.0.1:3100/api/status
 - `weights`：只改情绪幅度，不改长期人格。
 - 模型复核默认关闭；开启会产生额外调用。
 
+### 主动联系（只对你）
+
+在指定时间窗里，如果你太久没说话，她会主动来找你；超过更久，会先掉一点心情，再带小脾气地找你。
+
+```json
+{
+  "socialV2": {
+    "ownerContact": {
+      "enabled": true,
+      "windowStart": "08:00",
+      "windowEnd": "24:00",
+      "idleHours": 4,
+      "repeatHours": 3,
+      "maxPerDay": 4,
+      "sulkAfterHours": 8,
+      "sulkCooldownHours": 6,
+      "sulkMoodDrop": 0.18
+    }
+  }
+}
+```
+
+- `windowStart` / `windowEnd`：本地时间，`24:00` 表示当天结束；支持跨午夜（如 `20:00`–`02:00`）。
+- `idleHours`：你最后一条消息之后多久没动静，触发第一次主动联系。
+- `repeatHours`：两次主动联系至少隔多久；`maxPerDay` 是每日上限，防止刷屏。
+- `sulkAfterHours`：静默超过这么久，先掉心情再发；`sulkCooldownHours` 控制闹脾气的冷却。
+- `sulkMoodDrop`：每次闹脾气让愉悦度下降的幅度（0.05–0.5），会留下「他很久没来找我」的触发记录，但不会直接改长期人格。
+
+也可以在控制台「情绪」页的「主动联系」卡片里改，不用手写 JSON。
+
 ### memvec 环境变量
 
 ```text
