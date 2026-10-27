@@ -1,4 +1,4 @@
-﻿# 可塑性记忆
+# 可塑性记忆
 
 本地优先的 QQ 角色记忆控制台，DSH 插件形态。把长期记忆、原文与摘要、日记、性格和情绪放在一个页面里，能看、能改、能撤回；所有数据都在本机。
 
@@ -255,7 +255,7 @@ curl.exe http://127.0.0.1:3100/api/status
 
 ### 催睡觉
 
-到点提醒你睡觉；催了还不睡、还在聊，会掉心情并带小脾气。
+到点提醒你睡觉；催了还不睡、还在聊，会掉心情并带小脾气。和白天一样是概率制，不是固定分钟。
 
 ```json
 {
@@ -264,8 +264,10 @@ curl.exe http://127.0.0.1:3100/api/status
       "enabled": true,
       "time": "24:00",
       "graceMinutes": 15,
-      "sulkAfterMinutes": 60,
-      "maxNags": 2,
+      "sulkStartMinutes": 10,
+      "sulkProbabilityPerCheck": 0.12,
+      "sulkProbabilityRamp": 0.12,
+      "sulkMaxProbability": 0.6,
       "sulkCooldownHours": 20,
       "sulkMoodDrop": 0.2
     }
@@ -274,8 +276,8 @@ curl.exe http://127.0.0.1:3100/api/status
 ```
 
 - `time`：`24:00` 就是午夜；也支持 `23:30` 这种提前提醒。
-- 到点先发一条催睡；`graceMinutes` 后没回也没睡，再催一次（总共最多 `maxNags` 条）。
-- 如果你还在发消息、明显没睡，`sulkAfterMinutes` 后先掉心情，再带小脾气催一次。
+- 到点先发一条催睡；`graceMinutes` 后没回也没睡，再催一次。
+- 如果你还在发消息、明显没睡，从 `sulkStartMinutes` 开始每 5 分钟掷一次骰子：初始 12%，之后每多 1 小时再加 12 个百分点，封顶 60%。中位大约 30 分钟后开始闹。
 - 如果你回了「晚安 / 睡了 / 去睡」这类，就不再催、也不闹。
 - 只在到点后的 3 小时内生效，凌晨 3 点后不再追着催。
 
