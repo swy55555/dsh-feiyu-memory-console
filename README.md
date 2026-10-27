@@ -1,4 +1,4 @@
-# 可塑性记忆
+﻿# 可塑性记忆
 
 本地优先的 QQ 角色记忆控制台，DSH 插件形态。把长期记忆、原文与摘要、日记、性格和情绪放在一个页面里，能看、能改、能撤回；所有数据都在本机。
 
@@ -234,7 +234,7 @@ curl.exe http://127.0.0.1:3100/api/status
       "repeatHours": 0.5,
       "maxPerDay": 16,
       "sulkAfterHours": 2,
-      "sulkCooldownHours": 2,
+      "sulkCooldownHours": 6,
       "sulkMoodDrop": 0.22,
       "probabilityPerCheck": 0.15,
       "probabilityRamp": 0.15,
