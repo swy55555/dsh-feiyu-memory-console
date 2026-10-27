@@ -4,6 +4,28 @@
 
 当前版本 **0.7.2-ctx** · [使用手册](manual/可塑性记忆-使用手册-0.7.2.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
 
+## 先看：哪些功能需要额外一步
+
+装完插件不等于所有功能都能用。缺哪一步，对应功能会不可用或看起来是空的。
+
+| 功能 | 额外需要 |
+|---|---|
+| 长期记忆、记忆图、语义搜索 | memvec 服务在跑（`npm run start:memvec`） |
+| 原文层、摘要层、会话轮换 | memvec 新版 + **给桥接打上下文补丁**（`node bridge/install.mjs --apply`） |
+| 整理队列、轻量记忆、性格、情绪、日记 | QQ 桥接在跑；桥接缺少对应 capability 时页面会提示 |
+| 主动联系、催睡 | 需要带 `owner-contact` capability 的桥接；当前发布包不包含这段桥接改动 |
+
+桥接补丁安装（在插件目录执行）：
+
+```powershell
+node bridge/install.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
+node bridge/install.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
+```
+
+`--check` 报 `incompatible` 就不要 `--apply`：说明你的 `bridge.js` 和补丁版本对不上，先看 [UPGRADE.md](UPGRADE.md)。打完补丁要重启桥接。
+
+控制台「启动检查」只会提示缺什么；真正的修复步骤以这张表为准。
+
 ---
 
 ## 这是什么
