@@ -221,7 +221,7 @@ curl.exe http://127.0.0.1:3100/api/status
 
 ### 主动联系（只对你）
 
-在指定时间窗里，如果你太久没说话，她会主动来找你；超过更久，会先掉一点心情，再带小脾气地找你。
+在指定时间窗里，如果你太久没说话，她会主动来找你；超过更久，会先掉一点心情，再带小脾气地找你。默认调得比较黏：静默 1.5 小时就来找，最多每天 8 次。
 
 ```json
 {
@@ -230,12 +230,12 @@ curl.exe http://127.0.0.1:3100/api/status
       "enabled": true,
       "windowStart": "08:00",
       "windowEnd": "24:00",
-      "idleHours": 4,
-      "repeatHours": 3,
-      "maxPerDay": 4,
-      "sulkAfterHours": 8,
-      "sulkCooldownHours": 6,
-      "sulkMoodDrop": 0.18
+      "idleHours": 1.5,
+      "repeatHours": 1,
+      "maxPerDay": 8,
+      "sulkAfterHours": 4,
+      "sulkCooldownHours": 3,
+      "sulkMoodDrop": 0.22
     }
   }
 }
