@@ -221,7 +221,7 @@ curl.exe http://127.0.0.1:3100/api/status
 
 ### 主动联系（只对你）
 
-在指定时间窗里，如果你太久没说话，她会主动来找你；超过更久，会先掉一点心情，再带小脾气地找你。默认调得比较黏：静默 1.5 小时就来找，最多每天 8 次。
+在指定时间窗里，如果你太久没说话，她会主动来找你；超过更久，会先掉一点心情，再带小脾气地找你。默认调得比较黏：静默 1 小时后开始掷概率，越久越容易来找。
 
 ```json
 {
@@ -230,24 +230,26 @@ curl.exe http://127.0.0.1:3100/api/status
       "enabled": true,
       "windowStart": "08:00",
       "windowEnd": "24:00",
-      "idleHours": 1.5,
-      "repeatHours": 1,
+      "idleHours": 1,
+      "repeatHours": 0.5,
       "maxPerDay": 8,
       "sulkAfterHours": 4,
       "sulkCooldownHours": 3,
       "sulkMoodDrop": 0.22,
-      "jitterMinutes": 30
+      "probabilityPerCheck": 0.05,
+      "probabilityRamp": 0.05,
+      "maxProbabilityPerCheck": 0.6
     }
   }
 }
 ```
 
 - `windowStart` / `windowEnd`：本地时间，`24:00` 表示当天结束；支持跨午夜（如 `20:00`–`02:00`）。
-- `idleHours`：你最后一条消息之后多久没动静，触发第一次主动联系。
-- `repeatHours`：两次主动联系至少隔多久；`maxPerDay` 是每日上限，防止刷屏。
+- `idleHours`：你最后一条消息之后多久，开始进入概率判定。
+- `probabilityPerCheck` / `probabilityRamp`：每 5 分钟掷一次骰子；刚进入判定时每次 5%，之后每多静默 1 小时再加 5 个百分点，封顶 60%。所以不是固定时间，是越久越可能来。
+- `repeatHours`：两次联系的最小间隔，防止刚说完又来；`maxPerDay` 是每日上限。
 - `sulkAfterHours`：静默超过这么久，先掉心情再发；`sulkCooldownHours` 控制闹脾气的冷却。
 - `sulkMoodDrop`：每次闹脾气让愉悦度下降的幅度（0.05–0.5），会留下「他很久没来找我」的触发记录，但不会直接改长期人格。
-- `jitterMinutes`：随机浮动（0–120 分钟）。到阈值后再随机等 0–2 倍浮动时间，避免每天都卡在同一分钟。
 
 也可以在控制台「情绪」页的「主动联系」卡片里改，不用手写 JSON。
 
