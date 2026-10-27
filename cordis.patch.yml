@@ -1,0 +1,5 @@
+# 一条宿主行。客户端半边由 package.json 的 dsh.client 交给模块加载器。
+- insert:
+    - id: feiyu-memory-console
+      name: dsh-feiyu-memory-console
+      config: {}

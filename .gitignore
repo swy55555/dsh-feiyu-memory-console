@@ -1,0 +1,13 @@
+node_modules/
+*.tgz
+release/
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+
+# memvec runtime
+memvec/.venv/
+memvec/hfcache/
+memvec/memories.db
+memvec/*.log
