@@ -1,4 +1,4 @@
-# 可塑性记忆
+﻿# 可塑性记忆
 
 本地优先的 QQ 角色记忆控制台，DSH 插件形态。把长期记忆、原文与摘要、日记、性格和情绪放在一个页面里，能看、能改、能撤回；所有数据都在本机。
 
@@ -221,7 +221,7 @@ curl.exe http://127.0.0.1:3100/api/status
 
 ### 主动联系（只对你）
 
-在指定时间窗里，如果你太久没说话，她会主动来找你；超过更久，会先掉一点心情，再带小脾气地找你。默认是概率制：静默 2.5 小时后开始掷骰子，越久越容易来，但每次联系后计时重新开始。
+在指定时间窗里，如果你太久没说话，她会主动来找你；超过更久，会先掉一点心情，再带小脾气地找你。默认是概率制：静默 1.5 小时后开始掷骰子，越久越容易来，但每次联系后计时重新开始。
 
 ```json
 {
@@ -230,10 +230,10 @@ curl.exe http://127.0.0.1:3100/api/status
       "enabled": true,
       "windowStart": "08:00",
       "windowEnd": "24:00",
-      "idleHours": 2.5,
+      "idleHours": 1.5,
       "repeatHours": 0.5,
       "maxPerDay": 8,
-      "sulkAfterHours": 4,
+      "sulkAfterHours": 3,
       "sulkCooldownHours": 3,
       "sulkMoodDrop": 0.22,
       "probabilityPerCheck": 0.04,
