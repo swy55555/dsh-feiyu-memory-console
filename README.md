@@ -264,7 +264,7 @@ curl.exe http://127.0.0.1:3100/api/status
       "enabled": true,
       "time": "24:00",
       "graceMinutes": 15,
-      "sulkAfterMinutes": 30,
+      "sulkAfterMinutes": 60,
       "maxNags": 2,
       "sulkCooldownHours": 20,
       "sulkMoodDrop": 0.2
