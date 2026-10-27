@@ -10,6 +10,8 @@
 - 使用手册：[可塑性记忆-使用手册-0.7.2.pdf](manual/可塑性记忆-使用手册-0.7.2.pdf)
 - 技术说明：[memvec 技术说明](docs/memvec.md)（讲实现、公式和参考文献）
 
+![memvec 模块总览](docs/assets/memvec-modules.svg)
+
 ---
 
 ## 0.7.2-ctx 上下文层
