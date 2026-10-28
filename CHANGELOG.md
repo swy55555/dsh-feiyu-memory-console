@@ -1,4 +1,11 @@
-﻿# 0.7.3 — 记忆质量与性能版（2026-10-28）
+# 0.8.0 — 主动玩梗版（2026-10-28）
+
+- **梗库**：本地 `~/.dsh/qq-bridge/data/memes.db`，6668 条，字段 `title/slug/tags/usage/origin/other/summary`；桥接和 MCP `qq_meme_lookup` 都读它。
+- **主动玩梗**：每轮按最近 4 条消息的话题/标签挑 1–2 个候选，注入「自然才用、最多接一个、不解释出处」；不做频率限制；政治类始终跳过，攻击/嘲讽类只在心情值低于 `attackMoodBelow` 时出现。
+- **配置**：`~/.dsh/qq-bridge/state/meme-play.json`，`enabled` 总开关、`group`/`private` 分开关、`proactive` 是否主动挑候选、`limit` 候选数、`attackMoodBelow` 攻击类心情阈值。
+- **梗记忆**：她真的说出某个候选时，写一条低重要度记忆，`fact_key=meme:<slug>`、`tags` 带「梗」和场景；下次选梗优先考虑用过的，控制台「长期记忆」搜「梗」可看可删。
+- **文档**：README 新增「梗库怎么用」，手册升级到 0.8.0 并加梗库/玩梗说明。
+- 包含 0.7.3 的全部记忆质量、force-graph 视图、CPU 与检索优化。
 
 - **记忆图**：改用 force-graph 力导布局，宇宙/简洁双视图；修复切走再切回记忆图空白的问题。
 - **重复事件合并**：同正文、不同日期的事件写入时并成一条（如“2026年10月1日、10月2日，去广场玩了”）；启动和每 6 小时回扫历史，旧行标 `superseded / relation=merge`。
