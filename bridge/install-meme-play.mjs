@@ -82,81 +82,19 @@ if (!src.includes(importAnchor)) die('找不到 emotion import，桥接版本不
 let next = src.replace(importAnchor, importAnchor + "\nimport { loadMemePlayConfig, pickMemeCandidates, renderMemeBlock, recordMemeUse, usedTitlesFromMemories } from './meme-play.js';", 1);
 next = next.replace(/\r\n/g, '\n');
 
+const headOld = "  async function runHeadlessPrompt(prompt, timeoutMs = 90000) {";
+if (next.includes(headOld)) {
+  next = next.replace(headOld, "  async function runHeadlessPrompt(prompt, timeoutMs = 90000, images = []) {", 1);
+  next = next.replace(
+    "      const accepted = await api.sessions.prompt({ sessionId, mode: 'queue', content: [{ type: 'text', text: prompt }] });",
+    "      const content = [{ type: 'text', text: prompt }, ...(Array.isArray(images) ? images : [])];\n      const accepted = await api.sessions.prompt({ sessionId, mode: 'queue', content });",
+  );
+}
+
 const marker = '  // 2026-10-26：自动回忆。';
 if (!next.includes(marker)) die('找不到 withMemeContext 结束标记，桥接版本不兼容');
 
-const block = String.raw`  const pendingMemeCandidates = new Map();
-
-  async function withMemePlayContext(key, promptText) {
-    if (cfg.slang?.memeInject === false) return promptText;
-    try {
-      const play = loadMemePlayConfig(STATE_DIR);
-      const isGroup = String(key).startsWith('group:');
-      if (!play.enabled || (isGroup ? !play.group : !play.private)) return promptText;
-      if (!play.proactive) return promptText;
-      const st = getSocialV2State(key);
-      const ms = st.recentMessages || [];
-      const texts = [];
-      let checked = 0;
-      for (let i = ms.length - 1; i >= 0 && checked < 4; i--) {
-        const mm = ms[i];
-        if (!mm || mm.isSelf) continue;
-        checked += 1;
-        texts.push(String(mm.plain || mm.text || ''));
-      }
-      let usedTitles = [];
-      try {
-        const port = cfg.socialV2?.memoryRecall?.port ?? 9881;
-        const q = ('梗 ' + texts.slice(-2).join(' ')).slice(0, 160);
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 1200);
-        const res = await fetch('http://127.0.0.1:' + port + '/search', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ query: q, scope: key, k: 5, min_score: 0.1 }),
-          signal: ctrl.signal,
-        }).finally(() => clearTimeout(timer));
-        const data = await res.json();
-        usedTitles = usedTitlesFromMemories(Array.isArray(data?.results) ? data.results : []);
-      } catch {}
-      const candidates = pickMemeCandidates({
-        dbPath: MEME_DB_PATH,
-        texts,
-        moodValence: Number(emotionState?.mood?.valence ?? 0),
-        config: play,
-        usedTitles,
-        limit: play.limit,
-      });
-      if (!candidates.length) return promptText;
-      pendingMemeCandidates.set(key, candidates);
-      log('[meme] 候选 ' + candidates.map((m) => m.title).join('/') + ' ' + key);
-      return renderMemeBlock(candidates, usedTitles) + '\n\n' + promptText;
-    } catch {
-      return promptText;
-    }
-  }
-
-  function noteMemeUse(key, text) {
-    const list = pendingMemeCandidates.get(key);
-    if (!list || !list.length) return;
-    pendingMemeCandidates.delete(key);
-    const kind = String(key).startsWith('group:') ? 'group' : 'private';
-    for (const m of list) {
-      if (String(text || '').includes(m.title)) {
-        void recordMemeUse({
-          memvecUrl: 'http://127.0.0.1:' + (cfg.socialV2?.memoryRecall?.port ?? 9881),
-          scope: key,
-          title: m.title,
-          slug: m.slug,
-          usage: m.usage,
-          tags: m.tags,
-          kind,
-        });
-      }
-    }
-  }
-
-`;
+const block = fs.readFileSync(path.join(HERE, 'meme-play-block.js'), 'utf8');
 next = next.replace(marker, block + marker, 1);
 
 const call = 'promptText = withMemeContext(key, promptText);';
