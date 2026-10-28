@@ -18,6 +18,7 @@ const target = path.resolve(val('--target', path.join(os.homedir(), '.dsh', 'qq-
 const steps = [
   { file: 'install.mjs', name: '原文/摘要/会话轮换' },
   { file: 'install-daily-memory-fix.mjs', name: '记忆整理 source_id 修复' },
+  { file: 'install-runtime-extras.mjs', name: '记忆共享/群目录/花费归属' },
   { file: 'install-owner-contact.mjs', name: '主动联系/催睡' },
   { file: 'install-meme-play.mjs', name: '主动玩梗 + 图片 OCR' },
   { file: 'install-contrarian.mjs', name: '情绪低唱反调' },
