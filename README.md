@@ -2,14 +2,14 @@
 
 > 本地优先的 QQ 角色记忆控制台，DSH 插件形态。
 
-![version](https://img.shields.io/badge/version-0.8.2-0e5a68)
+![version](https://img.shields.io/badge/version-0.8.3-0e5a68)
 ![license](https://img.shields.io/badge/license-MIT-2e8696)
 ![node](https://img.shields.io/badge/node-24%2B-339933)
 ![platform](https://img.shields.io/badge/platform-Windows-0078d4)
 
 把长期记忆、原文与摘要、日记、性格和情绪放进同一个本地页面：能看、能改、能撤回。所有数据都在本机，不经过外部服务器。
 
-[使用手册](manual/可塑性记忆-使用手册-0.8.2.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
+[使用手册](manual/可塑性记忆-使用手册-0.8.3.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
 
 ---
 
@@ -189,7 +189,7 @@ node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
 | `bedtime.time` | `24:00` | 催睡时间 |
 | `bedtime.sulkCooldownHours` | `20` | 催睡闹脾气的冷却 |
 
-完整字段和默认值见 [使用手册](manual/可塑性记忆-使用手册-0.8.2.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
+完整字段和默认值见 [使用手册](manual/可塑性记忆-使用手册-0.8.3.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
 
 ### 玩梗
 
@@ -311,7 +311,7 @@ node test/browser.test.mjs
 
 ## 文档
 
-- [使用手册（PDF）](manual/可塑性记忆-使用手册-0.8.2.pdf)：逐页功能说明、配置和排查
+- [使用手册（PDF）](manual/可塑性记忆-使用手册-0.8.3.pdf)：逐页功能说明、配置和排查
 - [memvec 技术说明](docs/memvec.md)：技术选型、数据模型、检索与遗忘公式、参考文献
 - [梗库说明](docs/memes.md)：表结构、来源说明、替换与过滤规则
 - [上下文层说明](bridge/P0-CONTEXT.md)：原文、摘要、轮换和预算
