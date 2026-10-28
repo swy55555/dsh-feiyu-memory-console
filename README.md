@@ -2,14 +2,14 @@
 
 > 本地优先的 QQ 角色记忆控制台，DSH 插件形态。
 
-![version](https://img.shields.io/badge/version-0.7.3-0e5a68)
+![version](https://img.shields.io/badge/version-0.8.0-0e5a68)
 ![license](https://img.shields.io/badge/license-MIT-2e8696)
 ![node](https://img.shields.io/badge/node-24%2B-339933)
 ![platform](https://img.shields.io/badge/platform-Windows-0078d4)
 
 把长期记忆、原文与摘要、日记、性格和情绪放进同一个本地页面：能看、能改、能撤回。所有数据都在本机，不经过外部服务器。
 
-[使用手册](manual/可塑性记忆-使用手册-0.7.3.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
+[使用手册](manual/可塑性记忆-使用手册-0.8.0.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
 
 ---
 
@@ -189,7 +189,7 @@ node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge"
 | `bedtime.time` | `24:00` | 催睡时间 |
 | `bedtime.sulkCooldownHours` | `20` | 催睡闹脾气的冷却 |
 
-完整字段和默认值见 [使用手册](manual/可塑性记忆-使用手册-0.7.3.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
+完整字段和默认值见 [使用手册](manual/可塑性记忆-使用手册-0.8.0.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
 
 ### 玩梗
 
@@ -204,6 +204,26 @@ node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge"
 - 政治类始终跳过；攻击/嘲讽类只在心情值低于 `attackMoodBelow` 时出现；
 - 每轮最多注入 `limit` 个候选，是否使用由模型判断，不强制；
 - 用过的梗会写一条低重要度记忆，`fact_key=meme:<slug>`、`tags` 带「梗」和场景；在长期记忆页搜「梗」能看、能删。
+
+### 梗库怎么用
+
+梗库是一个独立的 SQLite 文件，不在长期记忆里，也不参与遗忘曲线：
+
+```
+~/.dsh/qq-bridge/data/memes.db
+```
+
+- 表 `memes`，6668 条，字段：`title`（梗名）、`slug`、`tags`（标签）、`usage`（怎么用）、`origin`（出处）、`other`、`summary`（解释）。
+- 桥接在两处读它：
+  1. 对方明确问「XX 是什么梗」时，查一条解释塞进提示词；
+  2. 主动玩梗时，按最近消息的话题/标签挑 1–2 个候选，只给用法，不灌百科。
+- 她也可以在对话里用 MCP 工具 `qq_meme_lookup` 自己查；不用手动喂。
+- 想自己查：用 DB Browser for SQLite 打开，或 `sqlite3 memes.db "select title,tags from memes where title like '%下头%' limit 5;"`。
+- 想换库：先备份原文件，再替换成同表、同字段的 SQLite；桥接按文件修改时间自动重载，不用重启（改完等一两轮）。
+- 想关掉：把 `meme-play.json` 的 `enabled` 设为 `false`；只想关群聊就把 `group` 设为 `false`。
+- 过滤：政治类始终跳过；攻击/嘲讽类只在心情差时出现；色情/敏感词条也会跳过。
+
+> 数据说明：这批词条是本地导入的第三方梗解释合集（6668 条，构建于 2026-10-26），不是本项目原创，也不随安装包分发；每条 `origin` 记录具体出处，使用前请核对原始来源和平台规则。完整说明见 [docs/memes.md](docs/memes.md)。
 
 ## 使用
 
@@ -289,8 +309,9 @@ node test/browser.test.mjs
 
 ## 文档
 
-- [使用手册（PDF）](manual/可塑性记忆-使用手册-0.7.3.pdf)：逐页功能说明、配置和排查
+- [使用手册（PDF）](manual/可塑性记忆-使用手册-0.8.0.pdf)：逐页功能说明、配置和排查
 - [memvec 技术说明](docs/memvec.md)：技术选型、数据模型、检索与遗忘公式、参考文献
+- [梗库说明](docs/memes.md)：表结构、来源说明、替换与过滤规则
 - [上下文层说明](bridge/P0-CONTEXT.md)：原文、摘要、轮换和预算
 - [更新日志](CHANGELOG.md) · [升级说明](UPGRADE.md)
 
