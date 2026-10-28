@@ -113,6 +113,7 @@ score = sim × (0.65 + 0.35R) × (0.75 + 0.5×importance)
 | POST | `/confirm`、`/confirm/undo` | 事务确认与撤销 |
 | POST | `/manage` | 人话命令：查看/忘记/纠正/完成待办 |
 | POST | `/decay` | 衰减与归档 |
+| POST | `/consolidate` | 合并同正文、不同日期的重复事件（可传 `scope` 或 `dry`） |
 | POST | `/message`、`/messages` | 原文层写入/读取 |
 | POST | `/summary`、`/summaries`、`/summary/delete` | 摘要层读写 |
 | POST | `/context`、`/context/stats` | 注入用的上下文块与统计 |
