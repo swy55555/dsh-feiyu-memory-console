@@ -1,4 +1,4 @@
-// 可塑性记忆 · 控制台前端
+﻿// 可塑性记忆 · 控制台前端
 //
 // 没有框架，没有构建。一个文件，读三个本地数据源。
 // 所有来自记忆正文的文本一律走 textContent / createTextNode，不拼 innerHTML。
@@ -145,6 +145,8 @@ const S = {
   },
   semantic: null,
   semanticQuery: '',
+  semanticTrace: null,
+  memes: { data: null, settings: null, q: '', page: 1, loading: false },
   light: { scopes: null, key: '', data: null, seq: 0 },
   diary: { books: null, book: 'public', index: -1, showIntro: false, dates: {}, days: {}, wantDate: '', seq: 0, token: '', autoImport: false },
   upkeep: { queue: null, preview: null },
@@ -162,7 +164,8 @@ const S = {
     data: null, loading: false, running: false, raf: 0, timer: 0,
     nodes: [], links: [], positions: new Map(), flashes: new Map(),
     hover: null, canvas: null, ctx: null, w: 0, h: 0, alpha: 0, dpr: 1,
-    scale: 1, tx: 0, ty: 0, dragging: false, dragX: 0, dragY: 0, filter: 'all', scope: 'all', paused: false,
+    scale: 1, tx: 0, ty: 0, dragging: false, dragX: 0, dragY: 0, filter: 'all', scope: 'all', tier: 'all', paused: false,
+    view: 'cosmos', stars: null, fitted: false,
     etag: null, total: 0, loadingMore: false,
   },
   theme: localStorage.getItem('feiyu-theme') || 'dark',
@@ -387,6 +390,7 @@ function buildTabs() {
     { id: 'graph', label: '记忆图', count: S.graph.data?.count },
     { id: 'persona', label: '性格', count: S.persona?.pending },
     { id: 'emotion', label: '情绪' },
+    { id: 'memes', label: '玩梗' },
     { id: 'library', label: '长期记忆', count: S.overview?.active },
     { id: 'light', label: '轻量记忆', count: S.overview?.light?.total },
     { id: 'diary', label: '日记', count: S.overview?.diary?.count },
@@ -401,6 +405,13 @@ function buildTabs() {
       on: { click: () => go(tab.id) },
     }, tab.label, (tab.id === 'overview' || tab.id === 'emotion') ? null : el('span', { class: 'n', text: tab.count == null ? '…' : String(tab.count) })))
   }
+  // 会话上下文是独立页（原文层 + 摘要层），不在 SPA 里，单独挂一个入口。
+  bar.appendChild(el('a', {
+    class: 'tab',
+    href: 'context.html',
+    title: '原文层与摘要层',
+    style: 'text-decoration:none',
+  }, '会话上下文'))
   return bar
 }
 
@@ -473,7 +484,7 @@ function route(force = false) {
     if (params.get('book') === 'private' || params.get('book') === 'public') S.diary.book = params.get('book')
     if (params.get('date')) { S.diary.wantDate = params.get('date'); S.diary.showIntro = false }
   }
-  if (!['overview', 'graph', 'persona', 'emotion', 'library', 'light', 'diary', 'upkeep'].includes(tab)) { go('overview', { replace: true }); return }
+  if (!['overview', 'graph', 'persona', 'emotion', 'memes', 'library', 'light', 'diary', 'upkeep'].includes(tab)) { go('overview', { replace: true }); return }
   if (tab !== S.tab || force) {
     const changed = tab !== S.tab
     S.tab = tab
@@ -498,19 +509,25 @@ function paintCurrent() {
     }))
   }
   const bridgeMissing = S.bridgeCaps && S.bridgeCaps.size
-    ? ['persona-chat', 'diary-vault', 'emotion', 'queue-limit'].filter((cap) => !S.bridgeCaps.has(cap))
+    ? ['persona-chat', 'diary-vault', 'emotion', 'queue-limit', 'owner-contact'].filter((cap) => !S.bridgeCaps.has(cap))
     : []
-  if (bridgeMissing.length) {
+  const contextMissing = !!(S.overview?.health?.bridge?.ok && S.overview.health.bridge.contextPatched === false)
+  if (bridgeMissing.length || contextMissing) {
+    const parts = []
+    if (bridgeMissing.length) parts.push(`桥接缺少能力：${bridgeMissing.join(' / ')}，对应功能会不可用。`)
+    if (contextMissing) parts.push('上下文层补丁未安装：原文/摘要不会写入。在插件目录运行 node bridge/install.mjs --target <桥接目录> --apply，然后重启桥接。')
+    if (bridgeMissing.includes('owner-contact')) parts.push('主动联系/催睡需要安装 owner-contact 桥接补丁：node bridge/install-owner-contact.mjs --apply，然后重启桥接。')
     mainEl.appendChild(el('div', {
       class: 'note',
       style: { margin: '0 0 14px', padding: '10px 14px', border: '1px solid var(--line-strong)', borderRadius: '10px' },
-      text: `桥接版本偏旧：${bridgeMissing.join(' / ')} 这些功能可能不可用。升级桥接后刷新即可；不影响看已同步的记忆。`,
+      text: parts.join(' '),
     }))
   }
   if (S.tab === 'overview') mainEl.appendChild(renderOverview())
   else if (S.tab === 'graph') { mainEl.appendChild(renderGraphTab()); startGraphLoop() }
   else if (S.tab === 'persona') { mainEl.appendChild(renderPersona()); if (!S.persona && !S.personaLoading) void loadPersona(); if (S.chatProfiles === null) void loadChatProfiles() }
   else if (S.tab === 'emotion') { mainEl.appendChild(renderEmotion()); if (!S.emotion && !S.emotionLoading) void loadEmotion() }
+  else if (S.tab === 'memes') { mainEl.appendChild(renderMemes()); if (!S.memes.data && !S.memes.loading) void loadMemes() }
   else if (S.tab === 'library') mainEl.appendChild(renderLibrary())
   else if (S.tab === 'light') mainEl.appendChild(renderLight())
   else if (S.tab === 'diary') mainEl.appendChild(renderDiary())
@@ -594,11 +611,58 @@ function tierLabel(tier) {
   return { core: '核心', task: '待办', normal: '普通' }[tier] || tier
 }
 
+function startupChecks(health) {
+  const checks = health?.checks || []
+  const failed = checks.filter((check) => !check.ok)
+  const passed = checks.filter((check) => check.ok)
+  const checkRow = (check) => el('div', { class: 'startup-check' },
+    el('strong', { text: `${check.ok ? '✓' : '!'} ${check.title}` }),
+    el('div', { text: check.detail }),
+    !check.ok ? el('p', { class: 'note', text: check.nextStep }) : null)
+  const panel = el('details', { class: 'card pad startup-checks', open: failed.length > 0 },
+    el('summary', { text: failed.length ? `启动检查 · ${failed.length} 项待处理` : '启动检查 · 已就绪' }),
+    el('p', { class: 'note', text: `检查时间：${health?.at ? new Date(health.at).toLocaleString() : '尚未检查'}。连接状态不代表某次回复是否使用了记忆。` }),
+    failed.map(checkRow),
+    passed.length ? el('details', { class: 'startup-check' },
+      el('summary', { text: `已通过 ${passed.length} 项检查` }), passed.map(checkRow)) : null,
+    el('button', { class: 'btn sm', type: 'button', text: '重新检查', on: { click: async (event) => {
+      event.currentTarget.disabled = true
+      try { await withBusy(() => api('/health?force=1')); await refreshOverview() }
+      catch (error) { toast(error.message, 'error'); event.currentTarget.disabled = false }
+    } } }),
+  )
+  return panel
+}
+
+function memoryEvidence(row, semantic) {
+  const detail = el('details', { class: 'memory-evidence', on: { click: (event) => event.stopPropagation() } },
+    el('summary', { text: semantic ? '查看检索依据与来源' : '查看记忆来源' }),
+    el('dl', {},
+      el('dt', { text: '来源聊天' }), el('dd', { text: row.scope || '未知' }),
+      el('dt', { text: '说话人' }), el('dd', { text: row.subjectId || '未记录，不能据此推断' }),
+      el('dt', { text: '来源时间' }), el('dd', { text: row.sourceTime ? new Date(row.sourceTime).toLocaleString() : '未记录' }),
+      el('dt', { text: '来源标识' }), el('dd', { text: row.sourceId || '未记录' }),
+      el('dt', { text: '提炼置信度' }), el('dd', { text: Number.isFinite(row.confidence) ? `${row.confidence.toFixed(2)}（记录值，不是事实正确率）` : '未记录' }),
+      el('dt', { text: '有效期限' }), el('dd', { text: row.expiresAt ? new Date(row.expiresAt).toLocaleString() : '未设到期时间' })),
+    el('p', { class: 'note', text: String(row.sourceId || '').startsWith('diary:') ? '来源为角色日记，应与用户原话区分。' : '以下是保存的来源片段；可能经过截断，不等于完整聊天记录。' }),
+    el('blockquote', { text: row.sourceText || '这条旧记忆未保存来源片段。' }),
+  )
+  if (semantic) {
+    const r = row.retrieval
+    detail.appendChild(el('p', { class: 'note', text: r
+      ? `向量相似度 ${r.similarity.toFixed(4)} × 保留权重 ${r.retentionMultiplier.toFixed(4)} = 综合分 ${r.score.toFixed(4)}。${r.tier === 'normal' ? '普通记忆按鲜活度调整权重。' : '核心与待办不做自然衰减。'}匹配分不是正确率。`
+      : '记忆服务未提供评分明细，请升级 memvec 后查看。' }))
+    if (r?.model) detail.appendChild(el('p', { class: 'note', text: `检索模型：${r.model}` }))
+    detail.appendChild(el('p', { class: 'note', text: '这是控制台本次检索的依据，不代表某条 QQ 回复实际使用了它。' }))
+  }
+  return detail
+}
+
 function renderOverview() {
   const o = S.overview
   if (!o) return el('div', { class: 'empty', text: '还没读到数据…' })
 
-  const heroText = o.candidate > 0
+  const heroText = o.unavailable ? '记忆库还没有就绪，先完成下面的启动检查。' : o.candidate > 0
     ? frag('她记得 ', el('em', { text: String(o.active) }), ' 件事，还有 ', el('em', { text: String(o.candidate) }), ' 件拿不准，等你点个头。')
     : frag('她记得 ', el('em', { text: String(o.active) }), ' 件事，都还清清楚楚。')
 
@@ -707,8 +771,9 @@ function renderOverview() {
 
   return frag(
     hero,
-    stats,
-    el('div', { class: 'overview-grid' },
+    startupChecks(o.health),
+    o.unavailable ? null : stats,
+    o.unavailable ? null : el('div', { class: 'overview-grid' },
       el('div', { class: 'panel-stack' }, scopeCard, recentCard),
       el('div', { class: 'panel-stack' }, fadingCard, queueCard, diaryCard, titleCard),
     ),
@@ -906,6 +971,8 @@ function paintLibraryList() {
       el('span', { class: 'spacer' }),
       el('button', { class: 'btn sm ghost', on: { click: () => { S.semantic = null; S.semanticQuery = ''; paintLibraryList(); updateTabs() } } }, icon('close'), '退出'),
     ))
+    libRefs.semHead.appendChild(el('p', { class: 'note', text: S.semanticTrace?.note || '控制台检索预览，不是 QQ 回复记录。' }))
+    if (S.semanticTrace?.partial) libRefs.semHead.appendChild(el('p', { class: 'note', role: 'status', text: `部分聊天检索失败，结果不完整：${S.semanticTrace.warnings.map((w) => `${w.scope}：${w.error}`).join('；')}` }))
     libRefs.countLine.appendChild(el('span', { text: `找到 ${S.semantic.length} 条最像的` }))
     libRefs.list.replaceChildren(...(S.semantic.length
       ? S.semantic.map((r) => memRow(r, { semantic: true }))
@@ -996,8 +1063,9 @@ function memRow(row, { semantic = false } = {}) {
   if (row.subjectId) meta.appendChild(el('span', { class: 'kv', text: `说话人 QQ ${row.subjectId}` }))
   if (row.sourceTime) meta.appendChild(el('span', { class: 'kv', text: `原话 ${fmtWhen(row.sourceTime)}` }))
   if (row.supersededBy) meta.appendChild(el('span', { class: 'kv', text: `被更新的那条取代` }))
-  if (semantic && Number.isFinite(row.sim)) meta.appendChild(el('span', { class: 'kv score', text: `相似 ${(row.sim * 100).toFixed(0)}% · 综合 ${(row.score * 100).toFixed(0)}%` }))
+  if (semantic && Number.isFinite(row.sim)) meta.appendChild(el('span', { class: 'kv score', text: `相似度 ${row.sim.toFixed(3)} · 综合分 ${row.score.toFixed(3)}` }))
   body.appendChild(meta)
+  body.appendChild(memoryEvidence(row, semantic))
 
   if (row.text && row.text.length > 150) {
     body.appendChild(el('button', {
@@ -1039,10 +1107,15 @@ function memRow(row, { semantic = false } = {}) {
 async function runSemantic(query) {
   const q = String(query ?? S.library.q ?? '').trim()
   if (!q) { toast('先写一句要找什么', 'error'); return }
+  clearTimeout(searchTimer)
+  const seq = ++S.library.seq
+  const scope = S.library.scope
   try {
-    const data = await withBusy(() => api('/search', { method: 'POST', body: { scope: S.library.scope, query: q, k: 30 } }))
+    const data = await withBusy(() => api('/search', { method: 'POST', body: { scope, query: q, k: 30 } }))
+    if (seq !== S.library.seq || scope !== S.library.scope) return
     S.semanticQuery = q
     S.semantic = data.results || []
+    S.semanticTrace = data.trace || null
     paintLibraryList()
     updateTabs()
   } catch (error) {
@@ -1125,6 +1198,115 @@ async function openAdd(presetScope = '') {
 }
 
 // ---------------------------------------------------------------- 轻量记忆
+
+async function loadMemes() {
+  if (S.memes.loading) return
+  S.memes.loading = true
+  try {
+    const data = await api(`/memes?q=${encodeURIComponent(S.memes.q)}&page=${S.memes.page}`)
+    S.memes.data = data
+    S.memes.settings = data.settings
+  } catch (error) {
+    toast(error.message, 'error')
+  } finally {
+    S.memes.loading = false
+    if (S.tab === 'memes') paintCurrent()
+  }
+}
+
+async function saveMemeSettings(patch) {
+  try {
+    const data = await api('/memes/settings', { method: 'POST', body: patch })
+    S.memes.settings = data.settings
+    toast('玩梗设置已保存', 'ok')
+  } catch (error) {
+    toast(error.message, 'error')
+  }
+}
+
+function renderMemes() {
+  const m = S.memes
+  const s = m.settings || {}
+  const d = m.data
+  const check = (label, key) => el('label', { style: { display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' } },
+    el('input', { type: 'checkbox', checked: s[key] !== false, on: { change: (e) => saveMemeSettings({ [key]: e.target.checked }) } }),
+    el('span', { text: label }),
+  )
+  const settingsCard = el('div', { class: 'card pad', style: { marginBottom: '14px' } },
+    el('div', { class: 'section-head' },
+      el('h2', { class: 'h2', text: '梗库与玩梗' }),
+      el('span', { class: 'muted small', text: '本地梗库；改完下一轮生效，不用重启桥接。' }),
+    ),
+    el('div', { style: { display: 'flex', gap: '18px', flexWrap: 'wrap', alignItems: 'center' } },
+      check('总开关', 'enabled'),
+      check('群聊', 'group'),
+      check('私聊', 'private'),
+      check('主动挑候选', 'proactive'),
+      el('label', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+        el('span', { class: 'muted small', style: { whiteSpace: 'nowrap' }, text: '攻击类心情阈值' }),
+        el('input', {
+          class: 'input', type: 'number', min: '-1', max: '1', step: '0.05', value: s.attackMoodBelow ?? 0.1,
+          style: { width: '90px' },
+          on: { change: (e) => saveMemeSettings({ attackMoodBelow: Number(e.target.value) }) },
+        }),
+      ),
+      el('label', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+        el('span', { class: 'muted small', style: { whiteSpace: 'nowrap' }, text: '候选数' }),
+        el('select', { class: 'select', on: { change: (e) => saveMemeSettings({ limit: Number(e.target.value) }) } },
+          el('option', { value: '1', text: '1 个', selected: Number(s.limit) === 1 }),
+          el('option', { value: '2', text: '2 个', selected: Number(s.limit) !== 1 }),
+        ),
+      ),
+    ),
+    el('p', { class: 'note', style: { margin: '10px 0 0' } },
+      '政治类始终跳过；色情/敏感也跳过；用过的梗会写一条低重要度记忆，在「长期记忆」搜「梗」能看能删。词条来自 ',
+      el('a', { href: 'https://github.com/in1t1a1/astrbot_plugin_memewiki', target: '_blank', rel: 'noreferrer', text: 'astrbot_plugin_memewiki' }),
+      ' / cnmeme.wiki。',
+    ),
+    el('button', { class: 'btn sm', style: { marginTop: '8px' }, on: { click: () => { S.library.q = '梗'; S.library.loaded = false; go('library') } } }, '看用过的梗'),
+  )
+
+  const input = el('input', {
+    class: 'input', style: { flex: '1', minWidth: '220px' }, placeholder: '搜梗名或标签，例如：下头、谐音、游戏',
+    value: m.q,
+    on: {
+      input: (e) => { S.memes.q = e.target.value },
+      keydown: (e) => { if (e.key === 'Enter') { S.memes.page = 1; void loadMemes() } },
+    },
+  })
+  const total = d?.total ?? 0
+  const size = d?.pageSize ?? 20
+  const pages = Math.max(1, Math.ceil(total / size))
+  const searchCard = el('div', { class: 'card pad' },
+    el('div', { class: 'section-head' },
+      el('h2', { class: 'h2', text: '梗库' }),
+      el('span', { class: 'muted small', text: d?.available === false ? '还没找到 memes.db' : `${total} 条` }),
+    ),
+    el('div', { style: { display: 'flex', gap: '8px', marginBottom: '12px' } },
+      input,
+      el('button', { class: 'btn sm', on: { click: () => { S.memes.page = 1; void loadMemes() } } }, '搜索'),
+    ),
+    (d?.items || []).length
+      ? el('div', null, d.items.map((it) => el('details', {
+          style: { borderTop: '1px solid var(--line)', padding: '9px 0' },
+        },
+        el('summary', { style: { cursor: 'pointer' } },
+          el('b', { text: it.title }),
+          el('span', { class: 'muted small', text: it.tags ? `  ${it.tags}` : '' }),
+        ),
+        el('p', { class: 'note', style: { margin: '8px 0 4px', whiteSpace: 'pre-wrap' }, text: it.usage || '' }),
+        it.origin ? el('p', { class: 'muted small', style: { margin: '0 0 4px', whiteSpace: 'pre-wrap' }, text: `出处：${it.origin}` }) : null,
+        el('p', { class: 'note', style: { margin: '0', whiteSpace: 'pre-wrap', opacity: '0.8' }, text: it.summary || '' }),
+      )))
+      : el('div', { class: 'empty', text: d ? '没有匹配的梗。' : '正在翻梗库…' }),
+    el('div', { style: { display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '12px' } },
+      el('button', { class: 'btn sm', disabled: (m.page || 1) <= 1, on: { click: () => { S.memes.page = Math.max(1, (m.page || 1) - 1); void loadMemes() } } }, '上一页'),
+      el('span', { class: 'muted small', text: `${m.page || 1} / ${pages}` }),
+      el('button', { class: 'btn sm', disabled: (m.page || 1) >= pages, on: { click: () => { S.memes.page = Math.min(pages, (m.page || 1) + 1); void loadMemes() } } }, '下一页'),
+    ),
+  )
+  return el('section', { class: 'stack' }, settingsCard, searchCard)
+}
 
 function renderLight() {
   const wrap = el('div')
@@ -2724,6 +2906,131 @@ function renderEmotion() {
     ),
   )
 
+  const contact = S.emotion?.ownerContact || {
+    enabled: true, windowStart: '08:00', windowEnd: '24:00', idleHours: 0.5, repeatHours: 0.5,
+    maxPerDay: 16, sulkAfterHours: 2, sulkCooldownHours: 6, sulkMoodDrop: 0.22,
+    probabilityPerCheck: 0.15, probabilityRamp: 0.15, maxProbabilityPerCheck: 0.7,
+  }
+  const bed = S.emotion?.bedtime || {
+    enabled: true, time: '24:00', graceMinutes: 15, sulkStartMinutes: 10,
+    sulkProbabilityPerCheck: 0.12, sulkProbabilityRamp: 0.12, sulkMaxProbability: 0.6,
+    sulkCooldownHours: 20, sulkMoodDrop: 0.2,
+  }
+  const contactCard = !hasBridgeCap('owner-contact') ? null : el('section', { class: 'card pad' },
+    el('div', { class: 'section-head' },
+      el('h2', { class: 'h2', text: '主动联系' }),
+      el('span', { class: 'spacer' }),
+      el('span', { class: 'muted small', text: '只对你生效 · 只在时间窗内' }),
+    ),
+    el('label', { class: 'row', style: { margin: '4px 0 8px' } },
+      el('input', {
+        id: 'oc-enabled', type: 'checkbox', checked: contact.enabled !== false, disabled: !hasCap('emotion'),
+      }),
+      el('span', { class: 'muted small', text: '在下面这段时间里，如果你太久没找她，她会主动来找你' }),
+    ),
+    el('div', { class: 'row', style: { gap: '10px', flexWrap: 'wrap', alignItems: 'center' } },
+      el('span', { class: 'muted small', text: '时间窗' }),
+      el('input', { id: 'oc-start', class: 'input', type: 'text', value: contact.windowStart || '08:00', placeholder: '08:00', style: { width: '78px' } }),
+      el('span', { class: 'muted small', text: '到' }),
+      el('input', { id: 'oc-end', class: 'input', type: 'text', value: contact.windowEnd || '24:00', placeholder: '24:00', style: { width: '78px' } }),
+      el('span', { class: 'muted small', text: '（24:00 = 当天结束；支持跨午夜，如 20:00–02:00）' }),
+    ),
+    el('div', { class: 'row', style: { gap: '10px', flexWrap: 'wrap', marginTop: '10px' } },
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '多久没说话就找' }),
+        el('input', { id: 'oc-idle', class: 'input', type: 'number', min: '0.5', max: '48', step: '0.5', value: String(contact.idleHours || 4), style: { width: '76px' } }),
+        el('span', { class: 'muted small', text: '小时' }),
+      ),
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '两次至少隔' }),
+        el('input', { id: 'oc-repeat', class: 'input', type: 'number', min: '0.5', max: '24', step: '0.5', value: String(contact.repeatHours || 3), style: { width: '76px' } }),
+        el('span', { class: 'muted small', text: '小时' }),
+      ),
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '每天最多' }),
+        el('input', { id: 'oc-max', class: 'input', type: 'number', min: '1', max: '20', step: '1', value: String(contact.maxPerDay || 4), style: { width: '70px' } }),
+        el('span', { class: 'muted small', text: '次' }),
+      ),
+    ),
+    el('div', { class: 'row', style: { gap: '10px', flexWrap: 'wrap', marginTop: '10px' } },
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '超过' }),
+        el('input', { id: 'oc-sulk', class: 'input', type: 'number', min: '1', max: '72', step: '1', value: String(contact.sulkAfterHours || 8), style: { width: '70px' } }),
+        el('span', { class: 'muted small', text: '小时开始闹脾气' }),
+      ),
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '脾气让心情降' }),
+        el('input', { id: 'oc-drop', class: 'input', type: 'number', min: '0.05', max: '0.5', step: '0.01', value: String(contact.sulkMoodDrop || 0.22), style: { width: '76px' } }),
+      ),
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '闹脾气间隔' }),
+        el('input', { id: 'oc-sulkcd', class: 'input', type: 'number', min: '0.5', max: '48', step: '0.5', value: String(contact.sulkCooldownHours || 6), style: { width: '70px' } }),
+        el('span', { class: 'muted small', text: '小时' }),
+      ),
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '基础概率' }),
+        el('input', { id: 'oc-base', class: 'input', type: 'number', min: '0', max: '100', step: '1', value: String(Math.round((contact.probabilityPerCheck ?? 0.05) * 100)), style: { width: '64px' } }),
+        el('span', { class: 'muted small', text: '% / 次' }),
+      ),
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '每多 1 小时 +' }),
+        el('input', { id: 'oc-ramp', class: 'input', type: 'number', min: '0', max: '50', step: '1', value: String(Math.round((contact.probabilityRamp ?? 0.05) * 100)), style: { width: '64px' } }),
+        el('span', { class: 'muted small', text: '%' }),
+      ),
+      el('button', { class: 'btn sm primary', on: { click: () => saveOwnerContact() } }, '保存'),
+    ),
+    el('p', { class: 'note', style: { margin: '8px 0 0' } }, '到点她会主动发消息，并带一点小脾气；闹脾气会真的降低当前情绪（留下“他很久没来找我”的触发），但不会直接改长期人格。冷却和每日上限会压住刷屏。'),
+  )
+
+  const bedtimeCard = !hasBridgeCap('owner-contact') ? null : el('section', { class: 'card pad' },
+    el('div', { class: 'section-head' },
+      el('h2', { class: 'h2', text: '催睡觉' }),
+      el('span', { class: 'spacer' }),
+      el('span', { class: 'muted small', text: '到点提醒 · 不听会闹' }),
+    ),
+    el('label', { class: 'row', style: { margin: '4px 0 8px' } },
+      el('input', { id: 'bt-enabled', type: 'checkbox', checked: bed.enabled !== false }),
+      el('span', { class: 'muted small', text: '到点催我睡觉；催了还不睡会掉心情、带小脾气' }),
+    ),
+    el('div', { class: 'row', style: { gap: '10px', flexWrap: 'wrap', alignItems: 'center' } },
+      el('span', { class: 'muted small', text: '几点催' }),
+      el('input', { id: 'bt-time', class: 'input', type: 'text', value: bed.time || '24:00', placeholder: '24:00', style: { width: '78px' } }),
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '没回隔' }),
+        el('input', { id: 'bt-grace', class: 'input', type: 'number', min: '0', max: '120', step: '5', value: String(bed.graceMinutes ?? 15), style: { width: '64px' } }),
+        el('span', { class: 'muted small', text: '分钟再催' }),
+      ),
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '多久开始不高兴' }),
+        el('input', { id: 'bt-start', class: 'input', type: 'number', min: '0', max: '120', step: '5', value: String(bed.sulkStartMinutes ?? 10), style: { width: '64px' } }),
+        el('span', { class: 'muted small', text: '分钟' }),
+      ),
+    ),
+    el('div', { class: 'row', style: { gap: '10px', flexWrap: 'wrap', marginTop: '10px' } },
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '基础概率' }),
+        el('input', { id: 'bt-base', class: 'input', type: 'number', min: '0', max: '100', step: '1', value: String(Math.round((bed.sulkProbabilityPerCheck ?? 0.12) * 100)), style: { width: '64px' } }),
+        el('span', { class: 'muted small', text: '% / 次' }),
+      ),
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '每多 1 小时 +' }),
+        el('input', { id: 'bt-ramp', class: 'input', type: 'number', min: '0', max: '50', step: '1', value: String(Math.round((bed.sulkProbabilityRamp ?? 0.12) * 100)), style: { width: '64px' } }),
+        el('span', { class: 'muted small', text: '%' }),
+      ),
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '闹脾气间隔' }),
+        el('input', { id: 'bt-cd', class: 'input', type: 'number', min: '1', max: '48', step: '1', value: String(bed.sulkCooldownHours ?? 20), style: { width: '64px' } }),
+        el('span', { class: 'muted small', text: '小时' }),
+      ),
+      el('label', { class: 'row', style: { gap: '6px' } },
+        el('span', { class: 'muted small', text: '心情降' }),
+        el('input', { id: 'bt-drop', class: 'input', type: 'number', min: '0.05', max: '0.5', step: '0.01', value: String(bed.sulkMoodDrop ?? 0.2), style: { width: '70px' } }),
+      ),
+      el('button', { class: 'btn sm primary', on: { click: () => saveBedtime() } }, '保存'),
+    ),
+    el('p', { class: 'note', style: { margin: '8px 0 0' } }, '说「晚安 / 睡了 / 去睡」就不会再催；超过时间 3 小时后不再追着催。'),
+  )
+
   const optionsCard = el('section', { class: 'card pad' },    el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '选项与后果' })),
     el('label', { class: 'row', style: { margin: '8px 0 4px' } },
       el('input', {
@@ -2748,7 +3055,54 @@ function renderEmotion() {
   )
 
   requestAnimationFrame(() => drawEmotionPad(e))
-  return frag(hero, stats, padCard, el('div', { class: 'panel-stack' }, climateCard, episodeCard, weightsCard, optionsCard, triggersCard, metricsCard))
+  return frag(hero, stats, padCard, el('div', { class: 'panel-stack' }, contactCard, bedtimeCard, climateCard, episodeCard, weightsCard, optionsCard, triggersCard, metricsCard))
+}
+
+async function saveOwnerContact() {
+  const val = (id) => document.getElementById(id)?.value
+  const patch = {
+    enabled: document.getElementById('oc-enabled')?.checked === true,
+    windowStart: String(val('oc-start') || '').trim(),
+    windowEnd: String(val('oc-end') || '').trim(),
+    idleHours: Number(val('oc-idle')) || 4,
+    repeatHours: Number(val('oc-repeat')) || 3,
+    maxPerDay: Math.round(Number(val('oc-max')) || 4),
+    sulkAfterHours: Number(val('oc-sulk')) || 2,
+    sulkMoodDrop: Number(val('oc-drop')) || 0.22,
+    sulkCooldownHours: Number(val('oc-sulkcd')) || 6,
+    probabilityPerCheck: Math.max(0, Math.min(100, Number(val('oc-base')) || 0)) / 100,
+    probabilityRamp: Math.max(0, Math.min(50, Number(val('oc-ramp')) || 0)) / 100,
+  }
+  try {
+    const data = await api('/emotion/owner-contact', { method: 'POST', body: patch })
+    S.emotion = { ...(S.emotion || {}), ownerContact: data.ownerContact }
+    toast(patch.enabled ? '主动联系已保存' : '已关闭主动联系', 'ok')
+    paintCurrent()
+  } catch (error) {
+    toast(error.message, 'error')
+  }
+}
+
+async function saveBedtime() {
+  const val = (id) => document.getElementById(id)?.value
+  const patch = {
+    enabled: document.getElementById('bt-enabled')?.checked === true,
+    time: String(val('bt-time') || '').trim(),
+    graceMinutes: Number(val('bt-grace')) || 15,
+    sulkStartMinutes: Number(val('bt-start')) || 10,
+    sulkProbabilityPerCheck: Math.max(0, Math.min(100, Number(val('bt-base')) || 0)) / 100,
+    sulkProbabilityRamp: Math.max(0, Math.min(50, Number(val('bt-ramp')) || 0)) / 100,
+    sulkCooldownHours: Number(val('bt-cd')) || 20,
+    sulkMoodDrop: Number(val('bt-drop')) || 0.2,
+  }
+  try {
+    const data = await api('/emotion/bedtime', { method: 'POST', body: patch })
+    S.emotion = { ...(S.emotion || {}), bedtime: data.bedtime }
+    toast(patch.enabled ? '催睡觉已保存' : '已关闭催睡觉', 'ok')
+    paintCurrent()
+  } catch (error) {
+    toast(error.message, 'error')
+  }
 }
 
 async function toggleEmotionDrift(event) {
@@ -2955,90 +3309,24 @@ function graphColor(scope) {
 }
 
 function renderGraphTab() {
-  const stage = el('div', { class: 'graph-stage' })
-  const canvas = el('canvas', { class: 'graph-canvas' })
-  const tip = el('div', { class: 'graph-tip', style: { display: 'none' } })
-  stage.appendChild(canvas)
-  stage.appendChild(tip)
-  S.graph.canvas = canvas
-  S.graph.tip = tip
-  S.graph.stage = stage
-
-  canvas.addEventListener('mousemove', (event) => {
-    if (S.graph.dragging) {
-      S.graph.tx += event.clientX - S.graph.dragX
-      S.graph.ty += event.clientY - S.graph.dragY
-      S.graph.dragX = event.clientX
-      S.graph.dragY = event.clientY
-      return
-    }
-    const rect = canvas.getBoundingClientRect()
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
-    const wx = (x - S.graph.tx) / S.graph.scale
-    const wy = (y - S.graph.ty) / S.graph.scale
-    let best = null
-    let bestD = (18 * 18) / (S.graph.scale * S.graph.scale || 1)
-    for (const n of S.graph.nodes) {
-      const d = (n.x - wx) ** 2 + (n.y - wy) ** 2
-      if (d < bestD) { bestD = d; best = n }
-    }
-    S.graph.hover = best
-    if (best) {
-      const imp = Math.round((best.importance || 0) * 100)
-      const rec = Math.round((best.recall || 0) * 100)
-      const statusText = { active: '活着', candidate: '待确认', superseded: '被取代', archived: '已归档', completed: '已完成' }[best.status] || best.status
-      tip.textContent = `${best.text}\n${best.scope} · 重要 ${imp}% · 回忆 ${rec}% · ${statusText}`
-      tip.style.display = 'block'
-      tip.style.left = `${Math.min(x + 14, S.graph.w - 250)}px`
-      tip.style.top = `${Math.max(8, y + 14)}px`
-    } else {
-      tip.style.display = 'none'
-    }
-  })
-  canvas.addEventListener('mouseleave', () => {
-    S.graph.hover = null
-    S.graph.dragging = false
-    canvas.style.cursor = ''
-    if (S.graph.tip) S.graph.tip.style.display = 'none'
-  })
-  canvas.addEventListener('click', () => {
-    const n = S.graph.hover
-    if (!n) return
-    S.library.scope = n.scope
-    S.library.status = n.status === 'active' ? 'active' : n.status
-    S.library.tier = 'all'
-    S.library.q = ''
-    S.library.loaded = false
-    go('library')
-  })
-
-  canvas.addEventListener('wheel', (event) => {
-    event.preventDefault()
-    const rect = canvas.getBoundingClientRect()
-    const mx = event.clientX - rect.left
-    const my = event.clientY - rect.top
-    const next = Math.max(0.4, Math.min(3, S.graph.scale * (event.deltaY < 0 ? 1.12 : 0.89)))
-    const ratio = next / S.graph.scale
-    S.graph.tx = mx - (mx - S.graph.tx) * ratio
-    S.graph.ty = my - (my - S.graph.ty) * ratio
-    S.graph.scale = next
-  }, { passive: false })
-
-  canvas.addEventListener('mousedown', (event) => {
-    S.graph.dragging = true
-    S.graph.dragX = event.clientX
-    S.graph.dragY = event.clientY
-    canvas.style.cursor = 'grabbing'
-  })
-  canvas.addEventListener('mouseup', () => {
-    S.graph.dragging = false
-    canvas.style.cursor = ''
-  })
-
+  // 复用上一次的舞台：切走再切回来时，ForceGraph 和 canvas 不能被丢掉，
+  // 否则新 DOM 里没有实例，页面就是空的。
+  let stage = S.graph.stage
+  if (!stage) {
+    stage = el('div', { class: 'graph-stage' })
+    const backdrop = el('canvas', { class: 'graph-backdrop' })
+    const fgEl = el('div', { class: 'graph-fg' })
+    stage.append(backdrop, fgEl)
+    S.graph.stage = stage
+    S.graph.backdrop = backdrop
+    S.graph.fgEl = fgEl
+  }
+  if (!S.graph.fg) S.graph.fitted = false
   if (!S.graph.data && !S.graph.loading) void loadGraph()
   const legendStats = el('span', { class: 'graph-stats' })
   S.graph.legendStats = legendStats
+
+  const rebuild = () => { S.graph.fitted = false; buildGraphNodes(); if (!S.graph.running) startGraphLoop() }
 
   return el('section', { class: 'card pad graph-card' },
     el('div', { class: 'section-head' },
@@ -3046,21 +3334,37 @@ function renderGraphTab() {
       el('span', { class: 'spacer' }),
       el('select', {
         class: 'select', style: { width: '150px', marginRight: '8px' },
-        on: { change: (event) => { S.graph.scope = event.target.value; buildGraphNodes(); S.graph.alpha = 1 } },
+        on: { change: (event) => { S.graph.scope = event.target.value; rebuild() } },
       },
       el('option', { value: 'all', text: '全部聊天', selected: S.graph.scope === 'all' }),
       (S.overview?.scopes || []).map((s) => el('option', { value: s.scope, text: s.label || s.scope, selected: S.graph.scope === s.scope })),
       ),
       el('select', {
         class: 'select', style: { width: '110px', marginRight: '8px' },
-        on: { change: (event) => { S.graph.filter = event.target.value; buildGraphNodes(); S.graph.alpha = 1 } },
+        on: { change: (event) => { S.graph.tier = event.target.value; rebuild() } },
       },
-      el('option', { value: 'all', text: '全部' }),
-      el('option', { value: 'active', text: '只看活着' }),
-      el('option', { value: 'fading', text: '只看快遗忘' }),
-      el('option', { value: 'candidate', text: '只看候选' }),
+      el('option', { value: 'all', text: '全部层级', selected: S.graph.tier === 'all' }),
+      el('option', { value: 'normal', text: '普通', selected: S.graph.tier === 'normal' }),
+      el('option', { value: 'core', text: '核心', selected: S.graph.tier === 'core' }),
+      el('option', { value: 'task', text: '待办', selected: S.graph.tier === 'task' }),
       ),
-      el('button', { class: 'btn sm', on: { click: () => { S.graph.scale = 1; S.graph.tx = 0; S.graph.ty = 0 } } }, '复位'),
+      el('select', {
+        class: 'select', style: { width: '110px', marginRight: '8px' },
+        on: { change: (event) => { S.graph.filter = event.target.value; rebuild() } },
+      },
+      el('option', { value: 'all', text: '全部状态', selected: S.graph.filter === 'all' }),
+      el('option', { value: 'active', text: '只看活着', selected: S.graph.filter === 'active' }),
+      el('option', { value: 'fading', text: '只看快遗忘', selected: S.graph.filter === 'fading' }),
+      el('option', { value: 'candidate', text: '只看候选', selected: S.graph.filter === 'candidate' }),
+      ),
+      el('select', {
+        class: 'select', style: { width: '100px', marginRight: '8px' },
+        on: { change: (event) => { S.graph.view = event.target.value; applyGraphView(); drawGraphBackdrop() } },
+      },
+      el('option', { value: 'cosmos', text: '宇宙', selected: S.graph.view === 'cosmos' }),
+      el('option', { value: 'plain', text: '简洁', selected: S.graph.view === 'plain' }),
+      ),
+      el('button', { class: 'btn sm', on: { click: () => { const fg = S.graph.fg; if (fg) fg.zoomToFit(600, 80) } } }, '复位'),
       el('button', { class: 'btn sm', on: { click: () => toggleGraphPause() } }, S.graph.paused ? '继续刷新' : '暂停刷新'),
       el('button', { id: 'graph-more', class: 'btn sm', style: { display: S.graph.data?.hasMore ? '' : 'none' }, on: { click: () => loadGraph({ more: true }) } }, '加载更多'),
       el('span', { class: 'muted small', text: '滚轮缩放 · 拖动平移 · 每 5 秒刷新' }),
@@ -3088,6 +3392,10 @@ function updateGraphLegend() {
 
 function toggleGraphPause() {
   S.graph.paused = !S.graph.paused
+  if (S.graph.fg) {
+    if (S.graph.paused) S.graph.fg.pauseAnimation?.()
+    else S.graph.fg.resumeAnimation?.()
+  }
   paintCurrent()
   toast(S.graph.paused ? '已暂停自动刷新；画面保留' : '已继续自动刷新', 'ok')
 }
@@ -3148,13 +3456,19 @@ async function loadGraph({ quiet = false, more = false } = {}) {
 
 function buildGraphNodes() {
   const data = S.graph.data
-  if (!data) { S.graph.nodes = []; S.graph.links = []; return }
+  if (!data) {
+    S.graph.nodes = []
+    S.graph.links = []
+    renderForceGraph()
+    return
+  }
   const old = S.graph.positions
-  const cx = S.graph.w / 2
-  const cy = S.graph.h / 2
+  const cx = (S.graph.fgEl?.clientWidth || 800) / 2
+  const cy = (S.graph.fgEl?.clientHeight || 520) / 2
   const filter = S.graph.filter || 'all'
   const filtered = (data.nodes || []).filter((n) => {
     if (S.graph.scope !== 'all' && n.scope !== S.graph.scope) return false
+    if (S.graph.tier !== 'all' && n.tier !== S.graph.tier) return false
     if (filter === 'all') return true
     if (filter === 'fading') return n.status === 'active' && Number(n.recall) < 0.35
     return n.status === filter
@@ -3162,7 +3476,7 @@ function buildGraphNodes() {
   const nodes = filtered.map((n) => {
     const p = old.get(n.id)
     const a = Math.random() * Math.PI * 2
-    const r = 60 + Math.random() * 90
+    const r = Math.min(cx, cy) * (0.12 + Math.random() * 0.45)
     const recall = Math.max(0, Math.min(1, Number(n.recall) || 0))
     const imp = Math.max(0, Math.min(1, Number(n.importance) || 0))
     const fading = n.status === 'active' && recall < 0.35
@@ -3171,57 +3485,286 @@ function buildGraphNodes() {
       ...n,
       recall,
       fading,
+      dead,
       x: p?.x ?? cx + Math.cos(a) * r,
       y: p?.y ?? cy + Math.sin(a) * r,
-      vx: 0, vy: 0,
-      r: (3 + imp * 7) * (fading ? 0.82 : 1),
+      r: (4 + imp * 8) * (fading ? 0.82 : 1),
       color: dead ? '#5a6a72' : graphColor(n.scope),
+      __top: imp >= 0.72,
     }
   })
   const map = new Map(nodes.map((n) => [n.id, n]))
   const links = (data.links || [])
-    .map((l) => ({ a: map.get(l.source), b: map.get(l.target), kind: l.kind, w: l.w }))
-    .filter((l) => l.a && l.b)
+    .filter((l) => map.has(l.source) && map.has(l.target) && l.source !== l.target)
+    .map((l) => ({ source: l.source, target: l.target, kind: l.kind, w: l.w }))
   S.graph.nodes = nodes
   S.graph.links = links
+  renderForceGraph()
+}
+
+function ensureForceGraph() {
+  if (S.graph.fg) return S.graph.fg
+  if (!S.graph.fgEl) return null
+  if (!window.ForceGraph) {
+    S.graph.fgEl.textContent = '记忆图组件没有加载：vendor/force-graph.min.js 缺失'
+    return null
+  }
+  let fg
+  try {
+    fg = new ForceGraph(S.graph.fgEl)
+    .backgroundColor('rgba(0,0,0,0)')
+    .nodeId('id')
+    .nodeRelSize(4)
+    .nodeVal((n) => 1 + Number(n.importance || 0) * 5)
+    .nodeCanvasObject(forceNodePaint)
+    .nodePointerAreaPaint(forcePointerPaint)
+    .nodeLabel((n) => {
+      const statusText = { active: '活着', candidate: '待确认', superseded: '被取代', archived: '已归档', completed: '已完成' }[n.status] || n.status
+      return `${n.text}\n${n.scope} · 重要 ${Math.round((n.importance || 0) * 100)}% · 回忆 ${Math.round((n.recall || 0) * 100)}% · ${statusText}`
+    })
+    .linkSource('source')
+    .linkTarget('target')
+    .linkColor(forceLinkColor)
+    .linkWidth((l) => (l.kind === 'relation' ? 1.8 : l.kind === 'fact' ? 1.3 : 0.8))
+    .linkCurvature(0.12)
+    .linkDirectionalParticles((l) => (S.graph.view === 'brain' ? 2 : S.graph.view === 'cosmos' ? 1 : 0))
+    .linkDirectionalParticleWidth(1.3)
+    .linkDirectionalParticleColor(() => 'rgba(160,240,255,0.9)')
+    .enableNodeDrag(true)
+    .onNodeClick((n) => openGraphNode(n))
+    .onNodeHover((n) => { S.graph.hover = n })
+    .d3AlphaDecay(0.022)
+    .d3VelocityDecay(0.35)
+    .warmupTicks(40)
+    .cooldownTicks(300)
+  } catch (error) {
+    S.graph.fgEl.textContent = `记忆图组件初始化失败：${error?.message || error}`
+    return null
+  }
+  const charge = fg.d3Force('charge')
+  if (charge && charge.strength) charge.strength(-260)
+  const linkForce = fg.d3Force('link')
+  if (linkForce && linkForce.distance) linkForce.distance(95)
+  S.graph.fg = fg
+  return fg
+}
+
+function forceLinkColor(l) {
+  const hot = S.graph.hover && (l.source?.id === S.graph.hover.id || l.target?.id === S.graph.hover.id)
+  if (l.kind === 'relation') return hot ? 'rgba(206,192,255,0.95)' : 'rgba(182,167,240,0.55)'
+  if (l.kind === 'fact') return hot ? 'rgba(255,222,160,0.9)' : 'rgba(240,201,135,0.4)'
+  const alpha = 0.16 + Math.max(0, Math.min(1, l.w || 0)) * 0.28
+  return `rgba(127,214,230,${hot ? 0.75 : alpha})`
+}
+
+function forceNodePaint(n, ctx) {
+  const r = n.r || 6
+  if (S.graph.view === 'brain') {
+    const seed = String(n.id).split('').reduce((a, c) => a + c.charCodeAt(0), 0)
+    ctx.strokeStyle = n.status === 'active' ? 'rgba(127,214,230,0.32)' : 'rgba(127,214,230,0.14)'
+    ctx.lineWidth = 0.8
+    for (let k = 0; k < 4; k++) {
+      const ang = (seed % 31) / 31 * Math.PI * 2 + k * (Math.PI / 2) + 0.4
+      const len = r * (1.8 + ((seed + k * 7) % 10) / 10)
+      ctx.beginPath()
+      ctx.moveTo(n.x, n.y)
+      ctx.lineTo(n.x + Math.cos(ang) * len, n.y + Math.sin(ang) * len)
+      ctx.stroke()
+    }
+  }
+  const base = n.dead ? 0.22 : n.status === 'candidate' ? 0.55 : 0.45 + 0.5 * (Number.isFinite(n.recall) ? n.recall : 1)
+  // 三层光晕，比硬边圆点柔和；不用 shadowBlur，节点多也不掉帧。
+  const layers = [[3.4, 0.05], [2.3, 0.08], [1.55, 0.12]]
+  for (const [mul, alpha] of layers) {
+    ctx.beginPath()
+    ctx.arc(n.x, n.y, r * mul, 0, Math.PI * 2)
+    ctx.fillStyle = n.color
+    ctx.globalAlpha = alpha * base
+    ctx.fill()
+    ctx.globalAlpha = 1
+  }
+  ctx.beginPath()
+  ctx.arc(n.x, n.y, r, 0, Math.PI * 2)
+  ctx.fillStyle = n.color
+  ctx.globalAlpha = base
+  ctx.fill()
+  ctx.globalAlpha = 1
+  // 核心高光：让节点像发光的星，而不是色块。
+  ctx.beginPath()
+  ctx.arc(n.x, n.y, Math.max(1.2, r * 0.38), 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(255,255,255,0.82)'
+  ctx.fill()
+  if (n.tier === 'core') {
+    ctx.beginPath()
+    ctx.arc(n.x, n.y, r + 3, 0, Math.PI * 2)
+    ctx.strokeStyle = 'rgba(240,201,135,0.7)'
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+  } else if (n.status === 'candidate') {
+    ctx.beginPath()
+    ctx.arc(n.x, n.y, r + 3, 0, Math.PI * 2)
+    ctx.strokeStyle = 'rgba(182,167,240,0.6)'
+    ctx.lineWidth = 1
+    ctx.setLineDash([2, 3])
+    ctx.stroke()
+    ctx.setLineDash([])
+  }
+  if (S.graph.hover?.id === n.id) {
+    ctx.beginPath()
+    ctx.arc(n.x, n.y, r + 6, 0, Math.PI * 2)
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+    ctx.lineWidth = 1
+    ctx.stroke()
+  }
+}
+
+function forcePointerPaint(n, color, ctx) {
+  ctx.beginPath()
+  ctx.arc(n.x, n.y, (n.r || 5) + 7, 0, Math.PI * 2)
+  ctx.fillStyle = color
+  ctx.fill()
+}
+
+function renderForceGraph() {
+  const fg = ensureForceGraph()
+  if (!fg) return
+  fg.graphData({ nodes: S.graph.nodes, links: S.graph.links })
+  if (!S.graph.running) fg.resumeAnimation?.()
+  drawGraphBackdrop()
+  if (!S.graph.fitted && S.graph.nodes.length) {
+    S.graph.fitted = true
+    setTimeout(() => {
+      try { fg.zoomToFit(500, 70) } catch {}
+    }, 600)
+  }
+}
+
+function applyGraphView() {
+  if (!S.graph.fg) return
+  S.graph.fg.linkDirectionalParticles((l) => (S.graph.view === 'brain' ? 2 : S.graph.view === 'cosmos' ? 1 : 0))
+  S.graph.fg.linkColor(forceLinkColor)
+  drawGraphBackdrop()
+}
+
+function drawGraphBackdrop() {
+  const canvas = S.graph.backdrop
+  const el = S.graph.fgEl
+  if (!canvas || !el) return
+  const w = Math.max(320, el.clientWidth)
+  const h = Math.max(320, el.clientHeight)
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = Math.round(w * dpr)
+  canvas.height = Math.round(h * dpr)
+  const ctx = canvas.getContext('2d')
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, w, h)
+  if (S.graph.view === 'cosmos') {
+    const bg = ctx.createRadialGradient(w * 0.5, h * 0.46, 10, w * 0.5, h * 0.5, Math.max(w, h) * 0.8)
+    bg.addColorStop(0, 'rgba(16,54,76,0.55)')
+    bg.addColorStop(0.45, 'rgba(6,22,40,0.75)')
+    bg.addColorStop(1, 'rgba(2,6,14,0.95)')
+    ctx.fillStyle = bg
+    ctx.fillRect(0, 0, w, h)
+    if (!S.graph.stars || S.graph.stars.w !== w || S.graph.stars.h !== h) {
+      S.graph.stars = {
+        w, h,
+        list: Array.from({ length: 180 }, (_, i) => ({
+          x: Math.random() * w, y: Math.random() * h,
+          r: 0.5 + Math.random() * 1.4, p: Math.random() * Math.PI * 2,
+          hue: i % 7 === 0 ? '182,167,240' : '190,235,250',
+        })),
+      }
+    }
+    for (const st of S.graph.stars.list) {
+      ctx.fillStyle = `rgba(${st.hue},${0.25 + 0.3 * (0.5 + 0.5 * Math.sin(st.p))})`
+      ctx.fillRect(st.x, st.y, st.r, st.r)
+    }
+    const groups = new Map()
+    for (const n of S.graph.nodes || []) {
+      const g = groups.get(n.scope) || { x: 0, y: 0, n: 0, color: n.color }
+      g.x += n.x; g.y += n.y; g.n += 1
+      groups.set(n.scope, g)
+    }
+    for (const g of groups.values()) {
+      if (g.n < 2) continue
+      const cx = g.x / g.n, cy = g.y / g.n
+      const rad = 120 + Math.min(220, g.n * 22)
+      const neb = ctx.createRadialGradient(cx, cy, 8, cx, cy, rad)
+      neb.addColorStop(0, g.color)
+      neb.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.globalAlpha = 0.10
+      ctx.fillStyle = neb
+      ctx.beginPath()
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.globalAlpha = 1
+    }
+  } else if (S.graph.view === 'brain') {
+    ctx.fillStyle = '#041018'
+    ctx.fillRect(0, 0, w, h)
+    const cx = w / 2, cy = h / 2
+    const rx = Math.min(w * 0.21, 230), ry = Math.min(h * 0.25, 210)
+    for (const side of [-1, 1]) {
+      ctx.save()
+      ctx.translate(cx + side * rx * 0.38, cy)
+      ctx.scale(side, 1)
+      ctx.beginPath()
+      ctx.ellipse(0, 0, rx, ry, -0.08, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(14,70,90,0.28)'
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(127,214,230,0.22)'
+      ctx.lineWidth = 1.2
+      ctx.stroke()
+      ctx.save()
+      ctx.clip()
+      ctx.strokeStyle = 'rgba(127,214,230,0.10)'
+      ctx.lineWidth = 1
+      for (let k = 0; k < 4; k++) {
+        ctx.beginPath()
+        ctx.ellipse(0, 0, rx * (0.32 + k * 0.17), ry * (0.30 + k * 0.17), k % 2 ? 0.5 : -0.5, 0, Math.PI * 2)
+        ctx.stroke()
+      }
+      ctx.restore()
+      ctx.restore()
+    }
+  } else {
+    ctx.clearRect(0, 0, w, h)
+  }
+}
+
+function openGraphNode(n) {
+  if (!n) return
+  S.library.scope = n.scope
+  S.library.status = n.status === 'active' ? 'active' : n.status
+  S.library.tier = 'all'
+  S.library.q = ''
+  S.library.loaded = false
+  go('library')
 }
 
 function startGraphLoop() {
-  const canvas = S.graph.canvas
-  if (!canvas) return
-  if (S.graph.running && S.graph.ctx) return
-  stopGraphLoop()
-  const rect = canvas.parentElement.getBoundingClientRect()
-  S.graph.w = Math.max(320, Math.round(rect.width))
-  S.graph.h = Math.max(360, Math.round(rect.height) || 520)
-  const dpr = window.devicePixelRatio || 1
-  canvas.width = Math.round(S.graph.w * dpr)
-  canvas.height = Math.round(S.graph.h * dpr)
-  canvas.style.width = `${S.graph.w}px`
-  canvas.style.height = `${S.graph.h}px`
-  const ctx = canvas.getContext('2d')
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  S.graph.ctx = ctx
-  S.graph.running = true
-  S.graph.alpha = 1
-  buildGraphNodes()
-  S.graph.timer = setInterval(() => { if (!S.graph.paused) void loadGraph({ quiet: true }) }, 5000)
-  const frame = (t) => {
-    if (!S.graph.running) return
-    tickGraph()
-    drawGraph(t)
-    S.graph.raf = requestAnimationFrame(frame)
+  const fg = ensureForceGraph()
+  if (!fg) return
+  const el = S.graph.fgEl
+  if (el) {
+    fg.width(el.clientWidth)
+    fg.height(el.clientHeight)
   }
-  S.graph.raf = requestAnimationFrame(frame)
+  if (!S.graph.data && !S.graph.loading) void loadGraph()
+  S.graph.running = true
+  drawGraphBackdrop()
+  buildGraphNodes()
+  if (!S.graph.paused) fg.resumeAnimation?.()
+  if (!S.graph.timer) {
+    S.graph.timer = setInterval(() => { if (!S.graph.paused) void loadGraph({ quiet: true }) }, 5000)
+  }
 }
 
 function stopGraphLoop() {
   S.graph.running = false
-  if (S.graph.raf) cancelAnimationFrame(S.graph.raf)
   if (S.graph.timer) clearInterval(S.graph.timer)
-  S.graph.raf = 0
   S.graph.timer = 0
-  S.graph.ctx = null
+  S.graph.fg?.pauseAnimation?.()
 }
 
 function tickGraph() {
@@ -3233,20 +3776,57 @@ function tickGraph() {
   const cy = h / 2
   const alpha = S.graph.alpha
   if (alpha > 0.02) {
-    for (let i = 0; i < nodes.length; i++) {
-      const a = nodes[i]
-      for (let j = i + 1; j < nodes.length; j++) {
-        const b = nodes[j]
-        let dx = b.x - a.x
-        let dy = b.y - a.y
-        let d2 = dx * dx + dy * dy
-        if (d2 < 25) d2 = 25
-        const d = Math.sqrt(d2)
-        const f = (2600 * alpha) / d2
-        const fx = (dx / d) * f
-        const fy = (dy / d) * f
-        a.vx -= fx; a.vy -= fy
-        b.vx += fx; b.vy += fy
+    if (nodes.length <= 160) {
+      for (let i = 0; i < nodes.length; i++) {
+        const a = nodes[i]
+        for (let j = i + 1; j < nodes.length; j++) {
+          const b = nodes[j]
+          let dx = b.x - a.x
+          let dy = b.y - a.y
+          let d2 = dx * dx + dy * dy
+          if (d2 < 25) d2 = 25
+          const d = Math.sqrt(d2)
+          const f = (2600 * alpha) / d2
+          const fx = (dx / d) * f
+          const fy = (dy / d) * f
+          a.vx -= fx; a.vy -= fy
+          b.vx += fx; b.vy += fy
+        }
+      }
+    } else {
+      // 大图用空间网格近似斥力：只和相邻格子里的节点算，避免 O(n²) 卡死。
+      const cell = 110
+      const grid = new Map()
+      for (const n of nodes) {
+        const key = `${Math.floor(n.x / cell)},${Math.floor(n.y / cell)}`
+        if (!grid.has(key)) grid.set(key, [])
+        grid.get(key).push(n)
+      }
+      const maxNear = 48
+      for (const a of nodes) {
+        let checked = 0
+        const gx = Math.floor(a.x / cell)
+        const gy = Math.floor(a.y / cell)
+        for (let ox = -1; ox <= 1 && checked < maxNear; ox++) {
+          for (let oy = -1; oy <= 1 && checked < maxNear; oy++) {
+            const bucket = grid.get(`${gx + ox},${gy + oy}`)
+            if (!bucket) continue
+            for (const b of bucket) {
+              if (b === a) continue
+              if (++checked > maxNear) break
+              let dx = b.x - a.x
+              let dy = b.y - a.y
+              let d2 = dx * dx + dy * dy
+              if (d2 < 25) d2 = 25
+              const d = Math.sqrt(d2)
+              const f = (2600 * alpha) / d2 * 0.5
+              const fx = (dx / d) * f
+              const fy = (dy / d) * f
+              a.vx -= fx; a.vy -= fy
+              b.vx += fx; b.vy += fy
+            }
+          }
+        }
       }
     }
     for (const l of links) {
@@ -3288,37 +3868,177 @@ function drawGraph(now) {
   if (!ctx) return
   const { nodes, links, w, h } = S.graph
   ctx.clearRect(0, 0, w, h)
+  const view = S.graph.view || 'cosmos'
+  if (view === 'cosmos' && S.theme !== 'light') {
+    const bg = ctx.createRadialGradient(w * 0.5, h * 0.46, 10, w * 0.5, h * 0.5, Math.max(w, h) * 0.8)
+    bg.addColorStop(0, 'rgba(16, 54, 76, 0.55)')
+    bg.addColorStop(0.45, 'rgba(6, 22, 40, 0.75)')
+    bg.addColorStop(1, 'rgba(2, 6, 14, 0.95)')
+    ctx.fillStyle = bg
+    ctx.fillRect(0, 0, w, h)
+    if (!S.graph.stars || S.graph.stars.w !== w || S.graph.stars.h !== h) {
+      S.graph.stars = {
+        w, h,
+        list: Array.from({ length: 160 }, (_, i) => ({
+          x: Math.random() * w, y: Math.random() * h,
+          r: 0.4 + Math.random() * 1.3, p: Math.random() * Math.PI * 2,
+          s: 0.3 + Math.random() * 0.7, hue: i % 7 === 0 ? '182,167,240' : '180,230,245',
+        })),
+      }
+    }
+    for (const st of S.graph.stars.list) {
+      const tw = 0.35 + 0.4 * (0.5 + 0.5 * Math.sin(now / 1400 + st.p))
+      ctx.fillStyle = `rgba(${st.hue},${tw * st.s})`
+      ctx.fillRect(st.x, st.y, st.r, st.r)
+    }
+    // 按聊天聚成星云，颜色和图例一致。
+    const clouds = new Map()
+    for (const n of nodes) {
+      const g = clouds.get(n.scope) || { x: 0, y: 0, n: 0, color: n.color }
+      g.x += n.x; g.y += n.y; g.n += 1
+      clouds.set(n.scope, g)
+    }
+    for (const g of clouds.values()) {
+      if (g.n < 2) continue
+      const cx = g.x / g.n, cy = g.y / g.n
+      const rad = 120 + Math.min(260, g.n * 26)
+      const neb = ctx.createRadialGradient(cx, cy, 10, cx, cy, rad)
+      neb.addColorStop(0, g.color)
+      neb.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.globalAlpha = 0.09
+      ctx.fillStyle = neb
+      ctx.beginPath()
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.globalAlpha = 1
+    }
+  } else if (view === 'brain') {
+    ctx.fillStyle = S.theme === 'light' ? '#f4fafb' : '#041018'
+    ctx.fillRect(0, 0, w, h)
+    const cx = w / 2, cy = h / 2
+    const rx = Math.min(w * 0.21, 230)
+    const ry = Math.min(h * 0.25, 210)
+    for (const side of [-1, 1]) {
+      ctx.save()
+      ctx.translate(cx + side * rx * 0.38, cy)
+      ctx.scale(side, 1)
+      ctx.beginPath()
+      ctx.ellipse(0, 0, rx, ry, -0.08, 0, Math.PI * 2)
+      ctx.fillStyle = S.theme === 'light' ? 'rgba(14,90,104,0.05)' : 'rgba(14,70,90,0.28)'
+      ctx.fill()
+      ctx.strokeStyle = S.theme === 'light' ? 'rgba(14,90,104,0.20)' : 'rgba(127,214,230,0.22)'
+      ctx.lineWidth = 1.2
+      ctx.stroke()
+      // 脑回：几道弧线，别让轮廓只是个空椭圆。
+      ctx.save()
+      ctx.clip()
+      ctx.strokeStyle = S.theme === 'light' ? 'rgba(14,90,104,0.10)' : 'rgba(127,214,230,0.10)'
+      ctx.lineWidth = 1
+      for (let k = 0; k < 4; k++) {
+        ctx.beginPath()
+        ctx.ellipse(0, 0, rx * (0.32 + k * 0.17), ry * (0.30 + k * 0.17), k % 2 ? 0.5 : -0.5, 0, Math.PI * 2)
+        ctx.stroke()
+      }
+      ctx.restore()
+      ctx.restore()
+    }
+    ctx.beginPath()
+    ctx.moveTo(cx, cy - ry * 0.92)
+    ctx.quadraticCurveTo(cx + 3, cy, cx, cy + ry * 0.92)
+    ctx.strokeStyle = S.theme === 'light' ? 'rgba(14,90,104,0.14)' : 'rgba(127,214,230,0.16)'
+    ctx.lineWidth = 1
+    ctx.stroke()
+  } else if (S.theme !== 'light') {
+    const bg = ctx.createRadialGradient(w * 0.5, h * 0.44, 20, w * 0.5, h * 0.5, Math.max(w, h) * 0.72)
+    bg.addColorStop(0, 'rgba(18, 78, 90, 0.34)')
+    bg.addColorStop(0.55, 'rgba(8, 30, 38, 0.16)')
+    bg.addColorStop(1, 'rgba(0, 0, 0, 0)')
+    ctx.fillStyle = bg
+    ctx.fillRect(0, 0, w, h)
+  }
   ctx.save()
   ctx.translate(S.graph.tx, S.graph.ty)
   ctx.scale(S.graph.scale, S.graph.scale)
+  const hoverId = S.graph.hover?.id || null
   for (const l of links) {
+    const hot = hoverId && (l.a.id === hoverId || l.b.id === hoverId)
     if (l.kind === 'relation') {
-      ctx.strokeStyle = 'rgba(182,167,240,0.55)'
-      ctx.lineWidth = 1.2
+      ctx.strokeStyle = hot ? 'rgba(206,192,255,0.95)' : 'rgba(182,167,240,0.5)'
+      ctx.lineWidth = hot ? 1.8 : 1.2
     } else if (l.kind === 'fact') {
-      ctx.strokeStyle = 'rgba(240,201,135,0.35)'
-      ctx.lineWidth = 1
+      ctx.strokeStyle = hot ? 'rgba(255,222,160,0.9)' : 'rgba(240,201,135,0.32)'
+      ctx.lineWidth = hot ? 1.5 : 1
     } else {
-      ctx.strokeStyle = `rgba(127,214,230,${0.05 + Math.max(0, Math.min(1, l.w)) * 0.12})`
-      ctx.lineWidth = 0.7
+      const alpha = 0.05 + Math.max(0, Math.min(1, l.w)) * 0.14 + (hot ? 0.25 : 0)
+      ctx.strokeStyle = `rgba(127,214,230,${alpha})`
+      ctx.lineWidth = hot ? 1.4 : 0.7
     }
+    const mx = (l.a.x + l.b.x) / 2 + (l.b.y - l.a.y) * 0.08
+    const my = (l.a.y + l.b.y) / 2 - (l.b.x - l.a.x) * 0.08
     ctx.beginPath()
     ctx.moveTo(l.a.x, l.a.y)
-    ctx.lineTo(l.b.x, l.b.y)
+    ctx.quadraticCurveTo(mx, my, l.b.x, l.b.y)
     ctx.stroke()
   }
+  if (view === 'brain' && links.length) {
+    // 突触信号：少量亮点沿连线跑，制造“大脑在活动”的感觉。
+    const t = now / 1100
+    for (let k = 0; k < 10; k++) {
+      const l = links[(k * 17 + Math.floor(t)) % links.length]
+      if (!l) continue
+      const pos = ((t % 1) + k * 0.11) % 1
+      const x = l.a.x + (l.b.x - l.a.x) * pos
+      const y = l.a.y + (l.b.y - l.a.y) * pos
+      ctx.beginPath()
+      ctx.arc(x, y, 2.2, 0, Math.PI * 2)
+      ctx.fillStyle = k % 2 ? 'rgba(182,167,240,0.85)' : 'rgba(160,240,255,0.9)'
+      ctx.fill()
+      ctx.beginPath()
+      ctx.arc(x, y, 5.5, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(127,214,230,0.12)'
+      ctx.fill()
+    }
+  }
+  ctx.textBaseline = 'middle'
+  const labels = []
   for (const n of nodes) {
+    if (view === 'brain') {
+      // 神经元胞体：几根短树突，让它不再只是一个圆点。
+      const seed = String(n.id).split('').reduce((a, c) => a + c.charCodeAt(0), 0)
+      ctx.strokeStyle = `rgba(127,214,230,${n.status === 'active' ? 0.28 : 0.14})`
+      ctx.lineWidth = 0.7
+      for (let k = 0; k < 4; k++) {
+        const ang = (seed % 31) / 31 * Math.PI * 2 + k * (Math.PI / 2) + 0.4
+        const len = n.r * (1.7 + ((seed + k * 7) % 10) / 10)
+        ctx.beginPath()
+        ctx.moveTo(n.x, n.y)
+        ctx.lineTo(n.x + Math.cos(ang) * len, n.y + Math.sin(ang) * len)
+        ctx.stroke()
+      }
+    }
     const flash = S.graph.flashes.get(n.id) || 0
     const isFlash = now < flash
+    // 柔和光晕：比 shadowBlur 便宜，节点多也不会掉帧。
+    ctx.beginPath()
+    ctx.arc(n.x, n.y, n.r * 2.1, 0, Math.PI * 2)
+    ctx.fillStyle = n.color
+    ctx.globalAlpha = 0.12
+    ctx.fill()
+    ctx.globalAlpha = 1
     ctx.beginPath()
     ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
     ctx.fillStyle = n.color
     const opacity = n.status === 'candidate' ? 0.55
       : (n.status === 'superseded' || n.status === 'archived') ? 0.3
-        : 0.25 + 0.65 * (Number.isFinite(n.recall) ? n.recall : 1)
+        : 0.3 + 0.65 * (Number.isFinite(n.recall) ? n.recall : 1)
     ctx.globalAlpha = opacity
     ctx.fill()
     ctx.globalAlpha = 1
+    // 高光让圆点不再像纯色棋子。
+    ctx.beginPath()
+    ctx.arc(n.x - n.r * 0.3, n.y - n.r * 0.34, Math.max(1, n.r * 0.32), 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'
+    ctx.fill()
     if (n.fading) {
       ctx.setLineDash([3, 3])
       ctx.beginPath()
@@ -3357,16 +4077,44 @@ function drawGraph(now) {
       ctx.lineWidth = 1.2
       ctx.stroke()
     }
-    if (S.graph.hover && S.graph.hover.id === n.id) {
+    if (hoverId === n.id) {
       ctx.beginPath()
       ctx.arc(n.x, n.y, n.r + 5, 0, Math.PI * 2)
       ctx.strokeStyle = 'rgba(255,255,255,0.85)'
       ctx.lineWidth = 1
       ctx.stroke()
-      ctx.font = `${12 / S.graph.scale}px system-ui, sans-serif`
-      ctx.fillStyle = 'rgba(232,246,250,0.95)'
-      ctx.fillText(String(n.text || '').slice(0, 26), n.x + n.r + 5, n.y - n.r - 3)
     }
+    if (hoverId === n.id || (nodes.length <= 90 && n.importance >= 0.7)) labels.push(n)
+  }
+  // 标签最后画，避免被别的节点盖住；只标 hover 和高重要节点，并做简单避让。
+  const placed = []
+  const ordered = labels.slice().sort((a, b) => {
+    if (a.id === hoverId) return -1
+    if (b.id === hoverId) return 1
+    return Number(b.importance || 0) - Number(a.importance || 0)
+  }).slice(0, 4)
+  for (const n of ordered) {
+    const text = String(n.text || '').slice(0, 14)
+    if (!text) continue
+    ctx.font = `${11 / S.graph.scale}px system-ui, sans-serif`
+    const tw = ctx.measureText(text).width
+    const th = 13 / S.graph.scale
+    const x = n.x + n.r + 6 / S.graph.scale
+    const y = n.y - n.r - 6 / S.graph.scale
+    const box = { x1: x - 3 / S.graph.scale, y1: y - th / 2, x2: x + tw + 3 / S.graph.scale, y2: y + th / 2 }
+    const overlap = placed.some((b) => box.x1 < b.x2 && box.x2 > b.x1 && box.y1 < b.y2 && box.y2 > b.y1)
+    if (overlap && n.id !== hoverId) continue
+    placed.push(box)
+    ctx.fillStyle = 'rgba(4, 18, 24, 0.78)'
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath()
+      ctx.roundRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1, 3 / S.graph.scale)
+      ctx.fill()
+    } else {
+      ctx.fillRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1)
+    }
+    ctx.fillStyle = 'rgba(232,246,250,0.95)'
+    ctx.fillText(text, x, y)
   }
   ctx.restore()
 }
@@ -3377,6 +4125,8 @@ async function boot() {
   const bootParams = new URLSearchParams(location.search)
   const requestedTheme = bootParams.get('theme')
   if (requestedTheme === 'dark' || requestedTheme === 'light') S.theme = requestedTheme
+  const requestedView = bootParams.get('view')
+  if (requestedView === 'cosmos' || requestedView === 'plain') S.graph.view = requestedView
   if (bootParams.get('embed') === '1') document.body.classList.add('embed')
   applyTheme()
   try { await api('/persona'); S.personaAvailable = true } catch { S.personaAvailable = false }
