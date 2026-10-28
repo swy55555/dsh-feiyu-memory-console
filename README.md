@@ -236,6 +236,7 @@ node bridge/install-emotion-spillover.mjs --target "$env:USERPROFILE\.dsh\qq-bri
 - 想自己查：用 DB Browser for SQLite 打开，或 `sqlite3 memes.db "select title,tags from memes where title like '%下头%' limit 5;"`。
 - 想换库：先备份原文件，再替换成同表、同字段的 SQLite；桥接按文件修改时间自动重载，不用重启（改完等一两轮）。
 - 想关掉：把 `meme-play.json` 的 `enabled` 设为 `false`；只想关群聊就把 `group` 设为 `false`。
+- 图片消息会先做一次视觉描述/OCR，把图里的角色名、台词、梗名带进匹配；同一张图会缓存，不重复调用。
 - 过滤：政治类始终跳过；攻击/嘲讽类只在心情差时出现；色情/敏感词条也会跳过。
 
 > 数据说明：词条来自开源项目 [astrbot_plugin_memewiki](https://github.com/in1t1a1/astrbot_plugin_memewiki)（MIT）随包的 6668 条快照，内容源自 [cnmeme.wiki](https://cnmeme.wiki) 公开 API；不是本项目原创，也不随安装包分发。每条 `origin` 保留出处，使用/再分发前请核对上游规则。完整说明见 [docs/memes.md](docs/memes.md)。
