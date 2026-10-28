@@ -2,14 +2,14 @@
 
 > 本地优先的 QQ 角色记忆控制台，DSH 插件形态。
 
-![version](https://img.shields.io/badge/version-0.8.0-0e5a68)
+![version](https://img.shields.io/badge/version-0.8.1-0e5a68)
 ![license](https://img.shields.io/badge/license-MIT-2e8696)
 ![node](https://img.shields.io/badge/node-24%2B-339933)
 ![platform](https://img.shields.io/badge/platform-Windows-0078d4)
 
 把长期记忆、原文与摘要、日记、性格和情绪放进同一个本地页面：能看、能改、能撤回。所有数据都在本机，不经过外部服务器。
 
-[使用手册](manual/可塑性记忆-使用手册-0.8.0.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
+[使用手册](manual/可塑性记忆-使用手册-0.8.1.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
 
 ---
 
@@ -42,7 +42,7 @@
 | 整理队列 | 查看队列、手动提炼、调整每日/群聊额度、暂停自动整理 |
 | 日记 | 公开本可读可改可补；私密本加密，需要密码解锁 |
 | 性格 | 查看/编辑维度、底色、边界，从角色卡起草，按聊天微调，撤销变化 |
-| 情绪 | 核心情绪、心情、长期底色三层，情绪盘、触发链、微调审计 |
+| 情绪 | 核心情绪、心情、长期底色三层，情绪盘、触发链、微调审计；心情低时会唱反调 |
 | 玩梗 | 从本地 6668 条梗库挑 1–2 个候选，自然才接；政治类跳过，攻击类只在心情差时出现 |
 | 情景记忆 | 事件、解释、情绪、行动、结果，支持补结果和删除 |
 | 会话上下文 | 原文层与摘要层：看最近原文/摘要、手动生成、删除写坏的摘要 |
@@ -133,7 +133,7 @@ curl.exe http://127.0.0.1:3100/api/status
 
 ### 4. 给桥接打补丁
 
-原文/摘要、主动联系和主动玩梗都需要桥接补丁。**不在插件目录时，先 `cd` 到插件目录。**
+原文/摘要、主动联系、主动玩梗、情绪唱反调和跨聊天情绪分享都需要桥接补丁。**不在插件目录时，先 `cd` 到插件目录。**
 
 ```powershell
 # 上下文层：原文 / 摘要 / 会话轮换
@@ -147,6 +147,14 @@ node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge"
 # 主动玩梗（可选）
 node bridge/install-meme-play.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
 node bridge/install-meme-play.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
+
+# 情绪低唱反调（可选）
+node bridge/install-contrarian.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
+node bridge/install-contrarian.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
+
+# 群聊/别人私聊的情绪分享（可选）
+node bridge/install-emotion-spillover.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
+node bridge/install-emotion-spillover.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
 ```
 
 - `--check` 报 `incompatible` 就不要 `--apply`：说明 `bridge.js` 与补丁版本不匹配，先看 [UPGRADE.md](UPGRADE.md)。
@@ -174,6 +182,9 @@ node bridge/install-meme-play.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --a
 | 会话上下文 | `socialV2.context` | 原文/摘要注入上限、轮换轮数、重试间隔 |
 | 整理队列 | `socialV2.dailyMemory` | 每日批次、队列上限、群聊策略 |
 | 情绪 | `socialV2.emotion` | 长期漂移、聊天微调、权重、模型复核 |
+| 情绪低唱反调 | `socialV2.emotion.contrarian` | 阈值默认 -0.15，低于就允许质疑/抬杠，有攻击边界 |
+| 跨聊天情绪分享 | `socialV2.emotion.spillover` | 群聊/别人私聊的高情绪事件，等老大安静后主动去说 |
+| 情绪恢复 | `socialV2.emotion.recovery` | 生气默认挂 30 分钟；被哄会缩短，之后快速回弹 |
 | 主动联系 | `socialV2.ownerContact` 或 `owner-contact.json` | 时间窗、静默阈值、概率、闹脾气间隔 |
 | 催睡觉 | `socialV2.bedtime` 或 `owner-contact.json` | 催睡时间、概率、闹脾气间隔 |
 | 玩梗 | `state/meme-play.json` | 群聊/私聊开关、主动候选、攻击类心情阈值 |
@@ -193,7 +204,7 @@ node bridge/install-meme-play.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --a
 | `bedtime.time` | `24:00` | 催睡时间 |
 | `bedtime.sulkCooldownHours` | `20` | 催睡闹脾气的冷却 |
 
-完整字段和默认值见 [使用手册](manual/可塑性记忆-使用手册-0.8.0.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
+完整字段和默认值见 [使用手册](manual/可塑性记忆-使用手册-0.8.1.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
 
 ### 玩梗
 
@@ -314,7 +325,7 @@ node test/browser.test.mjs
 
 ## 文档
 
-- [使用手册（PDF）](manual/可塑性记忆-使用手册-0.8.0.pdf)：逐页功能说明、配置和排查
+- [使用手册（PDF）](manual/可塑性记忆-使用手册-0.8.1.pdf)：逐页功能说明、配置和排查
 - [memvec 技术说明](docs/memvec.md)：技术选型、数据模型、检索与遗忘公式、参考文献
 - [梗库说明](docs/memes.md)：表结构、来源说明、替换与过滤规则
 - [上下文层说明](bridge/P0-CONTEXT.md)：原文、摘要、轮换和预算
