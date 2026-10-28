@@ -184,7 +184,7 @@ node bridge/install-emotion-spillover.mjs --target "$env:USERPROFILE\.dsh\qq-bri
 | 情绪 | `socialV2.emotion` | 长期漂移、聊天微调、权重、模型复核 |
 | 情绪低唱反调 | `socialV2.emotion.contrarian` | 阈值默认 -0.15，低于就允许质疑/抬杠，有攻击边界 |
 | 跨聊天情绪分享 | `socialV2.emotion.spillover` | 群聊/别人私聊的高情绪事件，等老大安静后主动去说 |
-| 情绪恢复 | `socialV2.emotion.recovery` | 生气默认挂 30 分钟；被哄会缩短，之后快速回弹 |
+| 情绪恢复 | `socialV2.emotion.recovery` | 生气按强度随机挂 10–45 分钟；被哄缩短到约 10 分钟，之后快速回弹 |
 | 主动联系 | `socialV2.ownerContact` 或 `owner-contact.json` | 时间窗、静默阈值、概率、闹脾气间隔 |
 | 催睡觉 | `socialV2.bedtime` 或 `owner-contact.json` | 催睡时间、概率、闹脾气间隔 |
 | 玩梗 | `state/meme-play.json` | 群聊/私聊开关、主动候选、攻击类心情阈值 |
