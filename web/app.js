@@ -772,17 +772,38 @@ function renderOverview() {
     ),
   )
 
+  const shareCard = el('section', { class: 'card pad' },
+    el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '跨聊天记忆共享' })),
+    el('p', { class: 'note', style: { margin: '0 0 8px' } }, '开启后，她能把别的聊天里的普通记忆带过来；管理员私聊和 global 里的住址、真名、证件、电话、密码、私密约定等仍然不共享。'),
+    el('div', { class: 'row', style: { gap: '10px' } },
+      el('span', { class: 'pill', text: o.memoryShare !== false ? '已开启' : '已关闭' }),
+      el('button', {
+        class: 'btn sm ' + (o.memoryShare !== false ? '' : 'primary'),
+        on: { click: () => toggleMemoryShare(o.memoryShare === false) },
+      }, o.memoryShare !== false ? '关闭共享' : '开启共享'),
+    ),
+  )
   return frag(
     hero,
     startupChecks(o.health),
     o.unavailable ? null : stats,
     o.unavailable ? null : el('div', { class: 'overview-grid' },
       el('div', { class: 'panel-stack' }, scopeCard, recentCard),
-      el('div', { class: 'panel-stack' }, fadingCard, queueCard, diaryCard, titleCard),
+      el('div', { class: 'panel-stack' }, fadingCard, queueCard, diaryCard, shareCard, titleCard),
     ),
   )
 }
 
+async function toggleMemoryShare(enabled) {
+  try {
+    await api('/memory-share', { method: 'POST', body: { enabled } })
+    if (S.overview) S.overview.memoryShare = enabled
+    toast(enabled ? '已开启跨聊天记忆共享' : '已关闭跨聊天记忆共享', 'ok')
+    paintCurrent()
+  } catch (error) {
+    toast(error.message, 'error')
+  }
+}
 async function saveOwnerTitle() {
   const input = document.getElementById('owner-title')
   const title = String(input?.value || '').trim().slice(0, 12) || '老大'
