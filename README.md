@@ -1,4 +1,4 @@
-# 可塑性记忆
+﻿# 可塑性记忆
 
 > 本地优先的 QQ 角色记忆控制台，DSH 插件形态。
 
@@ -26,6 +26,7 @@
 - [开发与测试](#开发与测试)
 - [已知限制](#已知限制)
 - [文档](#文档)
+- [致谢](#致谢)
 - [免责声明](#免责声明)
 - [许可证](#许可证)
 
@@ -277,6 +278,13 @@ node test/browser.test.mjs
 - [上下文层说明](bridge/P0-CONTEXT.md)：原文、摘要、轮换和预算
 - [更新日志](CHANGELOG.md) · [升级说明](UPGRADE.md)
 
+## 致谢
+
+这个项目不是一个人想出来的：最早的想法、主动联系和催睡的节奏、记忆分层和轮换的规则，很多来自群友的试用、反例和讨论。
+
+技术上站在 DSH、SnowLuma / OneBot、BAAI BGE、FastEmbed、force-graph、SQLite 这些项目上；思路也参考过 MemGPT、Generative Agents、mem0 等记忆系统。
+
+为了不替别人公开身份，README 不逐一列名；完整说明和名单见 [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md)。愿意具名的朋友可以直接说，我补进去。
 ## 免责声明
 
 本项目是个人开源项目，**不是** DeepSeek、DSH、腾讯 QQ、SnowLuma 或任何模型/平台方的官方产品，与其没有隶属或背书关系。
