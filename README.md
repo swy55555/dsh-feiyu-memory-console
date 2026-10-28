@@ -133,7 +133,7 @@ curl.exe http://127.0.0.1:3100/api/status
 
 ### 4. 给桥接打补丁
 
-原文/摘要和主动联系都需要桥接补丁。**不在插件目录时，先 `cd` 到插件目录。**
+原文/摘要、主动联系和主动玩梗都需要桥接补丁。**不在插件目录时，先 `cd` 到插件目录。**
 
 ```powershell
 # 上下文层：原文 / 摘要 / 会话轮换
@@ -143,6 +143,10 @@ node bridge/install.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
 # 主动联系 / 催睡（可选）
 node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
 node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
+
+# 主动玩梗（可选）
+node bridge/install-meme-play.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
+node bridge/install-meme-play.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
 ```
 
 - `--check` 报 `incompatible` 就不要 `--apply`：说明 `bridge.js` 与补丁版本不匹配，先看 [UPGRADE.md](UPGRADE.md)。
@@ -223,7 +227,7 @@ node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge"
 - 想关掉：把 `meme-play.json` 的 `enabled` 设为 `false`；只想关群聊就把 `group` 设为 `false`。
 - 过滤：政治类始终跳过；攻击/嘲讽类只在心情差时出现；色情/敏感词条也会跳过。
 
-> 数据说明：这批词条是本地导入的第三方梗解释合集（6668 条，构建于 2026-10-26），不是本项目原创，也不随安装包分发；每条 `origin` 记录具体出处，使用前请核对原始来源和平台规则。完整说明见 [docs/memes.md](docs/memes.md)。
+> 数据说明：词条来自开源项目 [astrbot_plugin_memewiki](https://github.com/in1t1a1/astrbot_plugin_memewiki)（MIT）随包的 6668 条快照，内容源自 [cnmeme.wiki](https://cnmeme.wiki) 公开 API；不是本项目原创，也不随安装包分发。每条 `origin` 保留出处，使用/再分发前请核对上游规则。完整说明见 [docs/memes.md](docs/memes.md)。
 
 ## 使用
 
@@ -261,6 +265,7 @@ node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge"
 |---|---|
 | 控制台是空的，没有原文/摘要 | 桥接没打上下文补丁；运行 `bridge/install.mjs --apply` 后重启桥接 |
 | 情绪页没有「主动联系」或「催睡觉」 | 桥接没有 `owner-contact` capability；运行 `bridge/install-owner-contact.mjs --apply` 后重启桥接 |
+| 「玩梗」页有设置但桥接不玩梗 | 桥接没打玩梗补丁；运行 `bridge/install-meme-play.mjs --apply` 后重启桥接 |
 | 保存主动联系/催睡 404 | DSH 还跑着旧路由；重启一次 DSH |
 | 记忆库红 | memvec 9881 未启动，运行 `npm run start:memvec` |
 | 桥接红 | 桥接 3100 未启动 |
