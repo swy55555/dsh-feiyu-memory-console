@@ -43,6 +43,7 @@
 | 日记 | 公开本可读可改可补；私密本加密，需要密码解锁 |
 | 性格 | 查看/编辑维度、底色、边界，从角色卡起草，按聊天微调，撤销变化 |
 | 情绪 | 核心情绪、心情、长期底色三层，情绪盘、触发链、微调审计 |
+| 玩梗 | 从本地 6668 条梗库挑 1–2 个候选，自然才接；政治类跳过，攻击类只在心情差时出现 |
 | 情景记忆 | 事件、解释、情绪、行动、结果，支持补结果和删除 |
 | 会话上下文 | 原文层与摘要层：看最近原文/摘要、手动生成、删除写坏的摘要 |
 | 主动联系 | 时间窗内按概率主动找你；太久没理她会掉心情、带小脾气 |
@@ -171,6 +172,7 @@ node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge"
 | 情绪 | `socialV2.emotion` | 长期漂移、聊天微调、权重、模型复核 |
 | 主动联系 | `socialV2.ownerContact` 或 `owner-contact.json` | 时间窗、静默阈值、概率、闹脾气间隔 |
 | 催睡觉 | `socialV2.bedtime` 或 `owner-contact.json` | 催睡时间、概率、闹脾气间隔 |
+| 玩梗 | `state/meme-play.json` | 群聊/私聊开关、主动候选、攻击类心情阈值 |
 
 常用项：
 
@@ -188,6 +190,20 @@ node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge"
 | `bedtime.sulkCooldownHours` | `20` | 催睡闹脾气的冷却 |
 
 完整字段和默认值见 [使用手册](manual/可塑性记忆-使用手册-0.7.3.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
+
+### 玩梗
+
+梗库是 `~/.dsh/qq-bridge/data/memes.db`（6668 条）；开关和策略在 `~/.dsh/qq-bridge/state/meme-play.json`：
+
+```json
+{"enabled": true, "group": true, "private": true, "proactive": true, "attackMoodBelow": 0.1, "limit": 2}
+```
+
+- `enabled` 总开关，`group` / `private` 分开控制；
+- `proactive=false` 时只在对方明确提到梗时解释，不主动挑候选；
+- 政治类始终跳过；攻击/嘲讽类只在心情值低于 `attackMoodBelow` 时出现；
+- 每轮最多注入 `limit` 个候选，是否使用由模型判断，不强制；
+- 用过的梗会写一条低重要度记忆，`fact_key=meme:<slug>`、`tags` 带「梗」和场景；在长期记忆页搜「梗」能看、能删。
 
 ## 使用
 
