@@ -136,31 +136,12 @@ curl.exe http://127.0.0.1:3100/api/status
 原文/摘要、主动联系、主动玩梗、情绪唱反调、跨聊天情绪分享和情绪回弹都需要桥接补丁。**不在插件目录时，先 `cd` 到插件目录。**
 
 ```powershell
-# 上下文层：原文 / 摘要 / 会话轮换
-node bridge/install.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
-node bridge/install.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
-
-# 主动联系 / 催睡（可选）
-node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
-node bridge/install-owner-contact.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
-
-# 主动玩梗（可选）
-node bridge/install-meme-play.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
-node bridge/install-meme-play.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
-
-# 情绪低唱反调（可选）
-node bridge/install-contrarian.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
-node bridge/install-contrarian.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
-
-# 群聊/别人私聊的情绪分享（可选）
-node bridge/install-emotion-spillover.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
-node bridge/install-emotion-spillover.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
-
-# 情绪回弹（可选）
-node bridge/install-emotion-recovery.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
-node bridge/install-emotion-recovery.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
+node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
+node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
 ```
 
+- 一条命令按顺序装齐 6 个补丁；`--check` 只检查，`--apply` 安装，`--undo` 按相反顺序撤销。
+- 单项安装器仍保留在 `bridge/install-*.mjs`，排查时可单独跑。
 - `--check` 报 `incompatible` 就不要 `--apply`：说明 `bridge.js` 与补丁版本不匹配，先看 [UPGRADE.md](UPGRADE.md)。
 - 补丁会备份原文件并写回执；撤销用 `--undo`。
 - 如果桥接本身已内置对应逻辑，`--check` 会报 `already-inline`，不会重复插入。
