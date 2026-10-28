@@ -57,7 +57,7 @@ const helpers = `  const SPILLOVER_FILE = path.join(STATE_DIR, 'emotion-spillove
       enabled: raw.enabled !== false,
       minIntensity: Math.max(0, Math.min(1, num(raw.minIntensity, 0.55))),
       minAbsPolarity: Math.max(0, Math.min(1, num(raw.minAbsPolarity, 0.35))),
-      maxPerDay: Math.max(1, Math.min(12, Math.round(num(raw.maxPerDay, 4)))),
+      maxPerDay: Math.max(0, Math.min(99, Math.round(num(raw.maxPerDay, 0)))),
       cooldownMinutes: Math.max(1, Math.min(720, Math.round(num(raw.cooldownMinutes, 45)))),
     };
   }
@@ -85,7 +85,7 @@ const helpers = `  const SPILLOVER_FILE = path.join(STATE_DIR, 'emotion-spillove
     const day = localDayKey(new Date());
     const state = readSpillover();
     if (state.day !== day) { state.day = day; state.count = 0; }
-    if (state.count >= conf.maxPerDay) return;
+    if (conf.maxPerDay > 0 && state.count >= conf.maxPerDay) return;
     const last = state.items[state.items.length - 1];
     if (last && now - Number(last.at || 0) < conf.cooldownMinutes * 60000) return;
     state.count += 1;
