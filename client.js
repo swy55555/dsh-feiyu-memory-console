@@ -61,7 +61,6 @@ window.__ModuleLoader__.load({
       const summary = note || (stats
         ? `${stats.active ?? 0} 条活着 · ${stats.candidate ?? 0} 条待确认 · ${stats.light?.total ?? 0} 条临时记忆 · ${stats.diary?.count ?? 0} 页日记`
         : '正在读…')
-      const pageUrl = `${location.origin}/dsh-feiyu-memory/`
 
       return h('div', { style: { padding: '2px 0 8px', minWidth: 0 } },
         h('div', {
@@ -71,17 +70,11 @@ window.__ModuleLoader__.load({
           h('span', { style: { fontSize: 12, color: note ? 'var(--dsw-alias-label-error, #d97777)' : 'var(--dsw-alias-label-tertiary, #8a8a8a)' } }, summary),
           h('span', { style: { flex: 1 } }),
           h('a', {
-            href: pageUrl,
-            target: '_blank',
+            href: '/',
+            target: '_top',
             rel: 'noreferrer',
             style: linkStyle,
-            onClick: (event) => {
-              // DSH 的 webview 有时会吞掉 target=_blank；退化成当前 iframe 打开，至少不会没反应。
-              event.preventDefault()
-              const win = window.open(pageUrl, '_blank', 'noopener,noreferrer')
-              if (!win || win.closed) window.location.assign(pageUrl)
-            },
-          }, '在新标签打开'),
+          }, '返回 DSH'),
         ),
         h('iframe', {
           src: `/dsh-feiyu-memory/?embed=1&theme=${theme}`,
