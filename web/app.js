@@ -147,6 +147,7 @@ const S = {
   semanticQuery: '',
   semanticTrace: null,
   memes: { data: null, settings: null, q: '', page: 1, loading: false },
+  cost: { data: null, loading: false, hours: 24, series: null }, 
   light: { scopes: null, key: '', data: null, seq: 0 },
   diary: { books: null, book: 'public', index: -1, showIntro: false, dates: {}, days: {}, wantDate: '', seq: 0, token: '', autoImport: false },
   upkeep: { queue: null, preview: null },
@@ -391,6 +392,7 @@ function buildTabs() {
     { id: 'persona', label: '性格', count: S.persona?.pending },
     { id: 'emotion', label: '情绪' },
     { id: 'memes', label: '玩梗' },
+    { id: 'cost', label: '花费' },
     { id: 'library', label: '长期记忆', count: S.overview?.active },
     { id: 'light', label: '轻量记忆', count: S.overview?.light?.total },
     { id: 'diary', label: '日记', count: S.overview?.diary?.count },
@@ -484,7 +486,7 @@ function route(force = false) {
     if (params.get('book') === 'private' || params.get('book') === 'public') S.diary.book = params.get('book')
     if (params.get('date')) { S.diary.wantDate = params.get('date'); S.diary.showIntro = false }
   }
-  if (!['overview', 'graph', 'persona', 'emotion', 'memes', 'library', 'light', 'diary', 'upkeep'].includes(tab)) { go('overview', { replace: true }); return }
+  if (!['overview', 'graph', 'persona', 'emotion', 'memes', 'cost', 'library', 'light', 'diary', 'upkeep'].includes(tab)) { go('overview', { replace: true }); return }
   if (tab !== S.tab || force) {
     const changed = tab !== S.tab
     S.tab = tab
@@ -528,6 +530,7 @@ function paintCurrent() {
   else if (S.tab === 'persona') { mainEl.appendChild(renderPersona()); if (!S.persona && !S.personaLoading) void loadPersona(); if (S.chatProfiles === null) void loadChatProfiles() }
   else if (S.tab === 'emotion') { mainEl.appendChild(renderEmotion()); if (!S.emotion && !S.emotionLoading) void loadEmotion() }
   else if (S.tab === 'memes') { mainEl.appendChild(renderMemes()); if (!S.memes.data && !S.memes.loading) void loadMemes() }
+  else if (S.tab === 'cost') { mainEl.appendChild(renderCost()); if (!S.cost.data && !S.cost.loading) void loadCost() }
   else if (S.tab === 'library') mainEl.appendChild(renderLibrary())
   else if (S.tab === 'light') mainEl.appendChild(renderLight())
   else if (S.tab === 'diary') mainEl.appendChild(renderDiary())
@@ -1306,6 +1309,229 @@ function renderMemes() {
     ),
   )
   return el('section', { class: 'stack' }, settingsCard, searchCard)
+}
+
+async function loadCost() {
+  if (S.cost.loading) return
+  S.cost.loading = true
+  try {
+    const [usage, keys, series] = await Promise.all([
+      api('/usage'),
+      api('/context/keys').catch(() => ({ keys: [] })),
+      api(`/usage/series?hours=${S.cost.hours || 24}`).catch(() => null),
+    ])
+    S.cost.data = usage
+    S.cost.data.series = series
+    S.cost.series = series
+    S.cost.labels = new Map((keys.keys || []).map((k) => [k.key, k.label]))
+  } catch (error) {
+    toast(error.message, 'error')
+  } finally {
+    S.cost.loading = false
+    if (S.tab === 'cost') paintCurrent()
+  }
+}
+
+async function loadCostSeries(hours) {
+  S.cost.hours = hours
+  try {
+    S.cost.series = await api(`/usage/series?hours=${hours}`)
+  } catch (error) {
+    toast(error.message, 'error')
+  }
+  if (S.tab === 'cost') paintCurrent()
+}
+function bucketTotal(b) {
+  if (!b) return 0
+  return Number(b.cacheMiss || 0) + Number(b.cacheHit || 0) + Number(b.cacheWrite || 0) + Number(b.output || 0) + Number(b.reasoning || 0)
+}
+
+function fmtNum(n) {
+  const v = Number(n) || 0
+  if (v >= 1e8) return (v / 1e8).toFixed(2) + ' 亿'
+  if (v >= 1e4) return (v / 1e4).toFixed(2) + ' 万'
+  return String(Math.round(v))
+}
+
+function renderCostChart(d) {
+  const payload = d.series
+  if (!payload || !payload.series) {
+    return el('div', { class: 'card pad muted', style: { marginBottom: '14px' }, text: '时间统计需要新版后端；重启 DSH 后显示。' })
+  }
+  const s = payload.series
+  const buckets = Array.isArray(s.buckets) ? s.buckets : []
+  const bucketMs = Number(s.bucketMs) || 3600000
+  const turns = Array.isArray(payload.pluginTurns) ? payload.pluginTurns : []
+  const byBucket = new Map()
+  for (const t of turns) {
+    const at = Number(t.startedAt || t.endedAt) || 0
+    if (!at) continue
+    const key = Math.floor(at / bucketMs) * bucketMs
+    const cur = byBucket.get(key) || { cost: 0, tokens: 0 }
+    cur.cost += Number(t.cost) || 0
+    const b = t.buckets || {}
+    cur.tokens += (Number(b.cacheMiss) || 0) + (Number(b.cacheHit) || 0) + (Number(b.cacheWrite) || 0) + (Number(b.output) || 0)
+    byBucket.set(key, cur)
+  }
+  const shown = buckets.slice(-Math.min(buckets.length, 28))
+  const maxCost = Math.max(0.000001, ...shown.map((b) => Number(b.cost) || 0))
+  const total = shown.reduce((n, b) => n + (Number(b.cost) || 0), 0)
+  const pluginTotal = shown.reduce((n, b) => n + (byBucket.get(Number(b.t))?.cost || 0), 0)
+  const label = (t) => {
+    const dt = new Date(Number(t) || 0)
+    if (bucketMs >= 86400000) return `${dt.getMonth() + 1}/${dt.getDate()}`
+    if (bucketMs >= 3600000) return `${String(dt.getHours()).padStart(2, '0')}:00`
+    return `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`
+  }
+  const period = (hours, text) => el('button', {
+    class: 'btn' + (S.cost.hours === hours ? ' primary' : ''),
+    on: { click: () => void loadCostSeries(hours) },
+  }, text)
+  return el('div', { class: 'card pad', style: { marginBottom: '14px' } },
+    el('div', { class: 'section-head', style: { flexWrap: 'wrap' } },
+      el('h2', { class: 'h2', text: '时间统计' }),
+      el('span', { class: 'muted small', text: `总 ${cur0(total)} · 可塑性记忆 ${cur0(pluginTotal)}` }),
+      el('span', { style: { flex: 1 } }),
+      period(24, '24 小时'), period(24 * 7, '7 天'), period(24 * 30, '30 天'),
+    ),
+    el('div', { style: { display: 'flex', alignItems: 'flex-end', gap: '2px', height: '150px', overflowX: 'auto', marginTop: '10px' } },
+      shown.map((b) => {
+        const t = Number(b.t) || 0
+        const cost = Number(b.cost) || 0
+        const p = byBucket.get(t) || { cost: 0, tokens: 0 }
+        const h = Math.max(1, (cost / maxCost) * 100)
+        const ph = cost > 0 ? Math.max(0, Math.min(100, (p.cost / cost) * 100)) : 0
+        return el('div', {
+          title: `${label(t)} 总 ¥${cost.toFixed(2)} · 插件 ¥${p.cost.toFixed(2)}`,
+          style: { flex: '1', minWidth: '8px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' },
+        }, el('div', {
+          style: { height: h + '%', background: '#31546b', borderRadius: '3px 3px 0 0', position: 'relative', minHeight: '2px' },
+        }, ph > 0 ? el('div', {
+          style: { position: 'absolute', bottom: 0, left: 0, right: 0, height: ph + '%', background: '#7fd6e6', borderRadius: '3px 3px 0 0' },
+        }) : null))
+      }),
+    ),
+    el('div', { class: 'muted small', style: { display: 'flex', gap: '14px', marginTop: '8px' } },
+      el('span', { text: '总花费' }), el('span', { text: '青色 = 可塑性记忆' }),
+      el('span', { style: { marginLeft: 'auto' }, text: shown.length ? label(shown[0].t) + ' → ' + label(shown[shown.length - 1].t) : '' }),
+    ),
+  )
+}
+
+function cur0(n) {
+  return '¥' + (Number(n) || 0).toFixed(2)
+}
+
+function renderCost() {
+  const d = S.cost.data
+  if (!d) return el('div', { class: 'empty', text: '正在算账…' })
+  const t = d.tokens || {}
+  const totals = t.totals || {}
+  const cur = t.symbol || '¥'
+  const mem = d.memory || {}
+  const list = Array.isArray(t.conversations) ? t.conversations : []
+  const pluginRows = list.filter((c) => String(c.key || '').startsWith('internal:可塑性记忆'))
+  const legacyRows = list.filter((c) => String(c.key || '') === 'internal:黑话学习')
+  const pluginCost = pluginRows.reduce((n, c) => n + (Number(c.cost) || 0), 0)
+  const pluginTokens = pluginRows.reduce((n, c) => n + bucketTotal(c.buckets), 0)
+  const legacyCost = legacyRows.reduce((n, c) => n + (Number(c.cost) || 0), 0)
+  const legacyTokens = legacyRows.reduce((n, c) => n + bucketTotal(c.buckets), 0)
+  const totalCost = Number(totals.cost) || 0
+  const totalTokens = Number(totals.totalTokens) || 0
+  const unattrCost = Number(totals.unattributedCost) || 0
+  const roleCost = Math.max(0, totalCost - pluginCost - legacyCost - unattrCost)
+  const roleTokens = Math.max(0, totalTokens - pluginTokens - legacyTokens)
+  const pct = totalCost > 0 ? Math.round((pluginCost / totalCost) * 100) : 0
+  const colors = { plugin: '#7fd6e6', role: '#6aa9ff', legacy: '#f0c987', unattr: '#5a6a72' }
+  const segs = [
+    ['可塑性记忆', pluginCost, colors.plugin],
+    ['角色对话', roleCost, colors.role],
+    ['历史内部', legacyCost, colors.legacy],
+    ['未归属', unattrCost, colors.unattr],
+  ].filter(([, v]) => Number(v) > 0)
+  let acc = 0
+  const stops = []
+  for (const [name, value, color] of segs) {
+    const from = totalCost > 0 ? (acc / totalCost) * 100 : 0
+    acc += Number(value)
+    const to = totalCost > 0 ? (acc / totalCost) * 100 : 0
+    stops.push(`${color} ${from.toFixed(2)}% ${to.toFixed(2)}%`)
+  }
+  const donutBg = stops.length ? `conic-gradient(${stops.join(',')})` : 'conic-gradient(#24424d 0 100%)'
+  const card = (label, value, note, color) => el('div', {
+    class: 'card pad',
+    style: { minWidth: '150px', flex: '1', borderLeft: `3px solid ${color}` },
+  },
+  el('div', { class: 'muted small', text: label }),
+  el('div', { style: { fontSize: '24px', fontWeight: '600', margin: '4px 0' }, text: value }),
+  note ? el('div', { class: 'muted small', text: note }) : null,
+  )
+  const legend = (label, value, color) => el('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' } },
+    el('i', { style: { width: '10px', height: '10px', borderRadius: '3px', background: color, display: 'inline-block' } }),
+    el('span', { text: label + '：' + cur + Number(value).toFixed(2) }),
+  )
+  const colorOf = (key) => String(key || '').startsWith('internal:可塑性记忆') ? colors.plugin
+    : String(key || '') === 'internal:黑话学习' ? colors.legacy
+      : String(key || '').startsWith('unattributed') ? colors.unattr : colors.role
+  const rows = list.filter((c) => bucketTotal(c.buckets) > 0 || Number(c.cost) > 0)
+  return el('section', { class: 'stack' },
+    el('div', { class: 'section-head' },
+      el('h2', { class: 'h2', text: 'Token 与花费' }),
+      el('span', { class: 'muted small', text: '只统计可塑性记忆自身，并与角色对话、历史内部做对比；价格按模型价目表折算。' }),
+    ),
+    el('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' } },
+      card('可塑性记忆', cur + pluginCost.toFixed(2), '占 ' + pct + '% · ' + fmtNum(pluginTokens) + ' tokens', colors.plugin),
+      card('角色对话', cur + roleCost.toFixed(2), fmtNum(roleTokens) + ' tokens', colors.role),
+      card('历史内部', cur + legacyCost.toFixed(2), '旧标签，未计入插件', colors.legacy),
+      card('总花费', cur + totalCost.toFixed(2), (t.currency || '') + ' · ' + (totals.turns || 0) + ' 轮', '#8fb0ba'),
+    ),
+    el('div', { class: 'card pad', style: { display: 'flex', gap: '20px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' } },
+      el('div', {
+        style: {
+          width: '120px', height: '120px', borderRadius: '50%', flex: '0 0 auto',
+          background: donutBg, display: 'grid', placeItems: 'center',
+        },
+      }, el('div', {
+        style: {
+          width: '82px', height: '82px', borderRadius: '50%', background: '#0e222a',
+          display: 'grid', placeItems: 'center', fontSize: '22px', fontWeight: '600',
+        }, text: pct + '%' })),
+      el('div', { class: 'muted small', style: { lineHeight: '1.9', flex: '1', minWidth: '220px' } },
+        el('div', { style: { color: 'var(--ink)', fontSize: '14px' }, text: '花费构成' }),
+        legend('可塑性记忆', pluginCost, colors.plugin),
+        legend('角色对话/其他', roleCost, colors.role),
+        legacyCost > 0 ? legend('历史内部（未计入）', legacyCost, colors.legacy) : null,
+        unattrCost > 0 ? legend('未归属', unattrCost, colors.unattr) : null,
+      ),
+    ),
+    renderCostChart(d),
+    el('div', { class: 'card pad', style: { marginBottom: '14px' } },
+      el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '记忆库占用' })),
+      el('div', { class: 'muted small', style: { lineHeight: '1.9' } },
+        '原文 ' + (mem.messages || 0) + ' 条 · 摘要 ' + (mem.summaries || 0) + ' 条 · 长期记忆 ' + (mem.memories || 0) + ' 条',
+        el('br'), '数据库：' + (mem.db || '—'),
+      ),
+    ),
+    rows.length ? el('div', null,
+      el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '按聊天' }), el('span', { class: 'muted small', text: '点开看明细' })),
+      rows.slice(0, 30).map((c) => el('details', {
+        class: 'card pad',
+        style: { marginBottom: '8px', borderLeft: `3px solid ${colorOf(c.key)}` },
+      },
+      el('summary', { style: { cursor: 'pointer', display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' } },
+        el('b', { text: c.label || S.cost.labels?.get(c.key) || c.key }),
+        el('span', { class: 'muted small', text: `${fmtNum(bucketTotal(c.buckets))} tokens · ${cur}${(Number(c.cost) || 0).toFixed(2)}` }),
+      ),
+      el('div', { class: 'muted small', style: { marginTop: '8px', lineHeight: '1.8' } },
+        '输入 ' + fmtNum((Number(c.buckets?.cacheMiss) || 0) + (Number(c.buckets?.cacheHit) || 0) + (Number(c.buckets?.cacheWrite) || 0))
+        + ' · 输出 ' + fmtNum(c.buckets?.output)
+        + ' · 缓存命中 ' + (((Number(c.buckets?.cacheHit) || 0) / Math.max(1, (Number(c.buckets?.cacheMiss) || 0) + (Number(c.buckets?.cacheHit) || 0) + (Number(c.buckets?.cacheWrite) || 0))) * 100).toFixed(1) + '%',
+        el('br'),
+        '轮次 ' + (c.turns || 0) + ' · 步骤 ' + (c.steps || 0) + ' · 会话 ' + (c.sessions || 0) + ' · 模型 ' + ((c.models || []).join(' / ') || '—'),
+      ),
+      )),
+    ) : null,
+  )
 }
 
 function renderLight() {
