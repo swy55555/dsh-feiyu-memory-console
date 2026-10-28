@@ -140,7 +140,7 @@ node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
 node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
 ```
 
-- 一条命令按顺序装齐 6 个补丁；`--check` 只检查，`--apply` 安装，`--undo` 按相反顺序撤销。
+- 一条命令按顺序装齐全部桥接补丁（含记忆共享、群目录、花费归属）；`--check` 只检查，`--apply` 安装，`--undo` 按相反顺序撤销。
 - 单项安装器仍保留在 `bridge/install-*.mjs`，排查时可单独跑。
 - `--check` 报 `incompatible` 就不要 `--apply`：说明 `bridge.js` 与补丁版本不匹配，先看 [UPGRADE.md](UPGRADE.md)。
 - 补丁会备份原文件并写回执；撤销用 `--undo`。
