@@ -23,7 +23,7 @@ export function loadMemePlayConfig(stateDir) {
   try {
     const file = `${stateDir}/meme-play.json`;
     if (!fs.existsSync(file)) return { ...DEFAULT_CONFIG };
-    const raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\\uFEFF/, ''));
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
     return { ...DEFAULT_CONFIG, ...(raw && typeof raw === 'object' ? raw : {}) };
   } catch {
     return { ...DEFAULT_CONFIG };
