@@ -55,7 +55,7 @@ export function buildHumanContext({ key, subjectId = '', currentMessage = '', pr
       if (r.status !== undefined && r.status !== 'active') continue;
       if (r.expires_at !== undefined && (!Number.isFinite(Number(r.expires_at)) || (Number(r.expires_at) !== 0 && Number(r.expires_at) * 1000 <= now))) continue;
       const score = Number(r.score);
-      if (!Number.isFinite(score) || score < .4) continue;
+      if (!r.associated && (!Number.isFinite(score) || score < .4)) continue;
       const tier = r.tier ?? r.retrieval?.tier ?? 'normal';
       if (isPriority && !['core', 'task'].includes(tier)) continue;
       const who = String(r.evidence?.subjectId ?? r.subject_id ?? (isPriority ? subject : ''));
@@ -71,7 +71,7 @@ export function buildHumanContext({ key, subjectId = '', currentMessage = '', pr
       }
       const hasSource = Boolean(r.evidence?.sourceId || r.source_id);
       const sourceAt = hasSource ? time(r.evidence?.sourceTime, true) || time(r.source_time) : null;
-      byId.set(r.id, { id: r.id, scope, who, text, tier, score, related: !isPriority,
+      byId.set(r.id, { id: r.id, scope, who, text, tier, score, related: !isPriority, associated: r.associated === true, kind: r.associated ? 'associated' : isPriority ? 'priority' : r.shared ? 'shared' : 'search',
         at: sourceAt || time(r.created_at), timeBasis: sourceAt ? 'source' : 'stored' });
     }
   }
@@ -94,6 +94,7 @@ export function buildHumanContext({ key, subjectId = '', currentMessage = '', pr
       kind: r.tier === 'task' ? 'plan-not-known-complete' : r.tier === 'core' ? 'long-term' : 'past-statement', text: r.text });
     if (used + line.length + 1 > budget) continue;
     lines.push(line); used += line.length + 1;
+    try { options.onSelect?.(r); } catch {}
     seen.add(r.id); contentSeen.add(identity);
     if (r.tier === 'task') tasks++;
     if (lines.length >= maxItems) break;

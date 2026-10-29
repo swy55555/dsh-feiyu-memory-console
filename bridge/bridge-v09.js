@@ -3307,14 +3307,19 @@ async function main() {
     const traceId = `tr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       fs.appendFileSync(retrievalTraceFile, JSON.stringify({ at: Date.now(), traceId, ...data }) + '\n');
-      if (data && data.key) activeTraceByKey.set(data.key, traceId);
+      if (data && data.key) {
+        const list = activeTraceByKey.get(data.key) || [];
+        list.push(traceId);
+        activeTraceByKey.set(data.key, list.slice(-20));
+      }
     } catch {}
     return traceId;
   }
   function recordTraceReply(key, info) {
-    const traceId = activeTraceByKey.get(key);
+    const list = activeTraceByKey.get(key) || [];
+    const traceId = list.shift();
     if (!traceId) return;
-    activeTraceByKey.delete(key);
+    if (list.length) activeTraceByKey.set(key, list); else activeTraceByKey.delete(key);
     try {
       fs.appendFileSync(retrievalReplyFile, JSON.stringify({ at: Date.now(), traceId, key, ...info }) + '\n');
     } catch {}
@@ -3333,7 +3338,11 @@ async function main() {
     // Truncated queries fall back to ordinary recall rather than guessing intent.
     const prefix = subjectId ? subjectId + ' ' : '';
     const currentMessage = prefix && latestQuery.startsWith(prefix) ? latestQuery.slice(prefix.length) : '';
-    const compose = (priorityRows = [], searchRows = []) => buildHumanContext({ key, subjectId, currentMessage, priorityRows, searchRows, options: humanOptions }) + promptText;
+    const traceSelected = [];
+    const compose = (priorityRows = [], searchRows = []) => {
+      traceSelected.length = 0;
+      return buildHumanContext({ key, subjectId, currentMessage, priorityRows, searchRows, options: { ...humanOptions, onSelect: (r) => traceSelected.push(r) } }) + promptText;
+    };
     // 摘要层 + 原文层：都从 memvec 取。原文只补窗口之前，摘要补整段大意。
     let summaryBlock = '';
     let sessionBlock = '';
@@ -3395,19 +3404,21 @@ async function main() {
             id: j.results[0].id,
             scope: memoryScope(key),
             limit: Math.max(1, Math.min(2, Number(assocCfg.maxExtra) || 1)),
+            include_global: shareCfg.enabled === true,
           }, 1000);
           associatedRows = (Array.isArray(ar.results) ? ar.results : []).map((r) => ({ ...r, associated: true }));
         } catch {}
       }
       if (human) {
         const merged = [...(j.results || []), ...sharedRows.map((r) => ({ ...r, shared: true })), ...associatedRows];
+        const composed = compose(priority.results, merged);
         recordRetrievalTrace({
           key, query, mode: 'human', reason: merged.length ? 'ok' : 'no-memory',
           durationMs: Date.now() - traceStart,
-          candidates: [...(priority.results || []).map((r) => traceRow(r, 'priority')), ...merged.map((r) => traceRow(r, r.shared ? 'shared' : 'search'))],
-          injected: merged.map((r) => traceRow(r, r.shared ? 'shared' : r.associated ? 'associated' : 'search')),
+          candidates: [...(priority.results || []).map((r) => traceRow(r, 'priority')), ...merged.map((r) => traceRow(r, r.shared ? 'shared' : r.associated ? 'associated' : 'search'))],
+          injected: traceSelected.map((r) => traceRow(r, r.kind || 'search')),
         });
-        return summaryBlock + sessionBlock + compose(priority.results, merged);
+        return summaryBlock + sessionBlock + composed;
       }
       const unique = new Map();
       for (const r of [...(priority.results || []), ...(j.results || [])]) if (!unique.has(r.id)) unique.set(r.id, r);

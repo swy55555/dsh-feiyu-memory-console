@@ -700,7 +700,7 @@ def _cached_memory_matrix(conn, scope: str, shared: bool = False, include_global
     return rows, mat
 
 
-def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2) -> list[dict]:
+def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2, include_global: bool = False) -> list[dict]:
     """只沿 fact_key / source_id 走一跳；不递归、不扩散。"""
     scope = valid_scope(scope)
     mid = str(memory_id or '').strip()
@@ -726,9 +726,10 @@ def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2) -
             params.append(source_id)
         if not clauses:
             return []
+        scope_sql = "(scope=? OR scope='global')" if include_global else "scope=?"
         sql = ("SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at,fact_key FROM memories "
-               "WHERE status='active' AND id <> ? AND (scope=? OR scope='global') AND (" + " OR ".join(clauses) + ") LIMIT 12")
-        rows = conn.execute(sql, params).fetchall()
+               "WHERE status='active' AND id <> ? AND " + scope_sql + " AND (expires_at=0 OR expires_at > ?) AND (" + " OR ".join(clauses) + ") LIMIT 12")
+        rows = conn.execute(sql, [*params, time.time()]).fetchall()
         out = []
         for r in rows:
             if not _shareable(r, r[3]):
@@ -738,7 +739,8 @@ def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2) -
                 'id': r[0], 'text': r[1], 'tags': r[2], 'scope': r[3],
                 'importance': r[4], 'created_at': r[5], 'last_access': r[6],
                 'tier': r[10], 'source_id': r[11], 'source_time': r[13],
-                'subject_id': r[14], 'confidence': r[15], 'reason': reason,
+                'subject_id': r[14], 'confidence': r[15], 'expires_at': r[16],
+                'status': 'active', 'score': 0.5, 'reason': reason,
             })
             if len(out) >= limit:
                 break
@@ -1129,7 +1131,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {"ok": True, **context_stats(b.get("key", ""))})
             elif self.path == "/associate":
                 b = self._body()
-                r = associate_memory(b.get("id", ""), b.get("scope"), int(b.get("limit", 2)))
+                r = associate_memory(b.get("id", ""), b.get("scope"), int(b.get("limit", 2)), bool(b.get("include_global", False)))
                 self._send(200, {"ok": True, "results": r})
             elif self.path == "/search":
                 b = self._body()

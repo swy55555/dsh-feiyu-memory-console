@@ -1,4 +1,12 @@
-﻿# 0.8.8 — 每轮依据与纠错入口（2026-10-29）
+﻿# 0.8.9 — trace 准确性与关联边界（2026-10-29）
+
+- **trace 等于最终注入**：`buildHumanContext` 通过 `onSelect` 回传真正进入提示词的记录；priority 也计入，预算淘汰/低分/去重不再被误标为注入。
+- **关联准入修正**：`/associate` 支持 `include_global`（默认 false），过滤 `expires_at`，返回 `expires_at/status/tier`；human-context 对关联行不再用普通 score 门槛误杀，最终文本标 `association-not-fact`。
+- **回复绑定队列**：同一聊天按顺序绑定最早待回复 trace，不再只保留最后一个。
+- **页面**：显示待回复/已回复/失败，以及 kind、subject、reasons。
+- 安装包内 `bridge-v09.js` / `human-context-v09.mjs` 已同步本轮修复。
+
+# 0.8.8 — 每轮依据与纠错入口（2026-10-29）
 
 - **每轮 trace**：记录查询、候选、`kind/scope/score/subject/tags/reasons`、最终注入、耗时；回复成功/失败通过 `traceId` 绑定到对应轮次。
 - **会话上下文页**：新增「最近记忆注入」卡片，可看候选、注入、来源、分数、回复状态。
