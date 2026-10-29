@@ -1,4 +1,13 @@
-﻿# 0.8.4 — 发布质量修复（2026-10-29）
+﻿# 0.8.5 — 复核问题闭环（2026-10-29）
+
+- **发布一致性**：完整源码提交后打 tag；tag 文件树与源码 ZIP/TGZ 一致，补齐 `bin/`、`test/`、`web/context.html`、`bridge/install.mjs` 等缺失文件。
+- **0.8.3 桥接可升级**：runtime-extras 增加内容检查，旧版已安装也会补 `include_global=false`、opt-in 条件和 human-context 共享放行；重复执行幂等。
+- **共享结果能进最终提示词**：`buildHumanContext` 只对标记 `shared:true` 的授权结果放行，未授权外部 scope 仍被拒绝。
+- **普通检索不再带 global**：`include_global` 固定 false；只有共享开启时由独立共享检索带入 global，并统一过隐私过滤。
+- **opt-in**：共享默认关闭，配置缺失/关闭/开启三种状态都有明确行为。
+- **测试**：npm 7/7、Python 13/13；新增共享行进入 human context 的验证。
+
+# 0.8.4 — 发布质量修复（2026-10-29）
 
 - **共享功能真正接通**：随包 memvec `/search` 现在读取 `shared`、`exclude_scope`、`include_global`；跨聊天检索有实现，不再只是桥接发送参数。
 - **关闭共享后不再召回旧 global**：`include_global=false` 时普通检索只查当前聊天；开启共享时才由共享检索带入 global（仍然过滤隐私）。

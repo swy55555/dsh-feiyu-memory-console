@@ -1,0 +1,25 @@
+{
+  "round": 2,
+  "conditions": {
+    "baseline": "first-round candidate",
+    "candidate": "second-round revision"
+  },
+  "cases": 12,
+  "retest": 6,
+  "new": 6,
+  "samplesPerCondition": 1,
+  "designFrozenBeforeGeneration": true,
+  "baselineHash": "34ddabc5290fc7b3c60af7da576da3fe567bf5464201952d05028a3874e63260",
+  "candidateHash": "72a2a1007c1dceed22592f16f0e81f0ccd906eb8410840538d01b9b6c0d53801",
+  "promptsHash": "af00a5dab6dba5b15f04a0357dce676d7d94c16e8beff0982246a8a21b1a7715",
+  "modelCallsPlanned": 24,
+  "primary": "user blind naturalness preference",
+  "secondary": "user context-fit preference",
+  "limitations": [
+    "one rater",
+    "one sample per condition per scenario",
+    "synthetic generic persona",
+    "no significance claim",
+    "retain every successful output unchanged"
+  ]
+}

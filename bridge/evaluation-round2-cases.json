@@ -1,0 +1,96 @@
+[
+  {
+    "id": "listen",
+    "history": "用户：准备面试。",
+    "memory": "我明天去面试，有点紧张",
+    "current": "没过，今天不想听建议，只想吐槽。",
+    "check": "针对具体遭遇回应，尊重只想倾诉。",
+    "set": "retest"
+  },
+  {
+    "id": "help",
+    "history": "用户：准备面试。",
+    "memory": "我明天去面试，有点紧张",
+    "current": "面试没过，想复盘一下，你帮我列两步就好。",
+    "check": "给两步具体帮助，不只安慰。",
+    "set": "retest"
+  },
+  {
+    "id": "positive",
+    "history": "用户：练习做饭。",
+    "memory": "我准备学做番茄炒蛋",
+    "current": "今天终于没糊！我还给它拍了照。",
+    "check": "自然回应喜悦，不机械说抱歉或焦虑。",
+    "set": "retest"
+  },
+  {
+    "id": "ordinary",
+    "history": "用户：刚到家。",
+    "memory": "我最近在学做饭",
+    "current": "二加二是多少？",
+    "check": "直接回答，不硬聊做饭、不强行共情。",
+    "set": "retest"
+  },
+  {
+    "id": "shared-experience",
+    "history": "用户：给你看过一张猫照片。",
+    "memory": "我上周给你看了我家猫的照片",
+    "current": "你记得那只猫吗？",
+    "check": "只能提已有细节，不编造颜色、名字、一起养猫经历。",
+    "set": "retest"
+  },
+  {
+    "id": "topic-boundary",
+    "history": "用户：准备面试。",
+    "memory": "我准备去面试",
+    "current": "别再问面试了，我们聊聊猫。",
+    "check": "不提面试，不重复追问。",
+    "set": "retest"
+  },
+  {
+    "id": "arithmetic-new",
+    "history": "用户：上周准备去旅行。",
+    "memory": "我准备去杭州旅游",
+    "current": "请计算 7 × 8 等于多少？",
+    "set": "new"
+  },
+  {
+    "id": "one-sentence",
+    "history": "用户：最近练习游泳。",
+    "memory": "我准备学习游泳",
+    "current": "用一句话解释什么是彩虹。",
+    "set": "new"
+  },
+  {
+    "id": "new-success",
+    "history": "用户：最近在练车。",
+    "memory": "我准备考驾照",
+    "current": "驾照拿到了！最后一把一遍过，我现在走路都带风。",
+    "set": "new"
+  },
+  {
+    "id": "new-frustration",
+    "history": "用户：昨晚认真做了汇报准备。",
+    "memory": "我昨晚准备汇报到十二点",
+    "current": "讲到一半投影坏了，前面白准备了，烦死。今天别给我讲道理。",
+    "set": "new"
+  },
+  {
+    "id": "exact-output",
+    "history": "用户：准备学习游泳。",
+    "memory": "我准备学习游泳",
+    "tier": "task",
+    "priorityOnly": true,
+    "current": "只回“晚安”，不要加别的。",
+    "set": "new"
+  },
+  {
+    "id": "changed-plan",
+    "history": "用户：周末准备跑步。",
+    "memory": "我周末准备去跑步",
+    "tier": "task",
+    "priorityOnly": true,
+    "current": "跑步计划取消啦。推荐一部适合周末放松看的电影，直接给片名就好。",
+    "set": "new"
+  }
+]

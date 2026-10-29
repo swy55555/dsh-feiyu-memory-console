@@ -1,0 +1,27 @@
+[
+  {
+    "name": "import",
+    "before": "import { DailyMemory, recallQuery, recallBlock, memoryScope, parseMemoryCommand, memoryCommandReply } from './daily-memory.js';",
+    "after": "import { DailyMemory, recallQuery, recallBlock, memoryScope, parseMemoryCommand, memoryCommandReply } from './daily-memory.js';\nimport { buildHumanContext, humanContextEnabled } from './human-context.mjs';"
+  },
+  {
+    "name": "memory-context",
+    "before": "  async function withMemoryContext(key, promptText) {\n    if (cfg.socialV2?.memoryRecall?.enabled === false) return promptText;\n    try {\n      const st = getSocialV2State(key);\n      const query = dailyRecallQueries.get(key) || recallQuery(st.recentMessages || []) || '';\n      if (!query) return promptText;\n      const priority = await memoryRequest('/priority', { scope: memoryScope(key), subject_id: dailyMemorySubjects.get(key) || (key.startsWith('private:') ? key.slice(8) : '') }, 1200).catch(() => ({ results: [] }));\n      const res = await fetch(`http://127.0.0.1:${cfg.socialV2?.memoryRecall?.port ?? 9881}/search`, {\n        method: 'POST',\n        headers: { 'content-type': 'application/json' },\n        body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3) }),\n        signal: AbortSignal.timeout(Number(cfg.socialV2?.memoryRecall?.timeoutMs ?? 1200))\n      });\n      if (!res.ok) throw new Error(`memory HTTP ${res.status}`);\n      const j = await res.json();\n      const unique = new Map();\n      for (const r of [...(priority.results || []), ...(j.results || [])]) if (!unique.has(r.id)) unique.set(r.id, r);\n      const rows = [...unique.values()].filter((r) => Number(r.score) >= 0.4);\n      if (!rows.length) return promptText;\n      log(`memory recall injected: ${rows.length} 条`);\n      return recallBlock(rows) + promptText;\n    } catch (error) {\n      log(`memory recall unavailable: ${error?.message || error}`);\n      return promptText;\n    }\n  }\n",
+    "after": "  async function withMemoryContext(key, promptText) {\n    const humanOptions = cfg.socialV2?.humanContext ?? {};\n    const human = humanContextEnabled(humanOptions);\n    const subjectId = dailyMemorySubjects.get(key) || (key.startsWith('private:') ? key.slice(8) : '');\n    const compose = (priorityRows = [], searchRows = []) => buildHumanContext({ key, subjectId, priorityRows, searchRows, options: humanOptions }) + promptText;\n    if (cfg.socialV2?.memoryRecall?.enabled === false) return human ? compose() : promptText;\n    try {\n      const st = getSocialV2State(key);\n      const query = dailyRecallQueries.get(key) || recallQuery(st.recentMessages || []) || '';\n      if (!query) return human ? compose() : promptText;\n      const priority = await memoryRequest('/priority', { scope: memoryScope(key), subject_id: subjectId }, 1200).catch(() => ({ results: [] }));\n      const res = await fetch(`http://127.0.0.1:${cfg.socialV2?.memoryRecall?.port ?? 9881}/search`, {\n        method: 'POST',\n        headers: { 'content-type': 'application/json' },\n        body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3) }),\n        signal: AbortSignal.timeout(Number(cfg.socialV2?.memoryRecall?.timeoutMs ?? 1200))\n      });\n      if (!res.ok) throw new Error(`memory HTTP ${res.status}`);\n      const j = await res.json();\n      if (human) return compose(priority.results, j.results);\n      const unique = new Map();\n      for (const r of [...(priority.results || []), ...(j.results || [])]) if (!unique.has(r.id)) unique.set(r.id, r);\n      const rows = [...unique.values()].filter((r) => Number(r.score) >= 0.4);\n      if (!rows.length) return promptText;\n      log(`memory recall injected: ${rows.length} 条`);\n      return recallBlock(rows) + promptText;\n    } catch (error) {\n      log(`memory recall unavailable: ${error?.message || error}`);\n      return human ? compose() : promptText;\n    }\n  }\n"
+  },
+  {
+    "name": "withStyleNudge(promptText)",
+    "before": "  function withStyleNudge(promptText) {",
+    "after": "  function withStyleNudge(promptText) {\n    if (humanContextEnabled(cfg.socialV2?.humanContext)) return promptText;"
+  },
+  {
+    "name": "withQzoneNudge(key, promptText)",
+    "before": "  function withQzoneNudge(key, promptText) {",
+    "after": "  function withQzoneNudge(key, promptText) {\n    if (humanContextEnabled(cfg.socialV2?.humanContext)) return promptText;"
+  },
+  {
+    "name": "remove-random-bad-replies",
+    "before": "    const antiAiLine = '【反AI味】你不是客服：不用有求必应，可以装傻、已读乱回、拒绝推荐；少用“一绝/真管用/保证/绝对”这类词。\\n\\n';",
+    "after": "    const antiAiLine = humanContextEnabled(cfg.socialV2?.humanContext) ? '' : '【反AI味】你不是客服：不用有求必应，可以装傻、已读乱回、拒绝推荐；少用“一绝/真管用/保证/绝对”这类词。\\n\\n';"
+  }
+]

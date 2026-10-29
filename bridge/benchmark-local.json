@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-28",
+  "node": "v24.19.0",
+  "machineLocalOnly": true,
+  "iterations": 5000,
+  "medianMs": 0.03390000000001692,
+  "p95Ms": 0.046899999999993724,
+  "averageMs": 0.036627479999999595,
+  "chars": {
+    "dense": {
+      "baseline": 2419,
+      "candidate": 963
+    },
+    "empty": {
+      "baseline": 0,
+      "candidate": 101
+    },
+    "single": {
+      "baseline": 371,
+      "candidate": 624
+    }
+  },
+  "additionalModelCalls": 0,
+  "additionalNetworkCalls": 0,
+  "caveat": "Synthetic local context assembly only; not token count, end-to-end latency or human-likeness.",
+  "appliesTo": "first-round module only; not the current second-round revision"
+}

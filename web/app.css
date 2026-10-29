@@ -1,4 +1,4 @@
-/* 大肥鱼的记忆 —— 深水色，一点暖光。 */
+﻿/* 大肥鱼的记忆 —— 深水色，一点暖光。 */
 
 :root {
   color-scheme: dark;
@@ -1195,6 +1195,21 @@ details.advanced[open] summary { margin-bottom: 6px; }
 .graph-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 5px; vertical-align: 1px; }
 .graph-stage { position: relative; height: clamp(380px, 56vh, 620px); border-radius: 14px; border: 1px solid var(--line); background: radial-gradient(circle at 50% 45%, rgba(127,214,230,.07), transparent 62%), rgba(0,0,0,.14); overflow: hidden; }
 .graph-canvas { display: block; width: 100%; height: 100%; }
+.graph-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+.graph-fg { position: absolute; inset: 0; z-index: 1; }
+.graph-fg canvas { display: block; }
 .emotion-pad { display: block; width: 100%; height: 340px; border: 1px solid var(--line); border-radius: 14px; background: radial-gradient(circle at 50% 45%, rgba(127,214,230,.07), transparent 62%), rgba(0,0,0,.14); }
 .graph-tip { position: absolute; max-width: 240px; padding: 8px 10px; border-radius: 10px; background: rgba(6,20,26,.94); border: 1px solid var(--line-strong); color: #e6f4f7; font-size: 12px; line-height: 1.5; white-space: pre-wrap; pointer-events: none; z-index: 2; }
 .graph-stats { margin-left: auto; font-size: 12px; color: var(--dim); }
+
+/* Inspectable source material and first-run diagnostics. */
+.startup-checks { margin-bottom: 18px; }
+.startup-checks summary, .memory-evidence summary { cursor: pointer; color: var(--ink); }
+.startup-check { padding: 12px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.startup-check strong { display: block; margin-bottom: 5px; }
+.memory-evidence { margin-top: 10px; font-size: 13px; line-height: 1.65; }
+.memory-evidence dl { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 5px 12px; }
+.memory-evidence dt { color: var(--dim); }
+.memory-evidence dd { margin: 0; overflow-wrap: anywhere; }
+.memory-evidence blockquote { margin: 10px 0; padding: 8px 12px; border-left: 2px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .memory-evidence dl { grid-template-columns: 1fr; gap: 2px; } }

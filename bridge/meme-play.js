@@ -15,6 +15,9 @@ const DEFAULT_CONFIG = {
 const POLITICS = /政治|时政|国际|新闻|政府|体制|党派|选举|外交|领导人/;
 const SENSITIVE = /色情|成人|裸|性暗示|约炮/;
 const ATTACK = /攻击|骂|嘲讽|阴阳|怼|撕|恶意|地狱|诅咒/;
+const DOMAIN_HINTS = [
+  [/炒股|股票|股市|基金|梭哈|理财|投资/, /股市|炒股|股票|基金|理财|投资|金融/],
+];
 const STOP = new Set(['我们', '你们', '他们', '今天', '这个', '那个', '什么', '就是', '可以', '没有', '不是', '一个', '感觉', '真的', '现在', '还是', '怎么', '因为', '所以']);
 
 let _cache = { path: '', mtime: 0, rows: [] };
@@ -82,9 +85,12 @@ export function pickMemeCandidates({ dbPath, texts = [], moodValence = 0, config
     let score = 0;
     let strong = 0;
     const title = row.title;
-    if (all.includes(title)) { score += 8; strong += 1; }
-    if (used.has(title)) score += 2;
     const tagText = row.tags.toLowerCase();
+    if (all.includes(title)) { score += /^[a-z0-9-]+$/i.test(title) ? 4 : 8; strong += 1; }
+    if (used.has(title)) score += 2;
+    for (const [q, want] of DOMAIN_HINTS) {
+      if (q.test(all) && want.test(tagText)) { score += 5; strong += 1; }
+    }
     const usageText = row.usage.toLowerCase();
     for (const q of qs) {
       if (q.length < 2) continue;

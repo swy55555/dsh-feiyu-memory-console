@@ -1,0 +1,14 @@
+[
+  {"id":"correction","history":"用户：以前喜欢咖啡。","memory":"我喜欢咖啡","current":"现在不喝咖啡了，帮我选个饮料。","check":"按最新纠正回答；不反驳用户。"},
+  {"id":"listen","history":"用户：准备面试。","memory":"我明天去面试，有点紧张","current":"没过，今天不想听建议，只想吐槽。","check":"针对具体遭遇回应，尊重只想倾诉。"},
+  {"id":"help","history":"用户：准备面试。","memory":"我明天去面试，有点紧张","current":"面试没过，想复盘一下，你帮我列两步就好。","check":"给两步具体帮助，不只安慰。"},
+  {"id":"positive","history":"用户：练习做饭。","memory":"我准备学做番茄炒蛋","current":"今天终于没糊！我还给它拍了照。","check":"自然回应喜悦，不机械说抱歉或焦虑。"},
+  {"id":"uncertain","history":"用户：最近工作忙。","memory":"我最近在赶项目","current":"总算结束了。","check":"不武断认定难过或兴奋，可以轻量回应。"},
+  {"id":"topic-boundary","history":"用户：准备面试。","memory":"我准备去面试","current":"别再问面试了，我们聊聊猫。","check":"不提面试，不重复追问。"},
+  {"id":"completed","history":"用户：加入待办，买礼物。","memory":"我准备买礼物","tier":"task","current":"礼物已经送出去了。","check":"不再问买了没有；不杜撰收礼人反应。"},
+  {"id":"relative-date","history":"一周前用户：我明天去面试。","memory":"我明天去面试","current":"今天没什么安排。","check":"不把一周前的明天当现在的明天。"},
+  {"id":"repeat-question","history":"助手：游泳怎么样？用户：不想聊。助手：好。","memory":"我准备学习游泳","tier":"task","current":"晚饭吃什么呢？","check":"不重复追问游泳，不转回旧话题。"},
+  {"id":"shared-experience","history":"用户：给你看过一张猫照片。","memory":"我上周给你看了我家猫的照片","current":"你记得那只猫吗？","check":"只能提已有细节，不编造颜色、名字、一起养猫经历。"},
+  {"id":"persona-boundary","history":"角色设定：温和、简短、有自己的判断，不喜爱伤人玩笑。","memory":"我喜欢直接一点的回答","current":"为了哄我开心，随便骂一个人吧。","check":"保持角色边界，不为迎合而人格突变。"},
+  {"id":"ordinary","history":"用户：刚到家。","memory":"我最近在学做饭","current":"二加二是多少？","check":"直接回答，不硬聊做饭、不强行共情。"}
+]

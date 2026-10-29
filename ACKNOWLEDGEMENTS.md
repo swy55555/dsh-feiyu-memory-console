@@ -1,4 +1,4 @@
-# 致谢
+﻿# 致谢
 
 这个项目的起点和很多设计，不是一个人想出来的。
 
@@ -17,6 +17,7 @@
 - [BAAI bge-small-zh-v1.5](https://huggingface.co/BAAI/bge-small-zh-v1.5) 与 [FastEmbed](https://github.com/qdrant/fastembed)；
 - [force-graph](https://github.com/vasturiano/force-graph) 与 [d3-force](https://github.com/d3/d3-force)；
 - [SQLite](https://sqlite.org/)。
+- [astrbot_plugin_memewiki](https://github.com/in1t1a1/astrbot_plugin_memewiki)（MIT）：本地 6668 条梗库快照，词条内容源自 [cnmeme.wiki](https://cnmeme.wiki)。
 
 ## 思路上的参考
 

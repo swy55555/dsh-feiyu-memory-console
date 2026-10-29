@@ -13,6 +13,7 @@ const has = (x) => args.includes(x);
 const val = (x, d) => { const i = args.indexOf(x); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const target = path.resolve(val('--target', path.join(os.homedir(), '.dsh', 'qq-bridge')));
 const file = path.join(target, 'src', 'bridge.js');
+const humanContextFile = path.join(target, 'src', 'human-context.mjs');
 const receipt = path.join(target, 'state', 'runtime-extras.json');
 const die = (m) => { console.error(m); process.exit(1); };
 
@@ -25,7 +26,15 @@ const markers = {
   groups: 'async function syncGroupDirectory()',
   tokens: "'internal:可塑性记忆'",
 };
+const bodyNoGlobal = "body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3) }),";
+const bodyOldGlobal = "body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3), include_global: cfg.socialV2?.memoryShare?.enabled !== false }),";
+const bodyNewGlobal = "body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3), include_global: false }),";
 const missing = Object.entries(markers).filter(([, m]) => !src.includes(m)).map(([k]) => k);
+if (src.includes(bodyNoGlobal) || src.includes(bodyOldGlobal)) missing.push('global-scope');
+if (src.includes('if (shareCfg.enabled !== false) {')) missing.push('opt-in');
+let humanContextSource = '';
+try { humanContextSource = fs.readFileSync(humanContextFile, 'utf8'); } catch {}
+if (humanContextSource.includes("if (scope !== key && scope !== 'global') continue;")) missing.push('human-context');
 if (has('--check')) {
   console.log(missing.length ? JSON.stringify({ target, installed: false, missing }, null, 2) : 'already-installed');
   process.exit(0);
@@ -35,6 +44,7 @@ if (has('--undo')) {
   try { r = JSON.parse(fs.readFileSync(receipt, 'utf8')); } catch {}
   if (!r.backup || !fs.existsSync(r.backup)) die('没有可用的安装回执/备份');
   fs.copyFileSync(r.backup, file);
+  if (r.humanContextBackup && fs.existsSync(r.humanContextBackup)) fs.copyFileSync(r.humanContextBackup, humanContextFile);
   fs.rmSync(receipt, { force: true });
   console.log(`restored ${r.backup}`);
   process.exit(0);
@@ -44,6 +54,11 @@ if (!missing.length) { console.log('already-installed'); process.exit(0); }
 
 const backup = `${file}.bak-runtime-extras-${Date.now()}.js`;
 fs.copyFileSync(file, backup);
+let humanContextBackup = '';
+if (fs.existsSync(humanContextFile)) {
+  humanContextBackup = `${humanContextFile}.bak-runtime-extras-${Date.now()}.mjs`;
+  fs.copyFileSync(humanContextFile, humanContextBackup);
+}
 let next = src;
 
 // 1) 配置热更新：memoryShare
@@ -62,10 +77,10 @@ if (!next.includes(markers.config)) {
 }
 
 // 2) 跨聊天共享检索
+if (next.includes(bodyOldGlobal)) next = next.replace(bodyOldGlobal, bodyNewGlobal);
+else if (next.includes(bodyNoGlobal)) next = next.replace(bodyNoGlobal, bodyNewGlobal);
+next = next.replace('if (shareCfg.enabled !== false) {', 'if (shareCfg.enabled === true) {');
 if (!next.includes(markers.share)) {
-  const bodyOld = "body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3) }),";
-  const bodyNew = "body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3), include_global: cfg.socialV2?.memoryShare?.enabled !== false }),";
-  if (next.includes(bodyOld)) next = next.replace(bodyOld, bodyNew);
   const old = `      const j = await res.json();
       if (human) return summaryBlock + sessionBlock + compose(priority.results, j.results);
       const unique = new Map();
@@ -92,7 +107,7 @@ if (!next.includes(markers.share)) {
           sharedRows = Array.isArray(sr.results) ? sr.results : [];
         } catch {}
       }
-      if (human) return summaryBlock + sessionBlock + compose(priority.results, [...(j.results || []), ...sharedRows]);
+      if (human) return summaryBlock + sessionBlock + compose(priority.results, [...(j.results || []), ...sharedRows.map((r) => ({ ...r, shared: true }))]);
       const unique = new Map();
       for (const r of [...(priority.results || []), ...(j.results || [])]) if (!unique.has(r.id)) unique.set(r.id, r);
       const rows = [...unique.values()].filter((r) => Number(r.score) >= 0.4);
@@ -162,8 +177,15 @@ if (!next.includes(markers.tokens)) {
   else die('桥接版本不兼容：找不到 token 归属锚点');
 }
 
+if (humanContextSource.includes("if (scope !== key && scope !== 'global') continue;")) {
+  const patched = humanContextSource.replace(
+    "      if (scope !== key && scope !== 'global') continue;",
+    "      if (!r.shared && scope !== key && scope !== 'global') continue;",
+  );
+  fs.writeFileSync(humanContextFile, patched, 'utf8');
+}
 fs.writeFileSync(file, next, 'utf8');
 fs.mkdirSync(path.dirname(receipt), { recursive: true });
-fs.writeFileSync(receipt, JSON.stringify({ backup, installedAt: new Date().toISOString(), target }, null, 2) + '\n', 'utf8');
+fs.writeFileSync(receipt, JSON.stringify({ backup, humanContextBackup, installedAt: new Date().toISOString(), target }, null, 2) + '\n', 'utf8');
 console.log(`installed: ${file}`);
 console.log(`backup: ${backup}`);

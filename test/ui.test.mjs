@@ -12,6 +12,9 @@ import path from 'node:path'
 const CDP = 'http://127.0.0.1:9223'
 const PAGE = 'http://127.0.0.1:3999/'
 
+assert.ok(process.env.DSH_HOME && process.env.FEIYU_ALLOW_LEGACY_UI_WRITES === '1',
+  '旧版 UI 测试会修改数据库；仅可在明确设置 DSH_HOME 的测试副本中运行，并设置 FEIYU_ALLOW_LEGACY_UI_WRITES=1。日常请使用隔离的 test/browser.test.mjs。')
+
 const targets = await (await fetch(`${CDP}/json`)).json()
 const target = targets.find((t) => t.type === 'page' && t.url.startsWith(PAGE))
 assert.ok(target, '找不到控制台页面，先启动 Chrome CDP')
