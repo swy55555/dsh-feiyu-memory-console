@@ -1,4 +1,11 @@
-﻿# 0.8.5 — 复核问题闭环（2026-10-29）
+﻿# 0.8.6 — 旧版迁移补齐共享标记（2026-10-29）
+
+- **0.8.3/0.8.4 旧桥接升级**：runtime-extras 现在会把旧 `compose(..., ...sharedRows)` 迁移为给共享行加 `shared: true`；`--check` 会把缺失标记报为 `shared-flag`，不再误判 `already-installed`。
+- **0.8.5 不完整升级**：即使旧安装器已执行过一次，也能补上该标记。
+- **打包清理**：TGZ 排除 `__pycache__` / `*.pyc`，减少发布杂物。
+- 包含 0.8.5 的发布树一致性、opt-in、普通检索 global 隔离和 human-context 共享放行。
+
+# 0.8.5 — 复核问题闭环（2026-10-29）
 
 - **发布一致性**：完整源码提交后打 tag；tag 文件树与源码 ZIP/TGZ 一致，补齐 `bin/`、`test/`、`web/context.html`、`bridge/install.mjs` 等缺失文件。
 - **0.8.3 桥接可升级**：runtime-extras 增加内容检查，旧版已安装也会补 `include_global=false`、opt-in 条件和 human-context 共享放行；重复执行幂等。

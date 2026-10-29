@@ -29,9 +29,12 @@ const markers = {
 const bodyNoGlobal = "body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3) }),";
 const bodyOldGlobal = "body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3), include_global: cfg.socialV2?.memoryShare?.enabled !== false }),";
 const bodyNewGlobal = "body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3), include_global: false }),";
+const composeOld = "compose(priority.results, [...(j.results || []), ...sharedRows]);";
+const composeNew = "compose(priority.results, [...(j.results || []), ...sharedRows.map((r) => ({ ...r, shared: true }))]);";
 const missing = Object.entries(markers).filter(([, m]) => !src.includes(m)).map(([k]) => k);
 if (src.includes(bodyNoGlobal) || src.includes(bodyOldGlobal)) missing.push('global-scope');
 if (src.includes('if (shareCfg.enabled !== false) {')) missing.push('opt-in');
+if (src.includes(composeOld)) missing.push('shared-flag');
 let humanContextSource = '';
 try { humanContextSource = fs.readFileSync(humanContextFile, 'utf8'); } catch {}
 if (humanContextSource.includes("if (scope !== key && scope !== 'global') continue;")) missing.push('human-context');
@@ -78,6 +81,7 @@ if (!next.includes(markers.config)) {
 
 // 2) 跨聊天共享检索
 if (next.includes(bodyOldGlobal)) next = next.replace(bodyOldGlobal, bodyNewGlobal);
+if (next.includes(composeOld)) next = next.replace(composeOld, composeNew);
 else if (next.includes(bodyNoGlobal)) next = next.replace(bodyNoGlobal, bodyNewGlobal);
 next = next.replace('if (shareCfg.enabled !== false) {', 'if (shareCfg.enabled === true) {');
 if (!next.includes(markers.share)) {
