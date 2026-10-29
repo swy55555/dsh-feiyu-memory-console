@@ -63,6 +63,9 @@ if (!next.includes(markers.config)) {
 
 // 2) 跨聊天共享检索
 if (!next.includes(markers.share)) {
+  const bodyOld = "body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3) }),";
+  const bodyNew = "body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3), include_global: cfg.socialV2?.memoryShare?.enabled !== false }),";
+  if (next.includes(bodyOld)) next = next.replace(bodyOld, bodyNew);
   const old = `      const j = await res.json();
       if (human) return summaryBlock + sessionBlock + compose(priority.results, j.results);
       const unique = new Map();
@@ -76,7 +79,7 @@ if (!next.includes(markers.share)) {
       // 跨聊天共享：只取非当前聊天、且管理员私聊隐私已过滤的记忆。
       const shareCfg = cfg.socialV2?.memoryShare || {};
       let sharedRows = [];
-      if (shareCfg.enabled !== false) {
+      if (shareCfg.enabled === true) {
         try {
           const sr = await memoryRequest('/search', {
             query,
