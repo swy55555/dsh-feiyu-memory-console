@@ -1,4 +1,4 @@
-import fs from 'node:fs'
+﻿import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -13,7 +13,7 @@ function run(command, args) {
   if (result.status !== 0) { failures++; console.error('FAILED:', args.join(' '), result.error?.message || '') }
 }
 try {
-  for (const name of ['host', 'diary', 'audit', 'features', 'integration', 'human-context']) run(process.execPath, [`test/${name}.test.mjs`])
+  for (const name of ['host', 'diary', 'audit', 'features', 'integration', 'human-context', 'runtime-extras']) run(process.execPath, [`test/${name}.test.mjs`])
   const python = findPython()
   if (python) run(python.command, [...python.args, 'test/memvec_test.py'])
   else { failures++; console.error('Python 3.10+ with numpy is required for memory regression tests.') }
@@ -21,5 +21,5 @@ try {
   const relative = path.relative(tempParent, path.resolve(temp))
   if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) fs.rmSync(temp, { recursive: true, force: true })
 }
-console.log(`Regression suites: ${7 - failures}/7 passed`)
+console.log(`Regression suites: ${8 - failures}/8 passed`)
 process.exitCode = failures ? 1 : 0

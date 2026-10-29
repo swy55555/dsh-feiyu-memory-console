@@ -1,4 +1,10 @@
-﻿# 0.8.6 — 旧版迁移补齐共享标记（2026-10-29）
+﻿# 0.8.7 — 一次性完成旧版迁移（2026-10-29）
+
+- **0.8.3 直接升级一次完成**：修正 runtime-extras 里 `else if` 误绑定，`include_global=false` 与 `shared:true` 标记在同一次 `--apply` 生效；不再需要第二次执行。
+- **升级回归**：新增 `test/runtime-extras.test.mjs`，覆盖旧桥接首次升级、`include_global`、共享标记、human-context 放行和重复执行幂等；测试总数 8/8。
+- 包含 0.8.6 的旧版迁移、打包清理和 0.8.5 的发布树一致性。
+
+# 0.8.6 — 旧版迁移补齐共享标记（2026-10-29）
 
 - **0.8.3/0.8.4 旧桥接升级**：runtime-extras 现在会把旧 `compose(..., ...sharedRows)` 迁移为给共享行加 `shared: true`；`--check` 会把缺失标记报为 `shared-flag`，不再误判 `already-installed`。
 - **0.8.5 不完整升级**：即使旧安装器已执行过一次，也能补上该标记。

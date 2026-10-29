@@ -82,7 +82,7 @@ if (!next.includes(markers.config)) {
 // 2) 跨聊天共享检索
 if (next.includes(bodyOldGlobal)) next = next.replace(bodyOldGlobal, bodyNewGlobal);
 if (next.includes(composeOld)) next = next.replace(composeOld, composeNew);
-else if (next.includes(bodyNoGlobal)) next = next.replace(bodyNoGlobal, bodyNewGlobal);
+if (next.includes(bodyNoGlobal)) next = next.replace(bodyNoGlobal, bodyNewGlobal);
 next = next.replace('if (shareCfg.enabled !== false) {', 'if (shareCfg.enabled === true) {');
 if (!next.includes(markers.share)) {
   const old = `      const j = await res.json();
