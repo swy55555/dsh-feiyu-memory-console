@@ -75,6 +75,8 @@
       .ctx-top h1 { font-size: 20px; }
     }
   </style>
+  <link rel="stylesheet" href="refinement.css">
+  <link rel="stylesheet" href="context.css">
 </head>
 <body class="ctx-body">
   <div class="ctx-shell">
@@ -97,25 +99,30 @@
         </div>
       </header>
 
+      <section class="ctx-guide" aria-label="上下文与记忆的关系">
+        <div><span>01 · 最近说了什么</span><h2>会话原文</h2><p>保存聊天记录。每轮按窗口和预算选取部分原文，让她接得上刚才的话。</p></div>
+        <div><span>02 · 前面聊到了哪里</span><h2>会话摘要</h2><p>把较早的聊天压缩成线索，换会话后也能接续。摘要可能有误，不等于已确认事实。</p></div>
+        <div><span>03 · 哪些信息值得记住</span><h2>长期记忆</h2><p>单独保存偏好与经历，按相关性取回，与上下文一起提供给聊天模型。原文不会全部变成记忆。</p></div>
+      </section>
       <section id="stat-row" class="ctx-stats"></section>
 
       <section class="ctx-card" id="budget-card">
-        <div class="ctx-card-head"><span>注入预算</span><span id="budget-note" class="muted"></span></div>
+        <div class="ctx-card-head"><span>本轮上下文容量</span><span id="budget-note" class="muted"></span></div>
         <div id="budget" class="ctx-budget"></div>
       </section>
 
       <section class="ctx-card" id="trace-card">
-        <div class="ctx-card-head"><span>最近记忆注入</span><span class="muted">候选 → 注入，只读</span></div>
+        <div class="ctx-card-head"><span>最近提供给模型的记忆</span><span class="muted">候选 → 注入，只读</span></div>
         <div id="traces" class="ctx-traces"></div>
       </section>
 
       <section class="ctx-section">
-        <div class="ctx-section-head"><h2>摘要</h2><span id="summary-meta" class="muted"></span></div>
+        <div class="ctx-section-head"><h2>之前的话，整理成摘要</h2><span id="summary-meta" class="muted"></span></div>
         <div id="summaries" class="ctx-summaries"></div>
       </section>
 
       <section class="ctx-section">
-        <div class="ctx-section-head"><h2>原文</h2><span id="message-meta" class="muted"></span></div>
+        <div class="ctx-section-head"><h2>最近的对话</h2><span id="message-meta" class="muted"></span></div>
         <div id="messages" class="ctx-messages"></div>
         <button id="more" class="btn ghost ctx-more" hidden>加载更早</button>
       </section>

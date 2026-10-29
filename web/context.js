@@ -1,3 +1,4 @@
+document.documentElement.dataset.theme = localStorage.getItem('feiyu-theme') === 'light' ? 'light' : 'dark'
 const $ = (sel) => document.querySelector(sel)
 const KEY_RE = /^(private|group):\d+$/
 // 挂在 DSH 下时页面在 /dsh-feiyu-memory/ 前缀里，裸 /api 会打到根路径。

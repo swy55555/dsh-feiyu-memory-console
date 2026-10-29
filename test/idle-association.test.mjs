@@ -128,3 +128,12 @@ test('affect toggle is independent and opt-in; expiration and restart retain onl
   assert.ok(reloaded.snapshot(key).events.some(e=>e.status==='restart-cleared'));
   g.advance(600001);assert.equal(g.worker.feeling(key),null);assert.equal(g.worker.snapshot(key).status,'expired');
 });
+
+test('explicit useful continuation may take a third step, but always stops at three',async()=>{
+ let index=0;const topics=['雨声适合配什么样的故事？','安静角落里可以摆哪些书？','怎样留下一份阅读清单？'];
+ const f=setup(async()=>JSON.stringify({useful:true,kind:'question',topic:topics[index++],sourceIds:['a'],continue:true,nextPurpose:'new-angle'}));
+ f.worker.note(key,'下雨了');f.advance(120000);assert.equal((await f.worker.tick()).steps,3);assert.equal(f.calls,3);
+ assert.equal(f.worker.snapshot(key).events.find(e=>e.status==='ready').stopReason,'step-limit');
+ const stop=setup(async()=>JSON.stringify({useful:true,kind:'question',topic:'听着雨声读书怎么样？',sourceIds:['a'],continue:true,nextPurpose:'none'}));
+ stop.worker.note(key,'下雨了');stop.advance(120000);assert.equal((await stop.worker.tick()).steps,1);
+});

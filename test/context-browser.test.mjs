@@ -28,10 +28,13 @@ const server = http.createServer(async (req, res) => {
     route = url.pathname.replace("/console", "");
   if (route.startsWith("/api/")) {
     let data = { ok: true };
-    if (route === "/api/version") data.version = "0.8.11";
+    if (route === "/api/version") data.version = "0.9.0";
     if (route === "/api/context/keys") data.keys = [{ key, label: "测试聊天" }];
     if (route === "/api/context")
-      data = { ...data, stats: {}, config: {}, messages: [], summaries: [] };
+      data = { ...data, stats: {messages:2,summaries:1}, config: {}, messages: [
+        {id:'demo1',at:Date.now()-10000,sender:'测试用户',text:'明天要面试，我想先确认一下路线。',is_self:0},
+        {id:'demo2',at:Date.now(),sender:'角色',text:'好，我们先看看地址和出发时间，再留一点缓冲。',is_self:1}
+      ], summaries: [{id:'s1',period_start:Date.now()-3600000,period_end:Date.now()-1800000,text:'测试用户计划明天面试，正在确认出行路线。面试结果尚未发生。',structured:JSON.stringify({topics:['面试准备'],open_loops:['确认出发时间'],tone:'平和'})}] };
     if (route === "/api/context/traces")
       data.traces = [
         {
@@ -58,7 +61,7 @@ const server = http.createServer(async (req, res) => {
     file = path.join(root, name);
   if (
     !fs.existsSync(file) ||
-    !["context.html", "context.js", "app.css", "favicon.svg"].includes(name)
+    !["context.html", "context.js", "app.css", "refinement.css", "context.css", "favicon.svg"].includes(name)
   ) {
     res.writeHead(404);
     res.end();
@@ -93,7 +96,7 @@ try {
   await page.goto(
     `http://127.0.0.1:${server.address().port}/console/context.html`,
   );
-  await page.locator("#app-version").filter({ hasText: "v0.8.11" }).waitFor();
+  await page.locator("#app-version").filter({ hasText: "v0.9.0" }).waitFor();
   await page.locator("#traces summary").click();
   await page.getByText(/回复：部分发送/).waitFor();
   await page.getByText(/主体 10001/).waitFor();
@@ -110,12 +113,19 @@ try {
   assert.deepEqual(feedback, [
     { op: "irrelevant", id: row.id, scope: key, key, traceId: "trace-1" },
   ]);
+  await page.getByRole('region',{name:'上下文与记忆的关系'}).waitFor();
+  await page.setViewportSize({width:390,height:844});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
+  await page.setViewportSize({width:1365,height:1000});
   assert.deepEqual(errors, []);
   if (process.env.FEIYU_SCREENSHOT)
     await page.screenshot({
       path: process.env.FEIYU_SCREENSHOT,
       fullPage: true,
     });
+  await page.evaluate(()=>{localStorage.setItem('feiyu-theme','light')});await page.reload();await page.locator('#summaries .ctx-summary').waitFor();
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+  if(process.env.FEIYU_SCREENSHOT)await page.screenshot({path:process.env.FEIYU_SCREENSHOT.replace('dark.png','light.png'),fullPage:true});
   console.log(
     "context browser OK: mounted route, actual rows, attribution, reply status, escaped text and trace-bound feedback",
   );

@@ -1778,7 +1778,7 @@ function lightHome(data) {
   return frag(
     el('div', { class: 'section-head' },
       el('h2', { class: 'h2', text: '轻量记忆' }),
-      el('span', { class: 'muted small', text: '聊天时随手挂着的：进行中的话题、想说还没说的话、对群友的印象。' }),
+      el('span', { class: 'muted small', text: '点开聊天可查看已确认的个人信息、自动整理的近期便签，以及聊天模型写入的印象。' }),
     ),
     el('p', { class: 'note', style: { margin: '0 0 14px' } }, '这些是临时上下文，聊完就散。真正的长期记忆在', el('b', { text: '「长期记忆」' }), '里。'),
     data.paused ? el('div', { class: 'semantic-head', style: { marginBottom: '12px' } }, '桥接现在是暂停状态，轻量记忆暂时不会更新。') : null,
@@ -1789,13 +1789,13 @@ function lightHome(data) {
       },
       el('div', { class: 'top' }, el('span', { class: `pill ${r.kind}`, text: r.kind === 'owner' ? '老大' : r.kind === 'group' ? '群' : '私聊' }), el('span', { class: 'nm', text: r.label })),
       el('div', { class: 'counts' },
-        el('span', null, '话题 ', el('b', { text: String(r.counts.activeTopics) })),
+        el('span', null, '话题 ', el('b', { text: String(r.counts.activeTopics+(r.counts.automaticTopics||0)) })),
         el('span', null, '没说 ', el('b', { text: String(r.counts.pendingThoughts) })),
         el('span', null, '印象 ', el('b', { text: String(r.counts.memberImpressions) })),
       ),
       r.lastActionAt ? el('div', { class: 'muted small', style: { marginTop: '7px' }, text: `上次说话 ${fmtWhen(r.lastActionAt)}` }) : null,
       )),
-      used.length === 0 ? el('div', { class: 'empty' }, el('div', { html: ICONS.wave }), '还没有哪一格挂着东西，去聊两句吧。') : null,
+      used.length === 0 ? el('div', { class: 'empty' }, el('div', { html: ICONS.wave }), '暂无近期便签；点开聊天仍可查看已有长期信息。') : null,
     ),
   )
 }
@@ -1819,7 +1819,7 @@ function lightDetail(data) {
   const head = el('div', { class: 'light-head' }, back,
     el('h2', { text: data.label }),
     el('span', { class: 'pill', text: data.paused ? '桥接暂停中' : '桥接在线' }),
-    el('span', { class: 'muted small', text: `共 ${data.counts.activeTopics + data.counts.pendingThoughts + data.counts.memberImpressions} 条` }),
+    el('span', { class: 'muted small', text: `共 ${data.counts.activeTopics + data.counts.pendingThoughts + data.counts.memberImpressions + (data.counts.automaticTopics||0)} 条` }),
     el('span', { class: 'spacer' }),
     el('button', { class: 'btn sm', on: { click: () => addLight('activeTopic') } }, icon('plus'), '加个话题'),
     el('button', { class: 'btn sm', on: { click: () => addLight('pendingThought') } }, icon('plus'), '加句没说的'),
@@ -1831,26 +1831,47 @@ function lightDetail(data) {
     el('div', { class: 'section-head' }, el('h3', { class: 'h3', text: `进行中的话题 · ${data.activeTopics.length}` })),
     data.activeTopics.length
       ? data.activeTopics.map((t) => lightTopic(t))
-      : el('div', { class: 'empty', text: '这会儿没在聊什么。' }),
+      : el('div', { class: 'empty', text: '暂无已记录的近期话题。' }),
   )
 
   const thoughts = el('section', { class: 'light-section' },
     el('div', { class: 'section-head' }, el('h3', { class: 'h3', text: `想说但还没说的 · ${data.pendingThoughts.length}` })),
     data.pendingThoughts.length
       ? data.pendingThoughts.map((t) => lightThought(t))
-      : el('div', { class: 'empty', text: '没有憋着没说的话。' }),
+      : el('div', { class: 'empty', text: '暂无已记录的待说事项。' }),
   )
 
   const imps = data.memberImpressions || {}
   const names = Object.keys(imps)
   const impressions = el('section', { class: 'light-section' },
-    el('div', { class: 'section-head' }, el('h3', { class: 'h3', text: `对群友的印象 · ${names.length}` })),
+    el('div', { class: 'section-head' }, el('h3', { class: 'h3', text: `对聊天对象的印象 · ${names.length}` })),
     names.length
       ? names.map((name) => lightImpression(name, imps[name]))
-      : el('div', { class: 'empty', text: '还没记住谁。' }),
+      : el('div', { class: 'empty', text: '这里尚未记录人物印象；不代表长期记忆里没有这个人的信息。' }),
   )
 
-  return frag(head, topics, thoughts, impressions)
+  const known=data.known||{rows:[],total:0,unavailable:true};
+  const knownCard=r=>el('article',{class:'light-known'},
+    el('span',{class:'mind-badge',text:`${r.subjectId} · ${r.tier==='task'?'尚未标记完成的计划':'已确认历史表述'}`}),el('p',{text:r.text}),
+    el('details',{},el('summary',{text:'查看原话与来源'}),el('p',{text:r.sourceText||'旧记录未保留原话'}),el('p',{class:'small muted',text:`记录 ${r.id} · 来源消息 ${r.sourceId||'未知'} · ${r.sourceTime?new Date(r.sourceTime).toLocaleString():'原话时间未知'}`})),
+    el('button',{class:'btn sm',text:'到长期记忆查看或修正',on:{click:()=>focusMemory(r)}}));
+  const personal=el('section',{class:'light-section'},el('h3',{text:`已知信息 · ${known.total} 条`}),
+    el('p',{class:'note',text:'直接读取当前聊天内有效、已确认的长期记忆，不复制也不重新推断。群聊按实际主体区分；最多展示最近30条，待确认和已过期记录不列在这里。'}),
+    known.unavailable?el('p',{text:'长期记忆暂不可用，不能据此认为没有记录。'}):known.rows.length?el('div',{class:'light-known-grid'},...known.rows.slice(0,6).map(knownCard)):el('p',{class:'muted',text:'当前聊天尚无符合条件的已确认信息。请到长期记忆查看待确认记录或整理队列。'}),
+    known.rows.length>6?el('details',{},el('summary',{text:`展开其余 ${known.rows.length-6} 条已知信息`}),el('div',{class:'light-known-grid'},...known.rows.slice(6).map(knownCard))):null);
+  const automatic=el('section',{class:'light-section'},el('h3',{text:`自动整理的近期便签 · ${(data.automaticTopics||[]).length}`}),
+    el('p',{class:'note',text:'复用记忆整理调用，从本人原话整理近期话题。便签会到期，不代表长期事实被删除；普通寒暄可以不记。'}),
+    data.automaticError?el('p',{role:'alert',text:'最近一次便签整理未完成：'+data.automaticError}):null,
+    data.automaticEnabled===false?el('p',{text:'自动记忆整理当前关闭；已有信息仍可查看。'}):null,
+    ...(data.automaticTopics||[]).map(r=>el('article',{class:'light-known'},el('p',{text:r.text}),el('p',{class:'small muted',text:`主体 ${r.subjectId} · ${new Date(r.expiresAt).toLocaleString()} 到期`}),
+      el('details',{},el('summary',{text:'原话依据'}),el('p',{text:r.quote}),el('p',{class:'small muted',text:`来源消息 ${r.sourceId}`})),
+      el('button',{class:'btn sm',text:'移除这条便签',on:{click:async()=>{try{await api('/light/action',{method:'POST',body:{op:'remove',category:'automaticTopic',key:data.key,id:r.id}});await loadLight(data.key)}catch(e){toast(e.message,'error')}}}})
+    )),
+    !(data.automaticTopics||[]).length?el('p',{class:'muted',text:'暂无活跃便签。符合当前聊天收集策略的消息，入队整理后会在这里显示处理结果。'}):null,
+    el('details',{},el('summary',{text:'最近自动整理记录'}),...(data.automaticAudit||[]).map(r=>el('p',{class:'small',text:`${fmtWhen(r.at)} · ${r.reason}${r.sourceId?' · 来源 '+r.sourceId:''}`})),!data.automaticCheckedAt?el('p',{text:'尚未运行自动整理。'}):null));
+  const manualCount=data.counts.activeTopics+data.counts.pendingThoughts+data.counts.memberImpressions;
+  return frag(head,personal,automatic,el('details',{class:'hub-fold',open:manualCount>0},el('summary',{text:`工具便签与手动印象 · ${manualCount} 条`}),el('p',{class:'note',text:'这里保留聊天模型通过工具写入或手动维护的便签和印象，与上面的长期信息分别保存。'}),topics,thoughts,impressions))
+
 }
 
 function lightTopic(t) {
@@ -3242,15 +3263,15 @@ function renderEmotion() {
   const reviewNames = {'shared-event':'连续事件理解（复用）',reviewed:'模型已复核',pending:'模型复核中',disabled:'本地判断（复核关闭）','not-needed':'本地判断（无需复核）','daily-limit':'本日复核额度已用完','budget-unavailable':'复核额度记录不可用','input-too-long':'消息过长，保守处理','invalid-result':'模型结果无效，保守处理',unavailable:'模型未完成，保守处理','stale-result':'情境已变化，忽略旧结果'}
 
   const hero = el('section', { class: 'hero' },
-    el('div', { class: 'kicker', text: 'emotion state' }),
+    el('div', { class: 'kicker', text: '此刻的情绪' }),
     el('p', {class:'muted small',text:`判断来源：${reviewNames[e.lastEvent?.review?.status] || '本地判断'}${e.lastEvent?.review?.count ? ` · 今日复核 ${e.lastEvent.review.count} 次（每日无上限）` : ''} · 近期修正 ${(e.corrections || []).length} 次`}),
-    el('h2', null, frag('她现在：', el('em', { text: label }), `，强度 ${intensity.toFixed(2)}。`)),
+    el('h2', null, frag('她现在：', el('em', { text: label }), intensity < .01 ? '，接近平常状态。' : `，情绪波动 ${Math.round(intensity * 100)}%。`)),
     st.nuance?el('div',{class:'emotion-nuances'},...(st.feelings||[]).map(f=>el('span',{class:'mind-badge',text:f.label}))):null,
-    el('p', { text: `回应态度：${e.stance || '正常交流'}。快变量是“现在”，心情是“今天”，底色是“长期”。` }),
+    el('p', { text: `回应态度：${e.stance || '正常交流'}。快变量是“现在”，心情是“今天”，底色是“长期”。情绪波动表示相对平常状态的变化，0.00 不代表没有感受。` }),
     el('p', { class:'muted small', text: e.lastCause ? `最近影响情绪的事件：${e.lastCause.kind} · ${(e.lastCause.evidence || []).join(' / ')}（${fmtWhen(e.lastCause.at)}）` : '尚无明确的情绪触发事件' }),
   )
   const stats = el('section', { class: 'stats' },
-    statCard(label, '现在', `强度 ${intensity.toFixed(2)}`, intensity > 0.55 ? 'amber' : ''),
+    statCard(label, '现在', `情绪波动 ${intensity.toFixed(2)}`, intensity > 0.55 ? 'amber' : ''),
     statCard(String(mood.label || '平静'), '心情', `V ${Number(mood.valence || 0).toFixed(2)} · A ${Number(mood.arousal || 0).toFixed(2)}`, 'green'),
     statCard(`V ${Number(base.valence || 0).toFixed(2)}`, '底色', `A ${Number(base.arousal || 0).toFixed(2)}`, 'accent'),
   )
@@ -3262,7 +3283,7 @@ function renderEmotion() {
       el('span', { class: 'muted small', text: '横轴：难受 ↔ 舒服 · 纵轴：低唤醒 ↔ 高唤醒' }),
     ),
     el('canvas', { id: 'emotion-pad', class: 'emotion-pad' }),
-    el('p', { class: 'note', style: { marginBottom: 0 } }, '点按环形模型（Russell）：valence/arousal 两维；轨迹是最近 120 个采样，点越大表示强度越高。'),
+    el('p', { class: 'note', style: { marginBottom: 0 } }, '点按环形模型（Russell）：valence/arousal 两维；轨迹是最近 120 个采样，点越大表示相对平常状态的波动越大。'),
   )
 
   const triggersCard = el('section', { class: 'card pad' },
@@ -3341,9 +3362,9 @@ function renderEmotion() {
         type: 'checkbox', checked: S.emotion?.appraisalModelEnabled === true, disabled: !hasCap('emotion'),
         on: { change: (event) => toggleAppraisalModel(event) },
       }),
-      el('span', { class: 'muted small', text: '按需复核复杂情境（只对老大私聊，每日无上限，按需调用）' }),
+      el('span', { class: 'muted small', text: '模型理解日常感受与复杂情境（老大私聊，每日无上限）' }),
     ),
-    el('p', { class: 'note', style: { margin: '4px 0 0' } }, '开：长期情绪会改人格底色，影响之后所有聊天；关：只记录情绪，不改人格。模式「直接应用」会自动改；「只建议」只写建议，需要你点采纳。模型复核开：复杂情境按需增加一次模型调用（花 token）；关：全程规则，0 token。'),
+    el('p', { class: 'note', style: { margin: '4px 0 0' } }, '开：长期情绪会改人格底色，影响之后所有聊天；关：只记录情绪，不改人格。模式「直接应用」会自动改；「只建议」只写建议，需要你点采纳。模型理解开启时，优先复用连续事件理解；未取得有效理解时，每条符合条件的主人消息最多补一次情绪调用。关闭此开关只停止独立情绪调用，连续事件理解仍按其自身开关运行。'),
     drifts.length
       ? el('div', { class: 'mini-list', style: { marginTop: '10px' } }, drifts.map((d) => el('div', { class: 'mini' },
           el('span', { class: 'd', text: fmtWhen(d.at) }),
@@ -4696,7 +4717,7 @@ function renderContinuity() {
       el('button',{class:S.continuity.view==='text'?'active':'','aria-pressed':String(S.continuity.view==='text'),on:{click:()=>switchView('text')},text:'文字列表'})),
       el('button',{class:'btn',disabled:S.continuity.loading,on:{click:()=>loadContinuity(true)}},icon('refresh'),'刷新当前心绪')),
     S.continuity.error ? el('p',{role:'alert',text:S.continuity.error}) : null))
-  wrap.appendChild(mindWorkspacePanel(el,{data:S.continuity.mind,error:S.continuity.mindError,loading:S.continuity.loading||S.continuity.changing,visual:S.continuity.view==='visual',change:changeMindWorkspace}));
+  wrap.appendChild(mindWorkspacePanel(el,{data:S.continuity.mind,error:S.continuity.mindError,loading:S.continuity.loading||S.continuity.changing,visual:S.continuity.view==='visual',emotion:S.continuity.emotion,selectedReference:S.continuity.hubSelected,select:id=>{S.continuity.hubSelected=id},folds:S.continuity.hubFolds||(S.continuity.hubFolds={}),change:changeMindWorkspace}));
   wrap.appendChild(mindAssociations(el,{idle:S.continuity.idle,error:S.continuity.idleError,emotion:S.continuity.emotion,emotionError:S.continuity.emotionError,overview:S.overview||{},visual:S.continuity.view==='visual',loading:S.continuity.loading,when:fmtWhen,details:showIdleAssociation,change:changeMindAssociation}));
   if(!d)return wrap
   wrap.appendChild(el('section',{class:'card pad'},

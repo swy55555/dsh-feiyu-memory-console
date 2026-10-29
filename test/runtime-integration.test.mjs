@@ -263,7 +263,7 @@ test("manual reset invalidates in-flight appraisal and clears dynamics", () => {
   assert.equal(impressionsCleared, true);
 });
 
-test("actual model gate avoids ordinary calls and handles malformed output, outage and ignores legacy daily limits", async (t) => {
+test("actual model gate reviews ordinary owner messages, reuses semantic results and handles malformed output, outage and ignores legacy daily limits", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "feiyu-review-gate-"));
   t.after(() => {
     const rel = path.relative(os.tmpdir(), dir);
@@ -295,7 +295,7 @@ test("actual model gate avoids ordinary calls and handles malformed output, outa
     runHeadlessPrompt: async (p) => {
       prompt = p;
       calls++;
-      if (calls === 1) return "not JSON";
+      if (calls <= 2) return "not JSON";
       throw Error("timeout");
     },
   });
@@ -309,14 +309,14 @@ test("actual model gate avoids ordinary calls and handles malformed output, outa
     speakerId: "1",
     messageId: "m1",
   });
-  assert.equal(calls, 0);
+  assert.equal(calls, 1);
   await ctx.noteEmotion({
     text: "你这个笨蛋，终于回来了😂",
     key: "private:1",
     speakerId: "1",
     messageId: "m2",
   });
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
   assert.equal(ctx.emotionState.lastEvent.review.status, "invalid-result");
   assert.ok(prompt.includes("recent"));
   assert.ok(prompt.includes("speakerId"));
@@ -327,7 +327,7 @@ test("actual model gate avoids ordinary calls and handles malformed output, outa
     speakerId: "1",
     messageId: "m3",
   });
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   assert.equal(ctx.emotionState.lastEvent.review.status, "unavailable");
   assert.ok(ctx.emotionState.state.valence >= 0.1);
   await ctx.noteEmotion({
@@ -336,7 +336,7 @@ test("actual model gate avoids ordinary calls and handles malformed output, outa
     speakerId: "1",
     messageId: "m4",
   });
-  assert.equal(calls, 3);
+  assert.equal(calls, 4);
   assert.equal(ctx.emotionState.lastEvent.review.status, "unavailable");
   ctx.emotionLast = {};
   const count = ctx.emotionState.metrics.events;
@@ -347,7 +347,12 @@ test("actual model gate avoids ordinary calls and handles malformed output, outa
     messageId: "m4",
   });
   assert.equal(ctx.emotionState.metrics.events, count);
-  assert.equal(calls, 3);
+  assert.equal(calls, 4);
+  await ctx.noteEmotion({text:'今天好开心',key:'private:1',speakerId:'1',messageId:'shared',semanticAppraisal:{kind:'neutral',target:'none',confidence:.9,intensity:0,evidence:[],feelings:[{kind:'joy',intensity:.4,confidence:.9,reason:'分享好心情',evidence:'好开心'}]}});
+  assert.equal(calls,4);assert.equal(ctx.emotionState.lastEvent.review.status,'shared-event');assert.match(ctx.emotionState.state.nuance,/轻快/);
+  await ctx.noteEmotion({text:'/状态',key:'private:1',speakerId:'1',messageId:'command'});
+  assert.equal(calls,4);
+
 });
 
 test("correction retracts matching derived episode and queued spillover without deleting unrelated history", () => {

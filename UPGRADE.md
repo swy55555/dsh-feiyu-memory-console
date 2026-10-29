@@ -1,17 +1,29 @@
-# v0.9.0 升级与回退
+# 升级到 0.9.1
+
+先备份并停止 DSH、QQ 桥接和独立记忆服务，再更新插件、统一运行时的 17 个模块及实际运行的 memvec/server.py。不能只更新网页。安装命令和回退步骤见下文；新包文件名为 dsh-feiyu-memory-console-0.9.1.tgz。
+
+本版保留所有既有开关、长期记忆、整理队列和费用归类。开启情绪模型后，普通主人消息也可能产生理解调用；优先复用事件理解，失败或未开启共享理解时可独立补一次。没有每日调用硬上限。自动近期便签复用记忆整理调用，不回填旧聊天。群聊原有入队规则不变。
+
+验收：总览、记忆服务和运行时均显示 0.9.1；心绪中枢可切换柔和图和文字；轻量记忆可查看同聊天已确认信息。自动便签需新的合格消息进入整理批次才可能出现，不保证每轮都有。原话、摘要与长期记忆各自保留。
+
+回退：停止服务，用 0.9.1 包的统一安装器 --undo 恢复升级前运行时；插件与实际 memvec/server.py 按备份恢复。新增便签和感受状态保留，旧版本可能忽略，不自动删除用户数据。
+
+以下为完整安装步骤；末尾另外保留历史迁移记录。
+
+## 完整安装与回退步骤
 
 本版需同时更新插件、QQ 桥接运行时和独立 memvec 服务。保留原数据库及配置；不会自动回填历史漏记、开启跨聊天共享或打开空闲联想试验。
 
 ## 适用范围
 
-用于已有 DSH/QQ 桥接环境，基础 SDK、账号和服务环境需自行准备。安装器按已知源码哈希或有效回执识别版本；未知或自定义桥接会拒绝覆盖。首次安装与通用操作见 `manual/USER_GUIDE-0.9.0.md`；本次功能变化见 `docs/continuity.md` 与 `docs/usage-and-association.md`。
+用于已有 DSH/QQ 桥接环境，基础 SDK、账号和服务环境需自行准备。安装器按已知源码哈希或有效回执识别版本；未知或自定义桥接会拒绝覆盖。首次安装与通用操作见 `manual/USER_GUIDE-0.9.1.md`；本次功能变化见 `docs/continuity.md` 与 `docs/usage-and-association.md`。
 
 ## 1. 下载与核验
 
-从 [v0.9.0 Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.9.0) 下载同版本 `.tgz` 或 `-source.zip`，以及升级指南、手册和 `SHA256SUMS-0.9.0.txt`。核对示例：
+从 [v0.9.1 Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.9.1) 下载同版本 `.tgz` 或 `-source.zip`，以及升级指南、手册和 `SHA256SUMS-0.9.1.txt`。核对示例：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\dsh-feiyu-memory-console-0.9.0.tgz
+Get-FileHash -Algorithm SHA256 .\dsh-feiyu-memory-console-0.9.1.tgz
 ```
 
 将结果与校验文件对应行比较。不要混用预览版安装器和正式版源码；不要覆盖已经公开的旧版本附件。
@@ -48,13 +60,13 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 
 启动 memvec、DSH 和桥接，刷新控制台：
 
-1. 网页后端版本显示 0.9.0，总览的数据库路径与服务检查正常。
+1. 网页后端版本显示 0.9.1，总览的数据库路径与服务检查正常。
 2. `http://127.0.0.1:9881/stats` 返回 ok，capabilities 包含 paged-fact-review、unified-fact-review 与 confirmation-relation-groups。
 3. QQ 连接恢复，原事实、队列和设置仍在；不能用新空库代替旧数据验证。
 4. 整理页出现消息处理状态入口，确认/恢复操作能显示分批进度。
 5. 在允许的测试聊天中自行核对两条不同对象的偏好是否都能保留；在线效果仍依赖实际模型。
 
-程序性验证可在隔离环境执行 `npm test` 和六个浏览器测试（主界面、上下文、花费与联想、当前心绪、界面升级、心绪中枢），不需要向 QQ 发测试消息。
+程序性验证可在隔离环境执行 `npm test` 和七个浏览器测试（主界面、上下文、花费与联想、当前心绪、界面升级、心绪中枢、轻量记忆），不需要向 QQ 发测试消息。
 
 ## 行为与用量变化
 
@@ -66,7 +78,7 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 
 ## 回退
 
-先停止桥接，再使用**本次安装所用的 v0.9.0 包**执行：
+先停止桥接，再使用**本次安装所用的 v0.9.1 包**执行：
 
 ```powershell
 node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --undo
@@ -78,7 +90,7 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --undo
 
 ## 当前心绪补充
 
-本版新增 `continuity.mjs`，运行时共 15 个模块；私有状态为桥接 `state/continuity.json`，请随原有状态一起备份。安装不会自动开启 `socialV2.continuity.enabled`。在“当前心绪”页开启后才处理新的主人私聊消息，不回填历史。
+0.8.12 引入 `continuity.mjs` 时运行时共 15 个模块；0.9.1 为 17 个模块；私有状态为桥接 `state/continuity.json`，请随原有状态一起备份。安装不会自动开启 `socialV2.continuity.enabled`。在“当前心绪”页开启后才处理新的主人私聊消息，不回填历史。
 
 本版操作、费用、容量和模拟边界见 `docs/continuity.md`。同版 Markdown/PDF 完整手册已纳入新功能的操作步骤和边界。回退前关闭连续事件理解并备份；旧版不读取新状态文件，不必删除该文件。
 
@@ -88,9 +100,9 @@ v0.8.12-preview.1 及本地 preview.2、preview.3 可以直接升级到本版，
 
 确认弹窗默认“确认这条，并保留全部已有记忆”；明确矛盾与不确定分别显示。只有明确矛盾可以被替换，现有记忆不会在安装时自动批量确认或更改。
 
-## v0.9.0 验收
+## v0.9.1 验收
 
-1. 网页右上角、运行时回执与 memvec `/stats` 均应显示 0.9.0；memvec capabilities 应包含 `auto-confirm-guard`。
+1. 网页右上角、运行时回执与 memvec `/stats` 均应显示 0.9.1；memvec capabilities 应包含 `auto-confirm-guard`。
 2. 当前心绪可切换可视化/文字列表，空闲联想及主观感受开关已移到这里，原配置保留。
 3. 长期记忆 → 待确认提供自动核对。新安装默认关闭，启用后 DSH 运行时每分钟处理一条候选或一批历史；关闭网页不会停止，关闭开关才停止后续提交。
 4. 备份 `feiyu-memory-console/candidate-auto.json` 和操作审计；自动确认可在操作记录撤销。回退代码不会自动撤销已经确认的记忆。

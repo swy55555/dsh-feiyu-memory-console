@@ -200,13 +200,15 @@ export function validateSemanticAppraisal(value, text) {
   if(value.feelings!==undefined&&(!Array.isArray(value.feelings)||value.feelings.length>2))return null;
   const feelings=value.feelings||[];
   if(new Set(feelings.map(f=>f?.kind)).size!==feelings.length||feelings.some(f=>!feelingKinds.has(f?.kind)||typeof f.intensity!=='number'||!Number.isFinite(f.intensity)||f.intensity<0||f.intensity>1||typeof f.evidence!=='string'||!f.evidence.trim()||f.evidence.length>200||!original.includes(f.evidence)))return null;
+  if(feelings.some(f=>(f.action!==undefined&&!['evoke','settle'].includes(f.action))||(f.action==='settle'&&f.intensity!==0)))return null;
+  if(feelings.some(f=>(f.confidence!==undefined&&(!Number.isFinite(f.confidence)||f.confidence<0||f.confidence>1))||(f.reason!==undefined&&(typeof f.reason!=='string'||f.reason.length>100))))return null;
   return {...event(
     value.kind,
     value.target,
     value.confidence,
     value.intensity,
     value.evidence,
-  ), feelings:feelings.map(f=>({kind:f.kind,intensity:f.intensity,evidence:f.evidence}))};
+  ), feelings:feelings.map(f=>({kind:f.kind,intensity:f.intensity,evidence:f.evidence,confidence:f.confidence??value.confidence,reason:f.reason||'',action:f.action||'evoke'}))};
 }
 export function appraisalScores(value, weight = 1) {
   const polarity =
@@ -226,4 +228,11 @@ export function appraisalScores(value, weight = 1) {
     negative: polarity < 0 ? 1 : 0,
     weight: Math.max(0.2, Math.min(3, Number(weight) || 1)),
   };
+}
+
+// Stable temperament is context for reaction style, never evidence about the user.
+export function temperamentContext(persona) {
+  return (Array.isArray(persona?.spec?.dimensions)?persona.spec.dimensions:[]).slice(0,8)
+    .filter(d=>d&&typeof d.key==='string'&&Number.isFinite(persona.baseline?.[d.key]))
+    .map(d=>({trait:String(d.label||d.key).slice(0,40),description:String(d.desc||'').slice(0,80),baseline:Math.max(0,Math.min(100,persona.baseline[d.key]))}));
 }

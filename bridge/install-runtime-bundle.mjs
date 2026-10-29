@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.9.0";
+export const RUNTIME_VERSION = "0.9.1";
 const files = {
   "mind-workspace.mjs": "mind-workspace.mjs",
   "response-patterns.mjs": "response-patterns.mjs",

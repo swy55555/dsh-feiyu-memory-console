@@ -7,11 +7,13 @@ export const STRATEGIES=Object.freeze({
   comfort_first:{label:'困扰时先倾听',kinds:['user_distress'],hint:'用户明确表达困扰时，先简短承接感受，再问是否需要建议；不要猜测隐藏情绪。'},
   concise_first:{label:'先简短，再按需展开',kinds:['neutral','criticism'],hint:'先给简明回应，再按用户需要展开；不能省略用户明确要求的细节。'},
   ask_before_advice:{label:'建议前先确认需要',kinds:['user_distress'],hint:'用户只是倾诉时先确认是否想听建议；用户已明确提问时直接回答。'},
+  share_interest:{label:'接住日常分享的细节',kinds:['neutral','affection'],hint:'用户分享日常时回应一处具体细节，可以轻轻表达兴趣或感受；不要总转成建议、任务清单或连串提问。纯任务仍直接处理。'},
+  leave_space:{label:'自然收尾，留一点空间',kinds:['neutral','user_distress'],hint:'允许一句自然回应就结束，不把每句话都接成追问；用户明确求助时仍积极回答。'},
   explain_correction:{label:'纠错时说明改动依据',kinds:['criticism'],hint:'被指出任务错误时先核对，说明修正和依据；不把纠错当成关系攻击。'},
 });
 export function learningInstruction(context) {
   if(!context)return '';
-  return '\n可选 learning 最多1项：{"strategy":"comfort_first|concise_first|ask_before_advice|explain_correction","outcome":"helpful|unhelpful","experienceId":"新反馈用空字符串；同一经历重述填已有ID","evidenceKind":"new|repeat|uncertain","quote":"当前消息完整反馈原句，最多200字","confidence":0到1}。没有明确反馈则 learning:[]。只接受用户本人明确评价角色的回应方式是否有帮助，保留否定和适用情境。说自己累、说第三方、引用、假设、玩笑、简单谢谢、角色自己的回复、课程结果都不是反馈证据。不要靠情绪词判断。改写或补充同一反馈仍是repeat；不确定是否新经历用uncertain。只有新的实际反馈才用new；不同日期重述同一件事也不是new。策略只用于改善回应，不能推出用户人格或改变信任。已有反馈用于去重：'+JSON.stringify(context)+'\n';
+  return '\n可选 learning 最多1项：{"strategy":"comfort_first|concise_first|ask_before_advice|explain_correction|share_interest|leave_space","outcome":"helpful|unhelpful","experienceId":"新反馈用空字符串；同一经历重述填已有ID","evidenceKind":"new|repeat|uncertain","quote":"当前消息完整反馈原句，最多200字","confidence":0到1}。没有明确反馈则 learning:[]。只接受用户本人明确评价角色的回应方式是否有帮助，保留否定和适用情境。说自己累、说第三方、引用、假设、玩笑、简单谢谢、角色自己的回复、课程结果都不是反馈证据。不要靠情绪词判断。改写或补充同一反馈仍是repeat；不确定是否新经历用uncertain。只有新的实际反馈才用new；不同日期重述同一件事也不是new。策略只用于改善回应，不能推出用户人格或改变信任。已有反馈用于去重：'+JSON.stringify(context)+'\n';
 }
 export class ResponsePatterns {
   constructor({allowed,enabled,load=()=>null,save=()=>{},now=Date.now}) {
