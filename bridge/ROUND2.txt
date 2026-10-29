@@ -33,8 +33,8 @@
 
 生效与回退
 本机桥接源码已备份并更新；没有重启，下一次正常重启QQ桥接后生效。已安装的控制台插件未替换，本次打包供保存或按UPGRADE.md升级。
-备份目录：C:/Users/sunwy/.dsh/qq-bridge/.human-context-backups/
+备份目录示例：D:/your-dsh/qq-bridge/.human-context-backups/
 本次桥接备份：bridge-1793129390888-7bd8efed.js；模块备份同名追加.mjs；旧回执备份同名追加.json。
-解压后在插件目录运行：node bridge/install.mjs --target C:/Users/sunwy/.dsh/qq-bridge --undo
+旧版回退示例：node bridge/install.mjs --target "D:/your-dsh/qq-bridge" --undo；当前版本请按 UPGRADE.md 使用统一安装器。
 有后续代码修改时拒绝自动覆盖。撤销后正常重启桥接；不需要导入或恢复记忆数据库。
 search_memory 仍保持 WHERE (scope=? OR scope='global') AND status='active' ...。

@@ -28,6 +28,7 @@ const server = http.createServer(async (req, res) => {
     route = url.pathname.replace("/console", "");
   if (route.startsWith("/api/")) {
     let data = { ok: true };
+    if (route === "/api/version") data.version = "0.8.11";
     if (route === "/api/context/keys") data.keys = [{ key, label: "测试聊天" }];
     if (route === "/api/context")
       data = { ...data, stats: {}, config: {}, messages: [], summaries: [] };
@@ -92,6 +93,7 @@ try {
   await page.goto(
     `http://127.0.0.1:${server.address().port}/console/context.html`,
   );
+  await page.locator("#app-version").filter({ hasText: "v0.8.11" }).waitFor();
   await page.locator("#traces summary").click();
   await page.getByText(/回复：部分发送/).waitFor();
   await page.getByText(/主体 10001/).waitFor();

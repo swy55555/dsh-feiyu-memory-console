@@ -375,3 +375,5 @@ $('#auto').onchange = startAuto
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load() })
 
 init().catch((error) => toast(error.message))
+
+fetch(new URL('api/version', location.href), { cache: 'no-store' }).then(r => r.ok ? r.json() : Promise.reject()).then(data => { if (typeof data.version === 'string') document.getElementById('app-version').textContent = `v${data.version}` }).catch(() => {})

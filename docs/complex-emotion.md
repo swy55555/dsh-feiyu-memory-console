@@ -1,6 +1,6 @@
 # 情绪系统 v2：复杂情境与按需模型复核
 
-版本：0.8.10。基于 v0.8.9，整合 preview.1～preview.3 的情绪系统和修复；运行行为与已部署验证的 preview.3 一致。
+适用版本：0.8.10 / 0.8.11。情绪机制在 0.8.10 引入，0.8.11 继续沿用。本页的历史测试数字与情绪用量估算描述 0.8.10 当时的验证；当前完整功能见用户手册，安装以仓库顶层 UPGRADE.md 为准。
 
 ## 这次采用的方案
 
@@ -49,7 +49,7 @@
 
 ## 安装和回退
 
-使用完整 `dsh-feiyu-memory-console-0.8.10-source.zip` 或同版本 `.tgz`。按源码内 `UPGRADE.md` 维护窗口步骤备份、停止并更新服务；在解压目录运行：
+使用完整 `dsh-feiyu-memory-console-0.8.11-source.zip` 或同版本 `.tgz`。按源码内 `UPGRADE.md` 维护窗口步骤备份、停止并更新服务；在解压目录运行：
 
 ```powershell
 node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --check

@@ -1,363 +1,150 @@
 # 可塑性记忆
 
-> 本地优先的 QQ 角色记忆控制台，DSH 插件形态。
-> v0.8.10 新增情绪系统 v2 和复杂情境按需复核，详见 [升级说明](UPGRADE.md) 与 [复杂情境和用量](docs/complex-emotion.md)。
+面向 DSH 与 QQ 桥接的本地记忆管理插件。集中查看和维护长期记忆、聊天原文与摘要、日记、性格和情绪，提供来源核对、处理进度和部分操作的撤销能力。
 
-![version](https://img.shields.io/badge/version-0.8.10-0e5a68)
-![license](https://img.shields.io/badge/license-MIT-2e8696)
-![node](https://img.shields.io/badge/node-24%2B-339933)
-![platform](https://img.shields.io/badge/platform-Windows-0078d4)
+![Version](https://img.shields.io/badge/version-0.8.11-0e5a68)
+![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933)
+![Platform](https://img.shields.io/badge/platform-Windows-0078d4)
+![License](https://img.shields.io/badge/license-MIT-2e8696)
 
-把长期记忆、原文与摘要、日记、性格和情绪放进同一个本地页面：能看、能改、能撤回。记忆数据库保存在本机；开启聊天、摘要或情绪模型复核时，相应文本会发送给你配置的模型服务。
+[下载 v0.8.11](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.8.11) · [用户手册](manual/USER_GUIDE-0.8.11.md) · [PDF 手册](manual/可塑性记忆-使用手册-0.8.11.pdf) · [升级指南](UPGRADE.md) · [更新日志](CHANGELOG.md)
 
-[0.8.9 基础手册](manual/可塑性记忆-使用手册-0.8.9.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
+## 项目定位
 
----
+本项目是已有 DSH/QQ 桥接环境的扩展，**不是包含 DSH、QQ、SnowLuma 和全部依赖的一键安装包**。插件包含控制台、独立记忆服务源码，以及用于已知桥接版本的运行时更新模块。
 
-## 目录
+数据库和状态文件默认保存在本机。聊天、提取、摘要、遗漏检查及启用后的语义复核会向所配置的模型服务发送相关文本；“本地保存”不代表全部功能都离线运行。
 
-- [功能](#功能)
-- [截图](#截图)
-- [环境要求](#环境要求)
-- [安装](#安装)
-- [配置](#配置)
-- [使用](#使用)
-- [数据与隐私](#数据与隐私)
-- [常见问题](#常见问题)
-- [开发与测试](#开发与测试)
-- [已知限制](#已知限制)
-- [文档](#文档)
-- [致谢](#致谢)
-- [免责声明](#免责声明)
-- [许可证](#许可证)
+## 主要功能
 
-## 功能
+| 功能 | 可以做什么 |
+| --- | --- |
+| 长期记忆 | 按聊天、状态、层级筛选；查看原话、确认候选、编辑、归档、恢复、删除和导出 |
+| 事实核对 | 区分共存、补充、重复与冲突；确认和恢复分批检查旧事实，进度保存，可中断续接 |
+| 提取与查漏 | 从允许的聊天整理个人事实；独立检查遗漏，失败或未完成的消息保留续处理 |
+| 整理记录 | 查看近期消息的排队、检查、遗漏、重试和提取时状态；调整批次额度 |
+| 检索与记忆图 | 本地语义检索、来源证据与可视化关联；区分检索预览和实际回复使用记录 |
+| 原文与摘要 | 查看会话原文、摘要及回复上下文，手动生成或删除不准确的摘要 |
+| 性格与情绪 | 维护角色底色和边界；查看事件驱动的情绪变化，按需复核复杂情境 |
+| 日记与情景 | 管理公开日记、查看私密日记及补页；查看事件、解释、情绪与结果 |
+| 主动联系与催睡 | 配置时间窗、概率、次数和冷却；满足条件时由桥接发起联系 |
+| 轻量记忆与玩梗 | 查看临时话题和印象，管理可选梗库功能；梗库需另行准备 |
+| 用量与审计 | 查看调用分类和费用统计，核对操作记录；有撤销入口的操作可尝试撤销 |
+| 空闲联想（试验） | 主人私聊空闲时，从同一聊天真实记忆出发形成短程话题设想；默认关闭 |
 
-| 模块 | 说明 |
-|---|---|
-| 总览 | 记忆总量、聊天分布、最近记忆、待整理队列、日记入口、称呼设置 |
-| 长期记忆 | 按聊天/状态/层级筛选，搜索，新增，改重要度，确认候选，归档，删除，导出；同正文不同日期的事件会自动合并 |
-| 记忆图 | 记忆关联可视化，支持宇宙/简洁两种视图，可缩放、平移、按聊天/层级/状态过滤 |
-| 语义搜索 | 本地向量检索，不调用外部模型 |
-| 轻量记忆 | 进行中的话题、没说出口的想法、群友印象 |
-| 整理队列 | 查看队列、手动提炼、调整每日/群聊额度、暂停自动整理 |
-| 日记 | 公开本可读可改可补；私密本加密，需要密码解锁 |
-| 性格 | 查看/编辑维度、底色、边界，从角色卡起草，按聊天微调，撤销变化 |
-| 情绪 | 核心情绪、心情、长期底色三层，情绪盘、触发链、微调审计；心情低时会唱反调 |
-| 玩梗 | 从本地 6668 条梗库挑 1–2 个候选，自然才接；政治类跳过，攻击类只在心情差时出现 |
-| 花费 | 单独统计可塑性记忆自身、角色对话、历史内部和未归属的 tokens/费用；环形占比、按聊天明细、24h/7天/30天 |
-| 情景记忆 | 事件、解释、情绪、行动、结果，支持补结果和删除 |
-| 会话上下文 | 原文层与摘要层：看最近原文/摘要、手动生成、删除写坏的摘要 |
-| 主动联系 | 时间窗内按概率主动找你；太久没理她会掉心情、带小脾气 |
-| 催睡觉 | 到点催睡；催了还不睡会闹脾气 |
+不同对象的偏好不应仅因同属“饮食”而互相覆盖。例如“不喜欢煎饼”和“喜欢小笼包”可以同时成立。模型仍可能判断错误，请以原话和实际情况为准。
 
-写操作都有审计。记忆删除、公开日记修改、候选确认支持撤销；衰减归档没有整批撤销入口。
+## v0.8.11 更新重点
 
-## 截图
+- 网页显示实际加载版本；确认与恢复统一处理事实关系、历史变化和撤销。
+- 内容入队不再依赖固定记忆词表，仍受会话授权和群聊参与策略约束。
+- 旧事实每批核对 8 条，继续检查同聊天、同主体全部有效事实，不再把八条当作总上限。
+- 提取声明完成后增加独立遗漏检查，显示最近最多 500 条消息处理记录。
+- 新增默认关闭的空闲联想试验；它不直接写记忆、改情绪或发送消息。
 
-截图来自纯合成演示库，人名、QQ 号、对话均为虚构。
+本版不自动回填历史漏记，也不自动开启跨聊天共享。完整变更见 [更新日志](CHANGELOG.md)。
+
+## 界面预览
+
+以下为历史版本的合成数据截图，用于说明页面结构；新增控件以当前界面和手册为准，不展示真实用户对话。
 
 | 总览 | 长期记忆 |
-|---|---|
-| <img src="docs/assets/overview.webp" width="480" alt="总览"> | <img src="docs/assets/library.webp" width="480" alt="长期记忆"> |
-
-| 记忆图 | 会话上下文 |
-|---|---|
-| <img src="docs/assets/graph.webp" width="480" alt="记忆图"> | <img src="docs/assets/context.webp" width="480" alt="会话上下文"> |
-
-| 轻量记忆 | 整理 |
-|---|---|
-| <img src="docs/assets/light.webp" width="480" alt="轻量记忆"> | <img src="docs/assets/upkeep.webp" width="480" alt="整理"> |
-
-memvec 内部结构：
-
-![memvec 模块总览](docs/assets/memvec-modules.svg)
+| --- | --- |
+| ![总览演示](docs/assets/overview.webp) | ![长期记忆演示](docs/assets/library.webp) |
 
 ## 环境要求
 
-| 组件 | 是否必须 | 说明 |
-|---|---|---|
-| DSH 桌面版 2.x | 是 | Node.js 24+ |
-| memvec | 是 | 默认 `127.0.0.1:9881`，包内附源码 |
-| QQ 桥接 | 完整功能需要 | 默认 `127.0.0.1:3100`，不在包内 |
-| SnowLuma | 完整功能需要 | OneBot v11 网关，第三方软件 |
-| QQ 账号 | 完整功能需要 | 自行登录 SnowLuma |
+| 组件 | 要求与用途 |
+| --- | --- |
+| Windows | 当前主要验证平台；其他系统未完成完整联调 |
+| DSH | 支持本项目插件接口的版本；基于现有 DSH NEXT 环境验证，不承诺全部宿主版本兼容 |
+| Node.js | 24 或更新版本，使用内置 SQLite 功能 |
+| Python | 3.10 或更新版本；依赖见 `memvec/requirements.txt` |
+| memvec | 独立记忆服务，默认 `127.0.0.1:9881` |
+| QQ 桥接 | 完整功能需要已有基础环境及 SDK；默认控制端口 3100 |
+| SnowLuma / QQ | QQ 收发链路需要，由使用者另行部署和登录 |
+| 模型服务 | 提取、查漏、摘要和可选复核需要已配置的聊天模型 |
 
-包内不含 QQ 桥接、SnowLuma、QQ 账号，也不含记忆数据库和模型缓存。
+## 安装与升级
 
-## 安装
+已有安装先阅读 [升级指南](UPGRADE.md)。只更新网页不能更新桥接或独立 memvec 服务。
 
-### 1. 安装插件
-
-在 DSH 的 **设置 → 插件 → 安装** 里选择本包，或本地开发时填写：
-
-```text
-link:C:\Users\<用户名>\.dsh\plugins\dsh-feiyu-memory-console
-```
-
-装完重启一次 DSH。页面资源每次请求读取，但宿主路由在启动时加载，**更新插件后也要重启**。
-
-### 2. 启动 memvec
-
-`memvec` 是独立 Python 服务，不会随 DSH 自动启动。
+1. 下载 `.tgz` 插件包或 `-source.zip` 完整源码，核对附件 SHA-256。
+2. 按当前 DSH 的本地插件安装入口安装本包。源码链接开发应指向实际解压目录。
+3. 在插件目录检查环境并准备记忆服务：
 
 ```powershell
-cd <插件目录>
 npm run doctor
 python -m pip install -r memvec/requirements.txt
 npm run start:memvec
 ```
 
-`doctor` 只检查，不安装依赖、不下载模型。首次启动会下载 `BAAI/bge-small-zh-v1.5`（约 90MB），之后离线加载。
+`doctor` 只检查。首次启动可能下载向量模型；已有数据库应继续使用原路径，不能误建空库。
 
-CPU 默认限制在 4 个线程（`MEMVEC_THREADS=4`），后台常驻不会一次抽走所有核；想快可设 8，想更省设 2。记忆量超过 2 万条才需要考虑 ANN，小库用精确扫描更准。
-
-确认：
+4. 备份并停止已有桥接，在插件目录检查兼容性，再安装统一运行时：
 
 ```powershell
-curl.exe http://127.0.0.1:9881/stats
+node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --check
+node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 ```
 
-返回 `{"ok":true,...}` 即正常。
+将示例替换为实际桥接目录。未知或自定义运行时会拒绝覆盖，应先检查差异。
 
-### 3. 启动 QQ 桥接
+5. 确认独立服务使用本包的 `memvec/server.py`，启动 memvec、DSH 和桥接。打开“可塑性记忆”，在总览检查版本和服务状态。
 
-```powershell
-cd ~/.dsh/qq-bridge
-node src/bridge.js
-```
+默认本机网页地址为 `http://127.0.0.1:3080/dsh-feiyu-memory/`，实际端口以 DSH 配置为准。完整路径核对与新手步骤见手册。
 
-确认：
+## 首次使用
 
-```powershell
-curl.exe http://127.0.0.1:3100/api/status
-```
+1. 总览完成启动检查，确认数据库路径一致、桥接在线。
+2. 在允许的聊天中正常交流；群聊默认只处理 @ 或回复机器人的消息。
+3. “整理”查看队列和“消息处理状态与遗漏检查”；普通闲聊可能没有新增事实。
+4. “长期记忆 → 待确认”核对原话。遇到冲突，可暂不处理、保留当前事实、分别保留或以候选为准。
+5. “语义找”检查检索结果；控制台预览不证明 QQ 回复已经使用这些记忆。
+6. 按需调整情绪复核、主动联系和试验功能。详细操作见 [用户手册](manual/USER_GUIDE-0.8.11.md)。
 
-### 4. 给桥接打补丁
+## 模型调用与配置
 
-原文/摘要、主动联系、主动玩梗、情绪唱反调、跨聊天情绪分享和情绪回弹都需要桥接补丁。**不在插件目录时，先 `cd` 到插件目录。**
+提取一批消息通常有一次提取和一次独立查漏调用；遗漏续处理会增加调用。确认/恢复时，每八条旧事实可能增加一次复核。复杂情绪复核开启后按需触发；空闲联想每轮最多两次调用。
 
-```powershell
-node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
-node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
-```
-
-- 统一安装七个桥接运行时模块并校验哈希；`--check` 只检查，`--apply` 安装，`--undo` 恢复本次安装前的文件。
-- 升级和回退请使用 `bridge/install-all.mjs`，详见 [升级说明](UPGRADE.md)。
-- `--check` 报 `incompatible` 就不要 `--apply`：说明 `bridge.js` 与补丁版本不匹配，先看 [UPGRADE.md](UPGRADE.md)。
-- 补丁会备份原文件并写回执；撤销用 `--undo`。
-- 如果桥接本身已内置对应逻辑，`--check` 会报 `already-inline`，不会重复插入。
-- 打完补丁重启桥接。
-
-### 5. 打开控制台
-
-- 已装 DSH：`http://127.0.0.1:3080/dsh-feiyu-memory/`，或侧栏「可塑性记忆」
-- 未装 DSH：`node bin/preview.mjs`，访问 `http://127.0.0.1:3999`
-
-| 状态灯 | 红色时先查 |
-|---|---|
-| 记忆库 | memvec 9881 未启动或端口被占用 |
-| 桥接 | QQ 桥接 3100 未启动 |
-| QQ | 桥接连不上 SnowLuma，或 QQ 未登录 |
-
-## 配置
-
-桥接配置在 `~/.dsh/qq-bridge/config.json`；主动联系和催睡也可以直接在控制台「情绪」页改，保存到 `owner-contact.json`。
-
-| 配置组 | 位置 | 说明 |
-|---|---|---|
-| 会话上下文 | `socialV2.context` | 原文/摘要注入上限、轮换轮数、重试间隔 |
-| 整理队列 | `socialV2.dailyMemory` | 每日批次、队列上限、群聊策略 |
-| 情绪 | `socialV2.emotion` | 长期漂移、聊天微调、权重、模型复核 |
-| 情绪低唱反调 | `socialV2.emotion.contrarian` | 阈值默认 -0.15，低于就允许质疑/抬杠，有攻击边界 |
-| 跨聊天情绪分享 | `socialV2.emotion.spillover` | 群聊/别人私聊的高情绪事件，等老大安静后主动去说 |
-| 情绪恢复 | `socialV2.emotion.recovery` | 生气按强度随机挂 10–45 分钟；被哄缩短到约 10 分钟，之后快速回弹 |
-| 主动联系 | `socialV2.ownerContact` 或 `owner-contact.json` | 时间窗、静默阈值、概率、闹脾气间隔 |
-| 催睡觉 | `socialV2.bedtime` 或 `owner-contact.json` | 催睡时间、概率、闹脾气间隔 |
-| 玩梗 | `state/meme-play.json` | 群聊/私聊开关、主动候选、攻击类心情阈值 |
-
-常用项：
-
-| 字段 | 默认 | 作用 |
-|---|---|---|
-| `context.messagesChars` | `6000` | 每轮注入原文的字符上限 |
-| `context.summaryChars` | `2000` | 每轮注入摘要的字符上限 |
-| `context.rotateTurns` | `40` | 多少轮后考虑会话轮换 |
-| `dailyMemory.maxCallsPerDay` | `200` | 每日提炼上限，`0` 为不限 |
-| `ownerContact.idleHours` | `1.5` | 多久没说话开始按概率找你 |
-| `ownerContact.probabilityPerCheck` | `0.15` | 每 5 分钟触发的基础概率 |
-| `ownerContact.maxPerDay` | `16` | 每日主动联系上限 |
-| `ownerContact.sulkCooldownHours` | `6` | 两次闹脾气的最小间隔 |
-| `bedtime.time` | `24:00` | 催睡时间 |
-| `bedtime.sulkCooldownHours` | `20` | 催睡闹脾气的冷却 |
-
-完整字段和默认值见 [0.8.9 基础手册](manual/可塑性记忆-使用手册-0.8.9.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
-
-### 玩梗
-
-梗库是 `~/.dsh/qq-bridge/data/memes.db`（6668 条）；开关和策略在 `~/.dsh/qq-bridge/state/meme-play.json`：
-
-```json
-{"enabled": true, "group": true, "private": true, "proactive": true, "attackMoodBelow": 0.1, "limit": 2}
-```
-
-- `enabled` 总开关，`group` / `private` 分开控制；
-- `proactive=false` 时只在对方明确提到梗时解释，不主动挑候选；
-- 政治类始终跳过；攻击/嘲讽类只在心情值低于 `attackMoodBelow` 时出现；
-- 每轮最多注入 `limit` 个候选，是否使用由模型判断，不强制；
-- 用过的梗会写一条低重要度记忆，`fact_key=meme:<slug>`、`tags` 带「梗」和场景；在长期记忆页搜「梗」能看、能删。
-
-### 梗库怎么用
-
-梗库是一个独立的 SQLite 文件，不在长期记忆里，也不参与遗忘曲线：
-
-```
-~/.dsh/qq-bridge/data/memes.db
-```
-
-- 表 `memes`，6668 条，字段：`title`（梗名）、`slug`、`tags`（标签）、`usage`（怎么用）、`origin`（出处）、`other`、`summary`（解释）。
-- 桥接在两处读它：
-  1. 对方明确问「XX 是什么梗」时，查一条解释塞进提示词；
-  2. 主动玩梗时，按最近消息的话题/标签挑 1–2 个候选，只给用法，不灌百科。
-- 她也可以在对话里用 MCP 工具 `qq_meme_lookup` 自己查；不用手动喂。
-- 想自己查：用 DB Browser for SQLite 打开，或 `sqlite3 memes.db "select title,tags from memes where title like '%下头%' limit 5;"`。
-- 想换库：先备份原文件，再替换成同表、同字段的 SQLite；桥接按文件修改时间自动重载，不用重启（改完等一两轮）。
-- 想关掉：把 `meme-play.json` 的 `enabled` 设为 `false`；只想关群聊就把 `group` 设为 `false`。
-- 图片消息会先做一次视觉描述/OCR，把图里的角色名、台词、梗名带进匹配；同一张图会缓存，不重复调用。
-- 过滤：政治类始终跳过；攻击/嘲讽类只在心情差时出现；色情/敏感词条也会跳过。
-
-> 数据说明：词条来自开源项目 [astrbot_plugin_memewiki](https://github.com/in1t1a1/astrbot_plugin_memewiki)（MIT）随包的 6668 条快照，内容源自 [cnmeme.wiki](https://cnmeme.wiki) 公开 API；不是本项目原创，也不随安装包分发。每条 `origin` 保留出处，使用/再分发前请核对上游规则。完整说明见 [docs/memes.md](docs/memes.md)。
-
-### 记忆共享
-
-默认关闭。在总览页「跨聊天记忆共享」里明确开启后，她才会检索别的聊天里的 active 记忆，并在提示词里标成「别处记住的（已过滤隐私）」。
-
-- 管理员私聊和旧 `global` 里的住址、地址、真名、姓名、身份证、手机号、护照、银行卡、密码、私密/秘密、别到处说、病历、工资、存款等不参与共享；
-- 其他聊天的普通偏好、习惯、计划和共同经历可以共享；
-- 总览页有「跨聊天记忆共享」开关，关掉后跨聊天检索完全停止，只召回当前聊天；
-- 配置：`socialV2.memoryShare.{enabled,topK,minScore}`，默认 `false/2/0.45`；开关会热更新，不用重启桥接。
-
-隐私过滤是关键词规则，不是语义模型；写得特别隐晦的住址或真名可能漏掉。
-
-### 花费
-
-「花费」页把可塑性记忆自身和角色对话分开：
-
-- 可塑性记忆：摘要、整理、图片 OCR、记忆提炼等后台调用；
-- 角色对话：QQ 会话本身；
-- 历史内部：旧版本混在 `internal:黑话学习` 里的记录，单列不混入插件；
-- 未归属：无法对应到 QQ 会话的 DSH 调用。
-
-页面有环形占比、每类色块卡片、按聊天展开的输入/输出、缓存命中、轮次、会话数和模型；时间统计支持 24 小时 / 7 天 / 30 天，柱子的青色部分是可塑性记忆。记忆库占用显示数据库大小、原文/摘要/长期记忆条数。
-
-## 使用
-
-1. 先开 memvec，再开桥接，最后开 DSH。
-2. 「总览」看记忆总量和待处理项。
-3. 「长期记忆」确认候选、改重要度、看来源；「记忆图」看关联。
-4. 「整理」查看队列、调额度、手动提炼。
-5. 「情绪」调主动联系和催睡；「会话上下文」看原文和摘要；「花费」看她自己烧了多少钱。
-6. 「日记」「性格」「情景记忆」按需修改，写操作都有审计。
+整理额度按成功批次计，不等于模型请求次数或 token 上限；`0` 表示不限。新环境的总额度默认不限，群聊仍有独立额度和低产出暂停。**升级保留已有配置**，不会把已有数值强制改为不限。情绪模型复核的每日不限与记忆整理额度是两套设置。实际费用以模型服务账单为准。
 
 ## 数据与隐私
 
-| 数据 | 路径 |
-|---|---|
-| 长期记忆、原文、摘要 | `~/.dsh/memvec/memories.db` |
-| 轻量记忆 | `~/.dsh/qq-bridge/state/social-v2.json` |
-| 整理队列 | `~/.dsh/qq-bridge/state/daily-memory-queue.json` |
-| 公开日记 | `~/.dsh/whale-diary.md` |
-| 私密日记 | `~/.dsh/feiyu-memory-console/private-diary.vault.json` |
-| 性格 / 情绪 / 情景 | `~/.dsh/feiyu-memory-console/` |
-| 主动联系 / 催睡 | `~/.dsh/qq-bridge/owner-contact.json` |
-| 审计日志 | `~/.dsh/feiyu-memory-console/audit.jsonl` |
-
-- 只监听 `127.0.0.1` / `::1`，没有外部入口。
-- 写操作要求 `x-feiyu-console: 1` 请求头和同源校验。
-- 前端无框架、无外部 CDN。
-- 私密日记 AES-256-GCM 加密，不会自动进入 QQ 记忆。
-- 私密日记密码明文保存在桥接的受限文件里，管理员可读；它是防随手翻的软加密。
-
-备份记忆库只需要复制 `memories.db`。不要分享 SnowLuma token、桥接 console token 或含白名单的配置。
-
-## 常见问题
-
-| 现象 | 原因 / 处理 |
-|---|---|
-| 控制台是空的，没有原文/摘要 | 桥接没打上下文补丁；运行 `bridge/install.mjs --apply` 后重启桥接 |
-| 情绪页没有「主动联系」或「催睡觉」 | 桥接没有 `owner-contact` capability；运行 `bridge/install-owner-contact.mjs --apply` 后重启桥接 |
-| 「玩梗」页有设置但桥接不玩梗 | 桥接没打玩梗补丁；运行 `bridge/install-meme-play.mjs --apply` 后重启桥接 |
-| 保存主动联系/催睡 404 | DSH 还跑着旧路由；重启一次 DSH |
-| 记忆库红 | memvec 9881 未启动，运行 `npm run start:memvec` |
-| 桥接红 | 桥接 3100 未启动 |
-| QQ 红 | 桥接连不上 SnowLuma，或 QQ 未登录 |
-| `--check` 报 incompatible | 桥接版本和补丁不匹配，先看 [UPGRADE.md](UPGRADE.md)，不要强装 |
-
-`npm run doctor` 会检查 Node、Python、记忆服务依赖、桥接能力、上下文补丁和主动联系支持情况。
-
-## 开发与测试
-
-```powershell
-# 本地预览
-node bin/preview.mjs
-
-# 同步 memvec 源码
-node scripts/sync-memvec.mjs
-node scripts/sync-memvec.mjs --check
-
-# 全套测试
-npm test
-
-# 单独运行
-node test/features.test.mjs
-node test/host.test.mjs
-node test/diary.test.mjs
-node test/audit.test.mjs
-node test/p0-context.test.mjs
-python test/memvec_test.py
-python test/p0-context-test.py
-
-# 浏览器回归（需要 Playwright）
-node test/browser.test.mjs
-```
-
-`npm test` 跑七组隔离测试：插件路由、性格/情绪/情景、日记、审计、真实本机 HTTP 集成、上下文工程、Python 记忆生命周期。Python 测试使用固定向量，不下载模型、不连 QQ。
+- 默认数据根目录为 `~/.dsh`。长期记忆、原文与摘要在 `memvec/memories.db`，整理队列在 `qq-bridge/state/daily-memory-queue.json`。
+- 配置、日记、性格、情绪与审计记录分布在桥接和 `feiyu-memory-console` 目录；备份不能只有插件源码。
+- 数据库运行时可能存在 WAL/SHM 文件。应使用 SQLite 在线备份，或停止服务后备份完整数据，不能把运行中单独复制 `.db` 视为一致备份。
+- 默认按聊天隔离。跨聊天共享需明确开启，隐私过滤存在局限，不等同于可靠匿名化。
+- 私密日记使用加密存储，但本机管理员或持有解锁材料者仍可能读取，不等同于端到端加密。
+- 不公开真实聊天库、模型密钥、控制台令牌、QQ 白名单或用户日志。
 
 ## 已知限制
 
-- 包内不含 QQ 桥接、SnowLuma 和 QQ 账号。
-- 没有桥接时，整理队列、情绪演化、私密日记等桥接功能不可用。
-- 私密日记只支持查看和补页，不支持编辑。
-- 记忆图最多加载 800 条，跨页不绘制边。
-- 情绪 appraisal 基于规则，对反讽和复杂上下文可能误判。
-- 情景记忆的行动和结果是启发式回填，不是完整因果模型。
-- 没有移动端专门布局。
+- 模型提取、查漏与语义判断仍会出错；独立检查不是完整性或准确率保证。
+- 大量历史需要多批调用；中断可续接，事实发生相关变化时需重新检查。
+- 最近最多 500 条处理记录中的事实状态为提取时快照；当前状态以长期记忆页为准。
+- 超过 12000 字的消息保留待拆分；队列容量达到上限时，移出项会留下状态。
+- 情绪理解使用有限规则和上下文，复杂反讽、指代和角色扮演仍可能误判。
+- 空闲联想是有限的候选话题机制，不代表持续自主思考，质量和重复话题需要观察。
+- 审计不等于所有操作都能撤销；已发送消息不会因记忆撤销自动收回。
 
-## 文档
+## 开发与发布
 
-- [0.8.9 基础手册（PDF）](manual/可塑性记忆-使用手册-0.8.9.pdf)：逐页功能说明、配置和排查
-- [memvec 技术说明](docs/memvec.md)：技术选型、数据模型、检索与遗忘公式、参考文献
-- [梗库说明](docs/memes.md)：表结构、来源说明、替换与过滤规则
-- [上下文层说明](bridge/P0-CONTEXT.md)：原文、摘要、轮换和预算
-- [更新日志](CHANGELOG.md) · [升级说明](UPGRADE.md) 与 [复杂情境和用量](docs/complex-emotion.md)
+```powershell
+npm test
+npm run test:browser
+npm run test:browser:context
+```
 
-## 致谢
+基础回归包含 15 组隔离测试。浏览器测试另需 Playwright 和兼容浏览器；测试使用隔离数据，不向 QQ 发消息。[发布规范](docs/RELEASING.md) 说明版本、标签、测试、附件、校验和草稿发布流程。
 
-这个项目不是一个人想出来的：最早的想法、主动联系和催睡的节奏、记忆分层和轮换的规则，很多来自群友的试用、反例和讨论。
+反馈问题时请附版本、操作步骤、期望与实际结果，以及去除个人信息后的错误信息。
 
-技术上站在 DSH、SnowLuma / OneBot、BAAI BGE、FastEmbed、force-graph、SQLite 这些项目上；思路也参考过 MemGPT、Generative Agents、mem0 等记忆系统。
+## 文档与许可
 
-为了不替别人公开身份，README 不逐一列名；完整说明和名单见 [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md)。愿意具名的朋友可以直接说，我补进去。
-## 免责声明
+- [详细用户手册](manual/USER_GUIDE-0.8.11.md) / [PDF](manual/可塑性记忆-使用手册-0.8.11.pdf)
+- [升级与回退](UPGRADE.md) / [更新日志](CHANGELOG.md)
+- [情绪与复杂情境](docs/complex-emotion.md) / [记忆服务说明](docs/memvec.md)
+- [致谢与来源](ACKNOWLEDGEMENTS.md) / [免责声明](DISCLAIMER.md)
 
-本项目是个人开源项目，**不是** DeepSeek、DSH、腾讯 QQ、SnowLuma 或任何模型/平台方的官方产品，与其没有隶属或背书关系。
-
-- 自动化收发 QQ 消息可能违反平台条款，存在限流、封号等风险，由使用者自行承担。
-- 模型生成的台词、记忆、摘要和情绪判断可能不准确或包含幻觉，请勿用于医疗、法律、财务等专业决策。
-- 数据默认存在本机，备份、隐私和访问控制由使用者负责；删除或轮换可能造成不可恢复的数据丢失。
-- 本项目按“现状”提供，不附带担保；作者不对数据丢失、账号处罚或模型输出造成的损失负责。
-
-完整条款见 [DISCLAIMER.md](DISCLAIMER.md)。继续安装或使用即表示你已阅读并同意。
-## 许可证
-
-MIT
+本项目采用 [MIT 许可证](LICENSE)，为独立开源项目，与 DeepSeek、DSH、腾讯 QQ、SnowLuma 或模型服务商无官方隶属关系。使用第三方服务时，应遵守其协议和适用要求。

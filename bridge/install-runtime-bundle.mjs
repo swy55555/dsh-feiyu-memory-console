@@ -4,8 +4,12 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.8.10";
+export const RUNTIME_VERSION = "0.8.11";
 const files = {
+  "memory-coverage.mjs": "memory-coverage.mjs",
+  "idle-association.mjs": "idle-association.mjs",
+  "daily-memory.js": "daily-memory.js",
+  "fact-review.mjs": "fact-review.mjs",
   "bridge.js": "bridge-v09.js",
   "human-context.mjs": "human-context-v09.mjs",
   "emotion.js": "emotion.js",
@@ -22,6 +26,8 @@ const sourceHash = (file) =>
       .replace(/^\uFEFF/, "")
       .replaceAll("\r\n", "\n"),
   );
+const knownAuxiliary = { "daily-memory.js": "a71448afb1c6d23cf938b18ed618dd89fc5e4f6f7344d565a35bf754b14c9d17" };
+const recognizedAuxiliary = (name, file) => knownAuxiliary[name] && sourceHash(file) === knownAuxiliary[name];
 const receiptFile = (root) => path.join(root, "state", "runtime-bundle.json");
 function receipt(root) {
   try {
@@ -116,7 +122,8 @@ export function installRuntime(
       if (
         !previous.files[name] &&
         fs.existsSync(path.join(src, name)) &&
-        sourceHash(path.join(src, name)) !== sourceHash(path.join(here, source))
+        sourceHash(path.join(src, name)) !== sourceHash(path.join(here, source)) &&
+        !recognizedAuxiliary(name, path.join(src, name))
       )
         throw Error(`新增模块 ${name} 已存在自定义内容，未覆盖`);
     }
@@ -124,6 +131,12 @@ export function installRuntime(
     throw Error(
       "未知或自定义运行时：未覆盖。确认需要整份替换时使用 --replace-legacy（先备份）。",
     );
+  for (const name of ["daily-memory.js", "fact-review.mjs", "idle-association.mjs", "memory-coverage.mjs"]) {
+    const file = path.join(src, name);
+    if (!replaceLegacy && !previous?.files?.[name] && fs.existsSync(file) &&
+        sourceHash(file) !== sourceHash(path.join(here, files[name])) && !recognizedAuxiliary(name, file))
+      throw Error(`辅助模块 ${name} 存在未知修改，未覆盖`);
+  }
   for (const source of Object.values(files)) {
     const check = spawnSync(
       process.execPath,

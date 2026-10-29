@@ -1,5 +1,7 @@
 # 上下文层：原文 + 摘要 + 轮换
 
+本文保留早期上下文层设计与旧安装器说明。v0.8.11 的安装和回退请以仓库顶层 UPGRADE.md 为准，使用统一 install-all 安装器，不混用旧补丁步骤。
+
 目标：让“她眼前看到什么”由可塑性记忆决定，而不是由 DSH 会话历史决定。三层数据都落在 memvec，桥接每轮只读取和拼装。
 
 ## 数据流
@@ -114,7 +116,7 @@ python test/p0-context-test.py  # 幂等、beforeAt、摘要裁剪、HTTP 路由
 ## 回退
 
 ```powershell
-node bridge/install.mjs --target C:/Users/sunwy/.dsh/qq-bridge --undo
+node bridge/install.mjs --target "D:/your-dsh/qq-bridge" --undo
 ```
 
 memvec 的 `messages` / `session_summaries` 表留着无害；只关注入：`socialV2.context.enabled=false`。

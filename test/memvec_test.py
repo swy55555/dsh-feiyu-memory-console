@@ -28,6 +28,14 @@ class MemoryLifecycleTests(unittest.TestCase):
     def add(self, text, scope='private:10001', subject='10001', **kwargs):
         return m.add_memory(text, scope=scope, subject_id=subject, **kwargs)['id']
 
+    def confirm(self, scope, mid):
+        try:
+            return m.confirm_memory(scope, mid)
+        except m.MemoryConflict as error:
+            if not error.conflict:
+                raise
+            return m.confirm_memory(scope, mid, 'use-candidate', error.conflict['revision'])
+
     def row(self, mid):
         with m.db() as c:
             c.row_factory = m.sqlite3.Row
@@ -56,7 +64,7 @@ class MemoryLifecycleTests(unittest.TestCase):
     def test_confirm_and_undo_restore_every_row(self):
         old, new = self.pair(tier='core')
         before = [self.row(old), self.row(new)]
-        result = m.confirm_memory('private:10001', new)
+        result = self.confirm('private:10001', new)
         self.assertEqual(self.row(old)['status'], 'superseded')
         self.assertEqual(self.row(new)['status'], 'active')
         m.undo_confirm('private:10001', result['undo']['operationId'])
@@ -72,7 +80,7 @@ class MemoryLifecycleTests(unittest.TestCase):
         new = self.add('related candidate', semantic_checked=True, relation='conflict', related_id=old,
                        source_time=m.now(), expires_at=m.now()+5000)
         before = self.row(new)
-        result = m.confirm_memory('private:10001', new)
+        result = self.confirm('private:10001', new)
         self.assertEqual(self.row(new)['tier'], 'core')
         self.assertEqual(self.row(new)['expires_at'], 0)
         m.undo_confirm('private:10001', result['undo']['operationId'])
@@ -81,7 +89,7 @@ class MemoryLifecycleTests(unittest.TestCase):
 
     def test_undo_refuses_later_changes_without_partial_restore(self):
         old, new = self.pair()
-        result = m.confirm_memory('private:10001', new)
+        result = self.confirm('private:10001', new)
         with m.db() as c:
             c.execute('UPDATE memories SET importance=.9 WHERE id=?', (new,))
         with self.assertRaises(m.MemoryConflict):
@@ -91,7 +99,7 @@ class MemoryLifecycleTests(unittest.TestCase):
 
     def test_undo_refuses_new_conflicting_fact(self):
         old, new = self.pair()
-        result = m.confirm_memory('private:10001', new)
+        result = self.confirm('private:10001', new)
         later = self.add('later', confirmed=True)
         with m.db() as c:
             c.execute("UPDATE memories SET fact_key='preference' WHERE id=?", (later,))
@@ -113,11 +121,329 @@ class MemoryLifecycleTests(unittest.TestCase):
 
     def test_operation_survives_reopening_and_is_single_use(self):
         _, new = self.pair()
-        op = m.confirm_memory('private:10001', new)['undo']['operationId']
+        op = self.confirm('private:10001', new)['undo']['operationId']
         # Each call opens a fresh SQLite connection; undo depends on disk state.
         m.undo_confirm('private:10001', op)
         with self.assertRaises(m.MemoryConflict):
             m.undo_confirm('private:10001', op)
+
+    def conflict_pair(self):
+        candidate = self.add('older candidate', fact_key='drink', source_time=m.now()-100)
+        active = self.add('newer confirmed', fact_key='drink', confirmed=True, source_time=m.now(), tier='core')
+        with self.assertRaises(m.MemoryConflict) as raised:
+            m.confirm_memory('private:10001', candidate)
+        conflict = raised.exception.conflict
+        self.assertEqual(conflict['candidate']['id'], candidate)
+        self.assertEqual([r['id'] for r in conflict['confirmed']], [active])
+        return candidate, active, conflict['revision']
+
+    def review(self, mid, relation='coexist', operation='confirm'):
+        context = m.confirmation_context('private:10001', mid, operation)['context']
+        return {'revision': context['revision'], 'candidateEvidence': context['candidate']['quote'],
+                'relations': [{'id': row['id'], 'relation': relation, 'confidence': .99, 'evidence': row['quote']}
+                              for row in context['related']]}
+
+    def fact(self, obj, value, evidence, condition='', timeframe=''):
+        return {'object': obj, 'attribute': '偏好', 'value': value, 'condition': condition,
+                'timeframe': timeframe, 'cardinality': 'single', 'evidence': evidence}
+
+    def test_broad_category_never_supersedes_different_objects(self):
+        a = self.add('不喜欢吃煎饼', fact_key='preference.饮食', confirmed=True,
+                     fact=self.fact('煎饼', '不喜欢', '不喜欢吃煎饼'))
+        b = self.add('喜欢吃小笼包', fact_key='preference.饮食', confirmed=True,
+                     fact=self.fact('小笼包', '喜欢', '喜欢吃小笼包'))
+        self.assertEqual(self.row(a)['status'], 'active')
+        self.assertEqual(self.row(b)['status'], 'active')
+        with m.db() as c:
+            c.execute("UPDATE memories SET status='archived' WHERE id=?", (a,))
+        with self.assertRaises(m.MemoryConflict):
+            m.restore_memory('private:10001', a)
+        m.restore_memory('private:10001', a, review=self.review(a, operation='restore'))
+        self.assertEqual(self.row(a)['status'], 'active')
+
+    def test_same_source_multiple_facts_are_not_deduplicated_by_category(self):
+        a = self.add('不喜欢煎饼', fact_key='preference.饮食', source_id='same-message')
+        b = self.add('喜欢小笼包', fact_key='preference.饮食', source_id='same-message')
+        self.assertNotEqual(a, b)
+
+    def test_semantic_review_accepts_unlisted_expressions_and_context(self):
+        # Contract test with a stubbed model verdict, not a semantic-accuracy benchmark.
+        for text in ['周末会吃早饭', '这座城让我想留下', '茶对我来说是续命水']:
+            self.add(text, confirmed=True, fact_key='broad.category')
+        candidate = self.add('工作日来不及吃早餐', fact_key='broad.category')
+        review = self.review(candidate)
+        result = m.confirm_memory('private:10001', candidate, review=review)
+        self.assertEqual(result['changed'], 1)
+        with m.db() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM memories WHERE status='active'").fetchone()[0], 4)
+
+    def test_semantic_review_requires_complete_negation_evidence(self):
+        self.add('喜欢煎饼', confirmed=True)
+        candidate = self.add('不喜欢煎饼')
+        review = self.review(candidate)
+        review['candidateEvidence'] = '喜欢煎饼'
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', candidate, review=review)
+        self.assertEqual(self.row(candidate)['status'], 'candidate')
+
+    def test_semantic_review_rejects_added_fact_and_incomplete_coverage(self):
+        self.add('current fact', confirmed=True)
+        candidate = self.add('candidate fact')
+        review = self.review(candidate)
+        self.add('new fact arrived', confirmed=True)
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', candidate, review=review)
+        review = self.review(candidate)
+        review['relations'].pop()
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', candidate, review=review)
+
+    def test_same_object_opposites_require_choice_even_when_newer(self):
+        a = self.add('喜欢煎饼', confirmed=True, fact=self.fact('煎饼', '喜欢', '喜欢煎饼'))
+        b = self.add('不喜欢煎饼', confirmed=True, fact=self.fact('煎饼', '不喜欢', '不喜欢煎饼'))
+        self.assertEqual(self.row(b)['status'], 'candidate')
+        review = self.review(b, 'conflict')
+        with self.assertRaises(m.MemoryConflict) as raised:
+            m.confirm_memory('private:10001', b, review=review)
+        m.confirm_memory('private:10001', b, 'coexist', raised.exception.conflict['revision'], review)
+        self.assertEqual(self.row(a)['status'], 'active')
+        self.assertEqual(self.row(b)['status'], 'active')
+
+    def test_model_cannot_replace_a_different_object(self):
+        old_fact = self.fact('煎饼', '不喜欢', '不喜欢煎饼')
+        a = self.add('不喜欢煎饼', confirmed=True, fact=old_fact)
+        b = self.add('现在喜欢小笼包', confirmed=True, semantic_checked=True, relation='replace',
+                     related_id=a, related_time=self.row(a)['source_time'], relation_confidence=.99,
+                     explicit_update=True, update_evidence='现在喜欢小笼包', related_fact=old_fact,
+                     fact=self.fact('小笼包', '喜欢', '现在喜欢小笼包'))
+        self.assertEqual(self.row(a)['status'], 'active')
+        self.assertEqual(self.row(b)['status'], 'candidate')
+
+    def test_unknown_category_and_new_timestamp_cannot_overwrite(self):
+        a = self.add('meaning needs context', fact_key='anything', confirmed=True)
+        b = self.add('another ambiguous sentence', fact_key='anything', confirmed=True)
+        self.assertEqual(self.row(a)['status'], 'active')
+        self.assertEqual(self.row(b)['status'], 'active')
+
+    def test_aliases_are_not_proof_of_coexistence(self):
+        a = self.add('喜欢咖啡', confirmed=True, fact=self.fact('咖啡', '喜欢', '喜欢咖啡'))
+        b = self.add('不喜欢拿铁', fact=self.fact('拿铁', '不喜欢', '不喜欢拿铁'))
+        self.assertEqual(m.fact_relation(self.row(a), self.row(b)), 'uncertain')
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', b)
+
+    def test_extracted_explicit_correction_needs_review_before_replacing(self):
+        fact = self.fact('咖啡', '喜欢', '喜欢咖啡')
+        a = self.add('喜欢咖啡', confirmed=True, fact=fact)
+        b = self.add('现在不喜欢咖啡了', confirmed=True, fact=self.fact('咖啡', '不喜欢', '现在不喜欢咖啡了'),
+                     semantic_checked=True, relation='replace', related_id=a, related_time=self.row(a)['source_time'],
+                     relation_confidence=.99, explicit_update=True, update_evidence='现在不喜欢咖啡了', related_fact=fact)
+        self.assertEqual(self.row(a)['status'], 'active')
+        self.assertEqual(self.row(b)['status'], 'candidate')
+        review = self.review(b, 'replace')
+        with self.assertRaises(m.MemoryConflict) as error:
+            m.confirm_memory('private:10001', b, review=review)
+        result = m.confirm_memory('private:10001', b, 'use-candidate', error.exception.conflict['revision'], review)
+        self.assertEqual(self.row(a)['status'], 'superseded')
+        m.undo_confirm('private:10001', result['undo']['operationId'])
+        self.assertEqual(self.row(a)['status'], 'active')
+
+    def test_restore_unknown_legacy_fact_needs_review_and_can_coexist_with_undo(self):
+        a = self.add('不喜欢煎饼', confirmed=True)
+        with m.db() as c:
+            c.execute("UPDATE memories SET status='archived' WHERE id=?", (a,))
+        b = self.add('喜欢小笼包', confirmed=True)
+        with self.assertRaises(m.MemoryConflict) as error:
+            m.restore_memory('private:10001', a)
+        self.assertEqual(error.exception.conflict['operation'], 'restore')
+        self.assertEqual(self.row(a)['status'], 'archived')
+        result = m.restore_memory('private:10001', a, review=self.review(a, operation='restore'))
+        self.assertEqual(self.row(a)['status'], 'active')
+        m.undo_confirm('private:10001', result['undo']['operationId'])
+        self.assertEqual(self.row(a)['status'], 'archived')
+        self.assertEqual(self.row(b)['status'], 'active')
+
+    def test_restore_keep_current_and_stale_review(self):
+        a = self.add('old fact')
+        with m.db() as c:
+            c.execute("UPDATE memories SET status='deleted' WHERE id=?", (a,))
+        self.add('current fact', confirmed=True)
+        review = self.review(a, operation='restore')
+        self.add('later fact', confirmed=True)
+        with self.assertRaises(m.MemoryConflict):
+            m.restore_memory('private:10001', a, review=review)
+        with self.assertRaises(m.MemoryConflict) as error:
+            m.restore_memory('private:10001', a)
+        result = m.restore_memory('private:10001', a, 'keep-confirmed', error.exception.conflict['revision'])
+        self.assertEqual(result['changed'], 0)
+        self.assertEqual(self.row(a)['status'], 'deleted')
+
+    def test_restore_replace_is_transactional_and_undo_restores_both(self):
+        a = self.add('old fact', confirmed=True)
+        with m.db() as c:
+            c.execute("UPDATE memories SET status='archived' WHERE id=?", (a,))
+        b = self.add('current fact', confirmed=True, tier='core')
+        before = [self.row(a), self.row(b)]
+        with self.assertRaises(m.MemoryConflict) as error:
+            m.restore_memory('private:10001', a)
+        result = m.restore_memory('private:10001', a, 'use-candidate', error.exception.conflict['revision'])
+        self.assertEqual(self.row(b)['status'], 'superseded')
+        m.undo_confirm('private:10001', result['undo']['operationId'])
+        self.assertEqual([self.row(a), self.row(b)], before)
+
+    def page_review(self, context, conflict_id=''):
+        return {'revision': context['revision'], 'candidateEvidence': context['candidate']['quote'],
+                'relations': [{'id': r['id'], 'relation': 'conflict' if r['id'] == conflict_id else 'coexist',
+                               'confidence': .99, 'evidence': r['quote']} for r in context['related']]}
+
+    def test_paged_review_finds_conflict_beyond_eighth_and_resumes(self):
+        for n in range(17):
+            self.add(f'fact {n}', confirmed=True)
+        candidate = self.add('candidate needing all pages')
+        ctx = m.confirmation_context('private:10001', candidate)['context']
+        self.assertEqual(len(ctx['related']), 8)
+        first = m.save_review_page('private:10001', candidate, 'confirm', 0, self.page_review(ctx))
+        self.assertTrue(first['pending'])
+        self.assertEqual(first['reviewed'], 8)
+        with self.assertRaises(m.MemoryConflict) as error:
+            m.confirm_memory('private:10001', candidate)
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', candidate, 'coexist', error.exception.conflict['revision'])
+        second = m.confirmation_context('private:10001', candidate)
+        self.assertEqual(second['context']['offset'], 8)
+        conflict_id = second['context']['related'][0]['id']
+        m.save_review_page('private:10001', candidate, 'confirm', 8, self.page_review(second['context'], conflict_id))
+        third = m.confirmation_context('private:10001', candidate)
+        self.assertEqual(third['context']['offset'], 16)
+        last = m.save_review_page('private:10001', candidate, 'confirm', 16, self.page_review(third['context']))
+        self.assertFalse(last['pending'])
+        self.assertEqual(last['reviewed'], 17)
+        with self.assertRaises(m.MemoryConflict) as error:
+            m.confirm_memory('private:10001', candidate)
+        self.assertFalse(error.exception.conflict['truncated'])
+        self.assertEqual([r['id'] for r in error.exception.conflict['confirmed']], [conflict_id])
+
+    def test_paged_review_cannot_reuse_old_version_or_wrong_page(self):
+        for n in range(10):
+            self.add(f'fact {n}', confirmed=True)
+        candidate = self.add('new candidate')
+        ctx = m.confirmation_context('private:10001', candidate)['context']
+        review = self.page_review(ctx)
+        with self.assertRaises(m.MemoryConflict):
+            m.save_review_page('private:10001', candidate, 'confirm', 8, review)
+        m.save_review_page('private:10001', candidate, 'confirm', 0, review)
+        self.add('changed history', confirmed=True)
+        reset = m.confirmation_context('private:10001', candidate)
+        self.assertEqual(reset['reviewed'], 0)
+        self.assertEqual(reset['context']['offset'], 0)
+        with self.assertRaises(m.MemoryConflict):
+            m.save_review_page('private:10001', candidate, 'confirm', 0, review)
+
+    def test_paged_review_survives_read_counters_but_invalidates_fact_edits(self):
+        for n in range(10):
+            self.add(f'fact {n}', confirmed=True)
+        candidate = self.add('new candidate')
+        ctx = m.confirmation_context('private:10001', candidate)['context']
+        m.save_review_page('private:10001', candidate, 'confirm', 0, self.page_review(ctx))
+        with m.db() as c:
+            c.execute('UPDATE memories SET last_access=last_access+100,access_count=access_count+1')
+        resumed = m.confirmation_context('private:10001', candidate)
+        self.assertEqual(resumed['reviewed'], 8)
+        self.assertEqual(resumed['context']['offset'], 8)
+        with m.db() as c:
+            c.execute('UPDATE memories SET text=? WHERE id=?', ('changed original fact', ctx['related'][0]['id']))
+        self.assertEqual(m.confirmation_context('private:10001', candidate)['reviewed'], 0)
+
+    def test_restore_can_finish_multiple_review_pages_without_truncation(self):
+        candidate = self.add('old archived record')
+        with m.db() as c:
+            c.execute("UPDATE memories SET status='archived' WHERE id=?", (candidate,))
+        for n in range(20):
+            self.add(f'current fact {n}', confirmed=True)
+        count = 0
+        while True:
+            page = m.confirmation_context('private:10001', candidate, 'restore')
+            if not page['needed']:
+                break
+            ctx = page['context']
+            m.save_review_page('private:10001', candidate, 'restore', ctx['offset'], self.page_review(ctx))
+            count += 1
+        self.assertEqual(count, 3)
+        result = m.restore_memory('private:10001', candidate)
+        self.assertEqual(self.row(candidate)['status'], 'active')
+        m.undo_confirm('private:10001', result['undo']['operationId'])
+        self.assertEqual(self.row(candidate)['status'], 'archived')
+
+    def test_conflict_keep_confirmed_and_undo(self):
+        candidate, active, revision = self.conflict_pair()
+        before = [self.row(candidate), self.row(active)]
+        result = m.confirm_memory('private:10001', candidate, 'keep-confirmed', revision)
+        self.assertEqual(self.row(candidate)['status'], 'archived')
+        self.assertEqual(self.row(active), before[1])
+        m.undo_confirm('private:10001', result['undo']['operationId'])
+        self.assertEqual([self.row(candidate), self.row(active)], before)
+
+    def test_conflict_use_candidate_and_undo_preserves_core(self):
+        candidate, active, revision = self.conflict_pair()
+        before = [self.row(candidate), self.row(active)]
+        result = m.confirm_memory('private:10001', candidate, 'use-candidate', revision)
+        self.assertEqual(self.row(candidate)['status'], 'active')
+        self.assertEqual(self.row(candidate)['tier'], 'core')
+        self.assertEqual(self.row(active)['superseded_by'], candidate)
+        m.undo_confirm('private:10001', result['undo']['operationId'])
+        self.assertEqual([self.row(candidate), self.row(active)], before)
+
+    def test_conflict_resolution_rejects_stale_snapshot_and_wrong_scope(self):
+        candidate, active, revision = self.conflict_pair()
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('group:1', candidate, 'use-candidate', revision)
+        with m.db() as c:
+            c.execute('UPDATE memories SET text=? WHERE id=?', ('changed after comparison', active))
+        with self.assertRaises(m.MemoryConflict) as raised:
+            m.confirm_memory('private:10001', candidate, 'use-candidate', revision)
+        self.assertNotEqual(raised.exception.conflict['revision'], revision)
+        self.assertEqual(self.row(candidate)['status'], 'candidate')
+        self.assertEqual(self.row(active)['status'], 'active')
+
+    def test_conflict_resolution_new_fact_invalidates_snapshot(self):
+        candidate, active, revision = self.conflict_pair()
+        extra = self.add('additional fact', confirmed=True)
+        with m.db() as c:
+            c.execute("UPDATE memories SET fact_key='drink' WHERE id=?", (extra,))
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', candidate, 'use-candidate', revision)
+        self.assertEqual(self.row(extra)['status'], 'active')
+        self.assertEqual(self.row(candidate)['status'], 'candidate')
+
+    def test_conflict_resolution_does_not_touch_other_speaker_or_chat(self):
+        candidate, active, revision = self.conflict_pair()
+        others = [self.add('another speaker', subject='20002', fact_key='drink', confirmed=True),
+                  self.add('another chat', scope='group:1', fact_key='drink', confirmed=True)]
+        before = [self.row(i) for i in others]
+        m.confirm_memory('private:10001', candidate, 'use-candidate', revision)
+        self.assertEqual([self.row(i) for i in others], before)
+
+    def test_conflict_resolution_follows_replaced_related_fact(self):
+        old = self.add('original related', confirmed=True, source_time=m.now()-200)
+        candidate = self.add('older related candidate', semantic_checked=True, relation='conflict',
+                             related_id=old, source_time=m.now()-100)
+        latest = self.add('latest related', confirmed=True)
+        with m.db() as c:
+            c.execute("UPDATE memories SET status='superseded',superseded_by=? WHERE id=?", (latest, old))
+        with self.assertRaises(m.MemoryConflict) as raised:
+            m.confirm_memory('private:10001', candidate)
+        self.assertEqual([r['id'] for r in raised.exception.conflict['confirmed']], [latest])
+        m.confirm_memory('private:10001', candidate, 'use-candidate', raised.exception.conflict['revision'])
+        self.assertEqual(self.row(latest)['superseded_by'], candidate)
+
+    def test_conflict_resolution_journal_failure_rolls_back(self):
+        candidate, active, revision = self.conflict_pair()
+        before = [self.row(candidate), self.row(active)]
+        with m.db() as c:
+            c.execute("CREATE TRIGGER reject_resolution BEFORE INSERT ON memory_operations BEGIN SELECT RAISE(ABORT, 'test failure'); END")
+        with self.assertRaises(m.sqlite3.IntegrityError):
+            m.confirm_memory('private:10001', candidate, 'use-candidate', revision)
+        self.assertEqual([self.row(candidate), self.row(active)], before)
 
     def test_noop_produces_no_undo_recipe(self):
         active = self.add('already active', confirmed=True)
@@ -127,7 +453,7 @@ class MemoryLifecycleTests(unittest.TestCase):
 
     def test_wrong_scope_cannot_undo(self):
         _, new = self.pair()
-        op = m.confirm_memory('private:10001', new)['undo']['operationId']
+        op = self.confirm('private:10001', new)['undo']['operationId']
         with self.assertRaises(m.MemoryConflict):
             m.undo_confirm('group:999', op)
 
@@ -136,7 +462,7 @@ class MemoryLifecycleTests(unittest.TestCase):
         with m.db() as c:
             c.execute("CREATE TRIGGER reject_operation BEFORE INSERT ON memory_operations BEGIN SELECT RAISE(ABORT, 'test failure'); END")
         with self.assertRaises(m.sqlite3.IntegrityError):
-            m.confirm_memory('private:10001', new)
+            self.confirm('private:10001', new)
         self.assertEqual(self.row(old)['status'], 'active')
         self.assertEqual(self.row(new)['status'], 'candidate')
 

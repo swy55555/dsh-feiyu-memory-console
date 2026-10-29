@@ -62,8 +62,13 @@ try {
   assert.equal(health.checks.find((c) => c.id === 'database-path').ok, true)
   assert.equal(health.checks.find((c) => c.id === 'confirm').ok, true)
 
+  const confirmChoice = async (id) => {
+    const pending = await json(`${api}/api/action`, { op: 'confirm', scope: 'private:10001', id })
+    if (pending.status !== 409 || !pending.data.conflict) return pending
+    return json(`${api}/api/action`, { op: 'confirm', scope: 'private:10001', id, resolution: 'use-candidate', revision: pending.data.conflict.revision })
+  }
   const before = [row(info.old), row(info.new)]
-  const confirmed = await json(`${api}/api/action`, { op: 'confirm', scope: 'private:10001', id: info.new })
+  const confirmed = await confirmChoice(info.new)
   assert.equal(confirmed.status, 200)
   assert.ok(confirmed.data.auditId)
   assert.equal(row(info.old).status, 'superseded')
@@ -90,10 +95,32 @@ try {
   assert.equal((await json(`${api}/api/undo`, { id: confirmed.data.auditId })).status, 409)
   assert.equal((await json(`${api}/api/action`, { op: 'confirm', id: info.new, scope: 'group:20001' })).status, 409)
 
-  const next = await json(`${api}/api/action`, { op: 'confirm', scope: 'private:10001', id: info.new })
+  const next = await confirmChoice(info.new)
   const op = next.data.undo
   const undoPair = await Promise.all([1, 2].map(() => json(`${realService}/confirm/undo`, op)))
   assert.deepEqual(undoPair.map((r) => r.status).sort(), [200, 409], 'concurrent undo applies only once')
+
+  // Conflict details survive both HTTP layers; explicit choices remain auditable and undoable.
+  const candidate = await json(`${realService}/add`, { text: 'older choice', scope: 'private:10001', subject_id: '10001', fact_key: 'choice', source_time: Date.now()/1000-1000 })
+  const current = await json(`${realService}/add`, { text: 'current choice', scope: 'private:10001', subject_id: '10001', fact_key: 'choice', confirmed: true })
+  const conflict = await json(`${api}/api/action`, { op: 'confirm', scope: 'private:10001', id: candidate.data.memory.id })
+  assert.equal(conflict.status, 409)
+  assert.ok(conflict.data.conflict.confirmed.some(r => r.id === current.data.memory.id))
+  const resolved = await json(`${api}/api/action`, { op: 'confirm', scope: 'private:10001', id: candidate.data.memory.id, resolution: 'keep-confirmed', revision: conflict.data.conflict.revision })
+  assert.equal(resolved.status, 200)
+  assert.equal(row(candidate.data.memory.id).status, 'archived')
+  const restoreConflict = await json(`${api}/api/action`, { op:'restore', id:candidate.data.memory.id })
+  assert.equal(restoreConflict.status,409)
+  assert.equal(restoreConflict.data.conflict.operation,'restore')
+  await assert.rejects(core.memoryAction('restore',{id:candidate.data.memory.id,scope:'global'}),e=>e.status===409)
+  const restored = await json(`${api}/api/action`, { op:'restore', id:candidate.data.memory.id, resolution:'coexist', revision:restoreConflict.data.conflict.revision })
+  assert.equal(restored.status,200)
+  assert.equal(row(candidate.data.memory.id).status,'active')
+  assert.equal((await json(`${api}/api/undo`,{id:restored.data.auditId})).status,200)
+  assert.equal(row(candidate.data.memory.id).status,'archived')
+  assert.equal((await json(`${api}/api/undo`, { id: resolved.data.auditId })).status, 200)
+  assert.equal(row(candidate.data.memory.id).status, 'candidate')
+  assert.equal(row(current.data.memory.id).status, 'active')
 
   // Relevance feedback must resolve an actual trace, never trust a supplied query.
   const mockBridge = await serve((req, res) => {
@@ -108,6 +135,38 @@ try {
   assert.equal(feedback.query,'actual query');assert.equal(feedback.traceId,'trace-real');assert.equal(feedback.injected,false)
   assert.deepEqual(row(info.new),feedbackBefore)
   await assert.rejects(core.memoryAction('irrelevant', {id:info.new,scope:'private:10001',key:'private:10001',traceId:'forged'}), e=>e.status===409)
+
+  // Paged review persists through model failure; reviewing alone never activates a fact.
+  let failReview = false, reviewCalls = 0
+  const reviewBridge = await serve(async (req,res) => {
+    let body=''; for await(const chunk of req) body+=chunk
+    res.setHeader('content-type','application/json')
+    if(!body){res.end(JSON.stringify({ok:true}));return}
+    const {context}=JSON.parse(body); reviewCalls++
+    if(failReview){res.writeHead(503);res.end(JSON.stringify({ok:false,error:'temporary model failure'}));return}
+    res.end(JSON.stringify({ok:true,review:{revision:context.revision,candidateEvidence:context.candidate.quote,
+      relations:context.related.map(r=>({id:r.id,relation:'coexist',confidence:1,evidence:r.quote}))}}))
+  })
+  fs.writeFileSync(core.paths().bridgeConfig,JSON.stringify({consolePort:Number(new URL(reviewBridge).port),consoleToken:'isolated-test-token'}))
+  for(let i=0;i<17;i++) await json(`${realService}/add`,{text:`independent fact ${i}`,scope:'private:20002',subject_id:'20002',confirmed:true})
+  const paged=await json(`${realService}/add`,{text:'new unrelated fact',scope:'private:20002',subject_id:'20002'})
+  const reviewBody={op:'confirm',scope:'private:20002',id:paged.data.memory.id,reviewOnly:true}
+  const page1=await json(`${api}/api/action`,reviewBody)
+  assert.equal(page1.data.reviewed,8);assert.equal(page1.data.total,17);assert.equal(page1.data.pending,true)
+  assert.equal(page1.data.auditId,undefined);assert.equal(row(reviewBody.id).status,'candidate')
+  failReview=true
+  const failedPage=await json(`${api}/api/action`,reviewBody)
+  assert.equal(failedPage.data.reviewed,8);assert.ok(failedPage.data.reviewError)
+  failReview=false
+  assert.equal((await json(`${api}/api/action`,reviewBody)).data.reviewed,16)
+  assert.equal((await json(`${api}/api/action`,reviewBody)).data.reviewed,17)
+  const ready=await json(`${api}/api/action`,reviewBody)
+  assert.equal(ready.data.readyToApply,true);assert.equal(row(reviewBody.id).status,'candidate')
+  assert.equal(reviewCalls,4)
+  const applied=await json(`${api}/api/action`,{...reviewBody,reviewOnly:false})
+  assert.equal(applied.status,200);assert.equal(row(reviewBody.id).status,'active');assert.ok(applied.data.auditId)
+  assert.equal((await json(`${api}/api/undo`,{id:applied.data.auditId})).status,200)
+  assert.equal(row(reviewBody.id).status,'candidate')
 
   // Expiry is stored in seconds; editing must not divide it a second time.
   const expires = Date.now() / 1000 + 86400

@@ -334,3 +334,31 @@ test("correction retracts matching derived episode and queued spillover without 
   assert.equal(pending.items[0].emotionEventId, "b");
   assert.equal(ctx.activeSpillover, null);
 });
+
+
+test('semantic fact reviewer is read-only, preserves context and rejects wrong revisions', async () => {
+  const { reviewMemoryFacts } = await import('../bridge/fact-review.mjs');
+  const context = { scope: 'private:1', revision: 'r1', candidate: { id: 'c', text: '茶是我的续命水', quote: '茶是我的续命水' }, related: [{ id: 'a', text: '早餐常吃小笼包', quote: '早餐常吃小笼包' }] };
+  let seen = '';
+  const result = await reviewMemoryFacts(context, async (prompt, timeout) => {
+    seen = prompt; assert.equal(timeout, 12000);
+    return JSON.stringify({ revision: 'r1', candidateEvidence: context.candidate.quote, relations: [{ id: 'a', relation: 'coexist', confidence: .99, evidence: context.related[0].quote }] });
+  });
+  assert.ok(seen.includes('茶是我的续命水'));
+  assert.ok(seen.includes('不发送消息'));
+  assert.equal(result.relations[0].relation, 'coexist');
+  await assert.rejects(reviewMemoryFacts(context, async () => '{"revision":"wrong","relations":[]}'));
+  await assert.rejects(reviewMemoryFacts({ ...context, related: Array(9).fill(context.related[0]) }, async () => '{}'));
+});
+
+
+test('memory extraction retains distinct facts from the same message and accepts semantic coexistence', async () => {
+  const { memoryCandidates } = await import('../bridge/daily-memory.js');
+  const messages = [{ id: 'message', userId: '1', text: '不喜欢吃煎饼，喜欢吃小笼包', time: Date.now() }];
+  const rows = ['不喜欢吃煎饼', '喜欢吃小笼包'].map(quote => ({ source_id: 'message', quote, kind: 'preference', aspect: '饮食', confidence: .99, relation: 'coexist', relation_confidence: .99, related_id: '', fact: { object: quote.endsWith('小笼包') ? '小笼包' : '煎饼', attribute: '喜好', value: quote, condition: '', timeframe: '', cardinality: 'single', evidence: quote } }));
+  for (const row of rows) row.assessment = {subject:'self',mode:'asserted',sensitive:false};
+  const result = memoryCandidates(JSON.stringify(rows), messages, Date.now(), [], { autoConfirm: true });
+  assert.equal(result.length, 2); assert.equal(result[0].source_id, result[1].source_id);
+  assert.notEqual(result[0].fact.object, result[1].fact.object);
+  assert.ok(result.every(r => r.relation === 'independent' && r.related_id === ''));
+});

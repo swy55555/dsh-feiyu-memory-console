@@ -171,6 +171,12 @@ def db() -> sqlite3.Connection:
         id TEXT PRIMARY KEY, scope TEXT NOT NULL, created_at REAL NOT NULL,
         changes TEXT NOT NULL, undone INTEGER NOT NULL DEFAULT 0
     )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS memory_review_pages (
+        scope TEXT NOT NULL, memory_id TEXT NOT NULL, operation TEXT NOT NULL,
+        revision TEXT NOT NULL, page_offset INTEGER NOT NULL, review TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        PRIMARY KEY(scope,memory_id,operation,revision,page_offset)
+    )""")
     existing = {r[1] for r in conn.execute('PRAGMA table_info(memories)')}
     for col, definition in {
         'status': "TEXT NOT NULL DEFAULT 'active'", 'fact_key': "TEXT NOT NULL DEFAULT ''",
@@ -180,6 +186,7 @@ def db() -> sqlite3.Connection:
         'superseded_by': "TEXT NOT NULL DEFAULT ''", 'last_reinforced': 'REAL NOT NULL DEFAULT 0',
         'tier': "TEXT NOT NULL DEFAULT 'normal'",
         'relation': "TEXT NOT NULL DEFAULT ''", 'related_id': "TEXT NOT NULL DEFAULT ''",
+        'fact_meta': "TEXT NOT NULL DEFAULT '{}'",
     }.items():
         if col not in existing:
             conn.execute(f'ALTER TABLE memories ADD COLUMN {col} {definition}')
@@ -223,6 +230,152 @@ def valid_scope(scope):
     return scope
 
 
+def fact_quote(text):
+    return str(text or '').split('曾说：', 1)[-1].strip()
+
+
+def validated_fact(proposal, text):
+    # Labels are semantic model output, not a fixed keyword taxonomy. Whole-quote
+    # evidence prevents dropping a negation/condition when selecting a short span.
+    if not isinstance(proposal, dict) or proposal.get('evidence') != fact_quote(text):
+        return {}
+    fields = {key: proposal.get(key) for key in ('object', 'attribute', 'value', 'condition', 'timeframe')}
+    if any(not isinstance(v, str) or len(v) > 100 for v in fields.values()):
+        return {}
+    if not all(fields[k].strip() for k in ('object', 'attribute', 'value')):
+        return {}
+    if proposal.get('cardinality') not in ('single', 'multi', 'unknown'):
+        return {}
+    return {**fields, 'evidence': proposal['evidence'], 'cardinality': proposal['cardinality'], 'source': 'model'}
+
+
+def stored_fact(row):
+    row = dict(row)
+    try:
+        proposal = json.loads(row.get('fact_meta') or '{}')
+    except (ValueError, TypeError):
+        return {}
+    return validated_fact(proposal, row.get('text'))
+
+
+def fact_relation(a, b):
+    a, b = dict(a), dict(b)
+    if a.get('scope') != b.get('scope') or a.get('subject_id') != b.get('subject_id'):
+        return 'coexist'
+    left, right = stored_fact(a), stored_fact(b)
+    if not left or not right:
+        return 'uncertain'
+    if left['object'] != right['object'] or left['attribute'] != right['attribute']:
+        return 'uncertain'  # Labels can be aliases or overlapping categories.
+    if left['condition'] != right['condition'] or left['timeframe'] != right['timeframe']:
+        return 'uncertain'  # Overlap requires semantic review, never a word-list guess.
+    if left['value'] == right['value']:
+        return 'equivalent'
+    return 'conflict' if left['cardinality'] == right['cardinality'] == 'single' else 'uncertain'
+
+
+def _review_context(conn, candidate, offset=0, all_rows=False):
+    rows = conn.execute("SELECT * FROM memories WHERE scope=? AND subject_id=? AND status='active' AND id<>? AND (expires_at=0 OR expires_at>?) ORDER BY id",
+                        (candidate['scope'], candidate['subject_id'], candidate['id'], now())).fetchall()
+    q = np.frombuffer(candidate['embedding'], dtype=np.float32)
+    def similarity(row):
+        v = np.frombuffer(row['embedding'], dtype=np.float32)
+        return float(v @ q) if v.shape == q.shape else -1.0
+    ranked = sorted(rows, key=similarity, reverse=True)
+    # Explicit links are kept, then fill by semantic similarity; no lexical gate.
+    selected = [r for r in rows if r['id'] == candidate['related_id']]
+    selected += [r for r in ranked if r not in selected]
+    total = len(selected)
+    selected = selected if all_rows else selected[offset:offset+8]
+    revision = hashlib.sha256(json.dumps([_review_fingerprint(candidate), *[_review_fingerprint(r) for r in rows]]).encode()).hexdigest()
+    def public(row):
+        return {**{k: row[k] for k in ('id','text','source_time','tier')}, 'quote': fact_quote(row['text']), 'fact': stored_fact(row)}
+    return {'scope': candidate['scope'], 'candidate': public(candidate), 'related': [public(r) for r in selected],
+            'revision': revision, 'truncated': total > offset+len(selected),
+            'offset': offset, 'total': total}, selected
+
+
+def _cached_reviews(conn, candidate, operation):
+    context, rows = _review_context(conn, candidate, all_rows=True)
+    relations = {}
+    cached = {r['page_offset']: r['review'] for r in conn.execute(
+        'SELECT page_offset,review FROM memory_review_pages WHERE scope=? AND memory_id=? AND operation=? AND revision=?',
+        (candidate['scope'], candidate['id'], operation, context['revision']))}
+    next_offset = None
+    for offset in range(0, len(rows), 8):
+        page = {**context, 'related': context['related'][offset:offset+8]}
+        try:
+            verdict = _validated_review(json.loads(cached.get(offset, 'null')), page)
+        except (ValueError, TypeError):
+            verdict = None
+        if verdict is not None:
+            relations.update(verdict)
+        elif next_offset is None:
+            next_offset = offset
+    return context, rows, relations, next_offset
+
+
+def confirmation_context(scope, mid, operation='confirm'):
+    scope = valid_scope(scope)
+    statuses = _activation_statuses(operation)
+    with _lock, db() as conn:
+        conn.row_factory = sqlite3.Row
+        candidate = conn.execute("SELECT * FROM memories WHERE scope=? AND id=? AND status IN (" + ','.join('?' for _ in statuses) + ')', (scope, mid, *statuses)).fetchone()
+        if candidate is None:
+            return {'needed': False}
+        full, _, relations, offset = _cached_reviews(conn, candidate, operation)
+        context, _ = _review_context(conn, candidate, offset or 0)
+        return {'needed': offset is not None, 'context': context,
+                'reviewed': len(relations), 'total': full['total']}
+
+
+def save_review_page(scope, mid, operation, offset, review):
+    scope = valid_scope(scope)
+    statuses = _activation_statuses(operation)
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0 or offset % 8:
+        raise ValueError('invalid review offset')
+    with _lock, db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        conn.row_factory = sqlite3.Row
+        candidate = conn.execute("SELECT * FROM memories WHERE scope=? AND id=? AND status IN (" + ','.join('?' for _ in statuses) + ')', (scope, mid, *statuses)).fetchone()
+        if candidate is None:
+            raise MemoryConflict('记忆状态已变化，请重新开始复核')
+        context, rows = _review_context(conn, candidate, offset)
+        if not rows or _validated_review(review, context) is None:
+            raise MemoryConflict('复核版本已变化或该批证据不完整；已有事实未改变')
+        conn.execute('DELETE FROM memory_review_pages WHERE scope=? AND memory_id=? AND operation=? AND revision<>?',
+                     (scope, mid, operation, context['revision']))
+        conn.execute('INSERT OR REPLACE INTO memory_review_pages VALUES (?,?,?,?,?,?,?)',
+                     (scope, mid, operation, context['revision'], offset, json.dumps(review, ensure_ascii=False), now()))
+        full, _, relations, missing = _cached_reviews(conn, candidate, operation)
+        return {'pending': missing is not None, 'reviewed': len(relations), 'total': full['total']}
+
+
+def _validated_review(review, context):
+    if not isinstance(review, dict) or review.get('revision') != context['revision']:
+        return None
+    if review.get('candidateEvidence') != context['candidate']['quote'] or not isinstance(review.get('relations'), list):
+        return None
+    known = {r['id']: r for r in context['related']}
+    relations = {}
+    for item in review['relations']:
+        if not isinstance(item, dict) or item.get('id') not in known or item['id'] in relations:
+            return None
+        confidence = item.get('confidence')
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            return None
+        if item.get('evidence') != known[item['id']]['quote'] or item.get('relation') not in ('equivalent','supplement','coexist','replace','conflict','uncertain'):
+            return None
+        relations[item['id']] = item['relation'] if confidence >= .9 else 'uncertain'
+    return relations if set(relations) == set(known) else None
+
+
+def _fact_peers(conn, row):
+    return [r for r in conn.execute("SELECT * FROM memories WHERE scope=? AND subject_id=? AND status='active' AND id<>? AND (expires_at=0 OR expires_at>?)",
+                                    (row['scope'], row['subject_id'], row['id'], now()))
+            if fact_relation(row, r) in ('conflict', 'equivalent')]
+
+
 def add_memory(text: str, tags: str = "", scope: str = None, importance: float = 0.5, **meta) -> dict:
     _matrix_cache_clear()
     scope = valid_scope(scope)
@@ -251,12 +404,10 @@ def add_memory(text: str, tags: str = "", scope: str = None, importance: float =
     with _lock, db() as conn:
         # Tombstones prevent extraction/reimport from resurrecting deleted evidence.
         semantic = meta.get('semantic_checked') is True
-        if not semantic and status == 'active' and fact_key and tier == 'normal':
-            old_core = conn.execute("SELECT id FROM memories WHERE scope=? AND subject_id=? AND fact_key=? AND status='active' AND tier='core' AND source_time<=?", (scope, subject, fact_key, source_time)).fetchone()
-            if old_core:
-                tier, expires = 'core', 0
-        prior = conn.execute('SELECT id,status,source_id,source_time FROM memories WHERE scope=? AND subject_id=? AND (text=? OR (source_id<>\'\' AND source_id=? AND fact_key=?)) ORDER BY created_at DESC LIMIT 1',
-                             (scope, subject, text, source_id, fact_key)).fetchone()
+        conn.row_factory = sqlite3.Row
+        incoming = {'id': mid, 'text': text, 'scope': scope, 'subject_id': subject, 'fact_meta': json.dumps(validated_fact(meta.get('fact'), text), ensure_ascii=False)}
+        prior = conn.execute('SELECT id,status,source_id,source_time FROM memories WHERE scope=? AND subject_id=? AND text=? ORDER BY created_at DESC LIMIT 1',
+                             (scope, subject, text)).fetchone()
         if semantic:
             prior = conn.execute('SELECT id,status,source_id,source_time FROM memories WHERE scope=? AND subject_id=? AND text=? ORDER BY created_at DESC LIMIT 1',(scope,subject,text)).fetchone()
         if prior:
@@ -282,15 +433,27 @@ def add_memory(text: str, tags: str = "", scope: str = None, importance: float =
                 conn.row_factory = sqlite3.Row
                 target = conn.execute("SELECT * FROM memories WHERE id=? AND scope=? AND subject_id=? AND status='active' AND (expires_at=0 OR expires_at>?)", (target_id,scope,subject,ts)).fetchone()
             valid_target = target is not None and target['source_time'] == meta.get('related_time')
+            if target is not None:
+                comparison_target = dict(target)
+                if meta.get('related_fact'):
+                    comparison_target['fact_meta'] = json.dumps(validated_fact(meta.get('related_fact'), target['text']), ensure_ascii=False)
+                verified_relation = fact_relation(incoming, comparison_target)
+                if verified_relation == 'coexist':
+                    relation, target_id, target = 'independent', '', None
+                elif verified_relation == 'uncertain':
+                    relation = 'uncertain'
+                elif relation == 'equivalent' and verified_relation != 'equivalent':
+                    relation = 'conflict'
+                elif relation == 'replace' and (meta.get('explicit_update') is not True or meta.get('update_evidence') != fact_quote(text)):
+                    relation = 'conflict'
             if relation == 'equivalent' and target is not None and source_id and source_id == target['source_id']:
                 return {'id':target_id,'status':'active','duplicate':True,'semantic':True}
             if relation in ('equivalent', 'replace') and (not valid_target or float(meta.get('relation_confidence',0)) < .95):
                 relation = 'uncertain'
             if relation not in ('independent','equivalent','replace','conflict','uncertain'):
                 relation = 'uncertain'
-            if relation == 'replace' and float(meta.get('relation_confidence',0)) >= .9 and status == 'candidate':
-                status = 'active'  # 明确更正直接生效（群里没有确认界面，尤其需要）
-            if relation in ('conflict','uncertain'):
+            # Extracted corrections require reviewed/manual activation, even at high confidence.
+            if relation in ('replace','conflict','uncertain'):
                 status = 'candidate'
             if relation == 'equivalent' and status == 'active':
                 if source_time > target['source_time'] and source_id != target['source_id']:
@@ -304,6 +467,9 @@ def add_memory(text: str, tags: str = "", scope: str = None, importance: float =
                     status = 'candidate'
                 elif target['tier'] == 'core':
                     tier, expires = 'core', 0
+        # A fresh timestamp or a shared topic never authorizes overwriting facts.
+        if status == 'active' and relation != 'replace' and any(fact_relation(incoming, r) == 'conflict' for r in _fact_peers(conn, incoming)):
+            status = 'candidate'
         conn.execute(
             "INSERT INTO memories (id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding)"
             " VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -315,13 +481,7 @@ def add_memory(text: str, tags: str = "", scope: str = None, importance: float =
         conn.execute('UPDATE memories SET relation=?,related_id=? WHERE id=?',(relation,target_id,mid))
         if semantic and relation == 'replace' and status == 'active':
             conn.execute("UPDATE memories SET status='superseded',superseded_by=? WHERE id=?",(mid,target_id))
-        if not semantic and status == 'active' and fact_key:
-            newer = conn.execute("SELECT id FROM memories WHERE scope=? AND subject_id=? AND fact_key=? AND status='active' AND source_time>? AND id<>? LIMIT 1", (scope, subject, fact_key, source_time, mid)).fetchone()
-            if newer:
-                conn.execute("UPDATE memories SET status='superseded',superseded_by=? WHERE id=?", (newer[0], mid))
-                status = 'superseded'
-            else:
-                conn.execute("UPDATE memories SET status='superseded',superseded_by=? WHERE scope=? AND subject_id=? AND fact_key=? AND status='active' AND id<>?", (mid, scope, subject, fact_key, mid))
+        conn.execute('UPDATE memories SET fact_meta=? WHERE id=?', (incoming['fact_meta'], mid))
     return {"id": mid, "text": text, "scope": scope, "importance": importance, 'status': status}
 
 
@@ -917,44 +1077,115 @@ def list_memories(scope, status='active'):
 
 
 class MemoryConflict(ValueError):
-    pass
+    def __init__(self, message, conflict=None):
+        super().__init__(message)
+        self.conflict = conflict
 
 
 def _fingerprint(row):
     values = {k: (bytes(v).hex() if isinstance(v, (bytes, memoryview)) else v)
               for k, v in dict(row).items()}
+    if values.get('fact_meta') in (None, '', '{}'):
+        values.pop('fact_meta', None)  # Preserve pre-migration undo fingerprints.
     return hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
 
 
-def _confirm_one(conn, scope, mid, before):
-    _matrix_cache_clear()
-    def remember(row_id):
-        if row_id not in before:
-            before[row_id] = dict(conn.execute('SELECT * FROM memories WHERE id=?', (row_id,)).fetchone())
+def _review_fingerprint(row):
+    # Reading a fact may update retrieval counters; that must not restart every page.
+    ignored = {'last_access', 'access_count', 'last_reinforced', 'strength_days', 'importance'}
+    return _fingerprint({k: v for k, v in dict(row).items() if k not in ignored})
 
-    row = conn.execute("SELECT subject_id,fact_key,source_time,relation,related_id FROM memories WHERE id=? AND scope=? AND status='candidate'", (mid, scope)).fetchone()
-    if not row:
+
+def _activation_statuses(operation):
+    if operation == 'confirm':
+        return ('candidate',)
+    if operation == 'restore':
+        return ('archived', 'deleted')
+    raise ValueError('invalid memory operation')
+
+
+def _confirmation_snapshot(conn, scope, mid, review=None, operation='confirm'):
+    statuses = _activation_statuses(operation)
+    candidate = conn.execute("SELECT * FROM memories WHERE id=? AND scope=? AND status IN (" + ','.join('?' for _ in statuses) + ')', (mid, scope, *statuses)).fetchone()
+    if candidate is None:
+        raise MemoryConflict('候选记忆已变化，请刷新列表后重试')
+    context, selected, cached, missing = _cached_reviews(conn, candidate, operation)
+    relations = _validated_review(review, context) if review is not None else cached
+    if review is not None and relations is None:
+        raise MemoryConflict('语义复核已过期或证据不完整，请刷新后重新确认')
+    active = [r for r in selected if relations.get(r['id'], fact_relation(candidate, r)) not in ('coexist', 'supplement')]
+    incomplete = len(selected) > 8 and len(relations) < len(selected)
+    def public(row):
+        return {key: row[key] for key in ('id', 'text', 'source_time', 'source_text', 'tier', 'status', 'fact_key')}
+    return candidate, active, {'kind': 'confirmation-conflict', 'scope': scope, 'revision': context['revision'],
+                               'operation': operation, 'review': review, 'truncated': incomplete,
+                               'reviewed': len(relations), 'total': len(selected),
+                               'candidate': public(candidate), 'confirmed': [public(r) for r in active]}
+
+
+def _confirmation_error(conn, scope, mid, message):
+    return MemoryConflict(message, _confirmation_snapshot(conn, scope, mid)[2])
+
+
+def _record_confirmation(conn, scope, before):
+    changes = []
+    for row_id, old in before.items():
+        row = conn.execute('SELECT * FROM memories WHERE id=?', (row_id,)).fetchone()
+        if _fingerprint(old) != _fingerprint(row):
+            changes.append({'id': row['id'], 'after': _fingerprint(row),
+                            'restore': {k: old[k] for k in ('status', 'superseded_by', 'tier', 'expires_at')}})
+    operation_id = uuid.uuid4().hex
+    conn.execute('INSERT INTO memory_operations (id,scope,created_at,changes) VALUES (?,?,?,?)',
+                 (operation_id, scope, now(), json.dumps(changes)))
+    return {'kind': 'memvec-confirm', 'operationId': operation_id, 'scope': scope}
+
+
+def resolve_confirmation(scope, mid, resolution, revision, review=None, operation='confirm'):
+    scope = valid_scope(scope)
+    if resolution not in ('keep-confirmed', 'use-candidate', 'coexist') or not isinstance(revision, str):
+        raise ValueError('请选择保留已确认事实或以候选为准')
+    with _lock, db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        conn.row_factory = sqlite3.Row
+        candidate, active, snapshot = _confirmation_snapshot(conn, scope, mid, review, operation)
+        if revision != snapshot['revision']:
+            raise MemoryConflict('记忆在对照期间有变化，请核对最新内容后重新选择', snapshot)
+        if snapshot['truncated'] and resolution != 'keep-confirmed':
+            raise MemoryConflict('历史尚未全部复核，请继续检查后再处理', snapshot)
+        before = {mid: dict(candidate)}
+        if resolution == 'keep-confirmed':
+            if operation == 'confirm':
+                conn.execute("UPDATE memories SET status='archived' WHERE id=?", (mid,))
+        elif resolution == 'use-candidate':
+            for row in active:
+                before[row['id']] = dict(row)
+                conn.execute("UPDATE memories SET status='superseded',superseded_by=? WHERE id=?", (mid, row['id']))
+            if any(row['tier'] == 'core' for row in active):
+                conn.execute("UPDATE memories SET tier='core',expires_at=0 WHERE id=?", (mid,))
+            conn.execute("UPDATE memories SET status='active' WHERE id=?", (mid,))
+        if resolution == 'coexist':
+            conn.execute("UPDATE memories SET status='active' WHERE id=?", (mid,))
+        if operation == 'restore' and resolution != 'keep-confirmed':
+            conn.execute("UPDATE memories SET superseded_by='' WHERE id=?", (mid,))
+        undo = _record_confirmation(conn, scope, before)
+        _matrix_cache_clear()
+        return {'changed': int(operation != 'restore' or resolution != 'keep-confirmed'), 'confirmed': int(resolution != 'keep-confirmed'), 'resolution': resolution, 'undo': undo}
+
+
+def _confirm_one(conn, scope, mid, before, review=None):
+    _matrix_cache_clear()
+    row = conn.execute("SELECT * FROM memories WHERE id=? AND scope=? AND status='candidate'", (mid, scope)).fetchone()
+    if row is None:
         return 0
-    remember(mid)
-    if row[3] in ('replace', 'conflict', 'equivalent', 'uncertain') and row[4]:
-        target = conn.execute("SELECT source_time,tier FROM memories WHERE id=? AND scope=? AND subject_id=? AND status='active'",(row[4],scope,row[0])).fetchone()
-        if not target or target[0] > row[2]:
-            raise MemoryConflict('关联记忆已更新，请通过纠正命令明确新事实')
-        remember(row[4])
-        if target[1] == 'core':
-            conn.execute("UPDATE memories SET tier='core',expires_at=0 WHERE id=?",(mid,))
-        conn.execute("UPDATE memories SET status='superseded',superseded_by=? WHERE id=?",(mid,row[4]))
-    elif row[1]:
-        newer = conn.execute("SELECT id FROM memories WHERE scope=? AND subject_id=? AND fact_key=? AND status='active' AND source_time>?", (scope, *row[:3])).fetchone()
-        if newer:
-            raise MemoryConflict('已有更新的已确认事实，请先处理冲突')
-        for related in conn.execute("SELECT id FROM memories WHERE scope=? AND subject_id=? AND fact_key=? AND status='active'", (scope, row[0], row[1])).fetchall():
-            remember(related['id'])
-        conn.execute("UPDATE memories SET status='superseded',superseded_by=? WHERE scope=? AND subject_id=? AND fact_key=? AND status='active'", (mid, scope, row[0], row[1]))
+    _, peers, snapshot = _confirmation_snapshot(conn, scope, mid, review)
+    if peers or snapshot['truncated']:
+        raise MemoryConflict('相关记忆需要核对；未能确认矛盾的记录可以分别保留，截短的历史不会自动被忽略', snapshot)
+    before[mid] = dict(row)
     conn.execute("UPDATE memories SET status='active' WHERE id=?", (mid,))
     return 1
 
-def confirm_batch(scope, mid=None, subject_id=None, prefix=''):
+
+def confirm_batch(scope, mid=None, subject_id=None, prefix='', review=None):
     scope = valid_scope(scope)
     with _lock, db() as conn:
         conn.execute('BEGIN IMMEDIATE')
@@ -968,24 +1199,18 @@ def confirm_batch(scope, mid=None, subject_id=None, prefix=''):
         # Capture all affected rows, including facts superseded by a confirmation.
         before = {}
         for candidate in candidates:
-            _confirm_one(conn, scope, candidate['id'], before)
-        changes = []
-        for row_id, old in before.items():
-            row = conn.execute('SELECT * FROM memories WHERE id=?', (row_id,)).fetchone()
-            if _fingerprint(old) != _fingerprint(row):
-                changes.append({'id': row['id'], 'after': _fingerprint(row),
-                                'restore': {k: old[k] for k in ('status', 'superseded_by', 'tier', 'expires_at')}})
-        operation_id = uuid.uuid4().hex
-        conn.execute('INSERT INTO memory_operations (id,scope,created_at,changes) VALUES (?,?,?,?)',
-                     (operation_id, scope, now(), json.dumps(changes)))
+            _confirm_one(conn, scope, candidate['id'], before, review)
+        undo = _record_confirmation(conn, scope, before)
         return {'changed': len(candidates), 'confirmed': len(candidates),
-                'undo': {'kind': 'memvec-confirm', 'operationId': operation_id, 'scope': scope}}
+                'undo': undo}
 
 
-def confirm_memory(scope, mid):
+def confirm_memory(scope, mid, resolution=None, revision=None, review=None):
     if not isinstance(mid, str) or not mid:
         raise ValueError('id is required')
-    return confirm_batch(scope, mid=mid)
+    if resolution is not None:
+        return resolve_confirmation(scope, mid, resolution, revision, review)
+    return confirm_batch(scope, mid=mid, review=review)
 
 
 def undo_confirm(scope, operation_id):
@@ -1004,8 +1229,7 @@ def undo_confirm(scope, operation_id):
             if row is None or _fingerprint(row) != change['after']:
                 raise MemoryConflict('相关记忆后来又被改过，不能覆盖后续修改')
             if change['restore']['status'] == 'active':
-                conflicts = conn.execute("SELECT id FROM memories WHERE scope=? AND subject_id=? AND status='active' AND ((fact_key<>'' AND fact_key=?) OR related_id=?)",
-                                         (scope, row['subject_id'], row['fact_key'], row['id'])).fetchall()
+                conflicts = [r for r in conn.execute("SELECT * FROM memories WHERE scope=? AND subject_id=? AND status='active' AND id<>?", (scope, row['subject_id'], row['id'])) if fact_relation(row, r) == 'conflict' or (fact_relation(row, r) == 'uncertain' and ((row['fact_key'] and row['fact_key'] == r['fact_key']) or r['related_id'] == row['id']))]
                 if any(r['id'] not in affected for r in conflicts):
                     raise MemoryConflict('已有后续事实，不能恢复成互相冲突的记忆')
         for change in changes:
@@ -1014,6 +1238,22 @@ def undo_confirm(scope, operation_id):
                          (old['status'], old['superseded_by'], old['tier'], old['expires_at'], change['id']))
         conn.execute('UPDATE memory_operations SET undone=1 WHERE id=?', (operation_id,))
         return {'changed': len(changes), 'operationId': operation_id}
+
+
+def restore_memory(scope, mid, resolution=None, revision=None, review=None):
+    scope = valid_scope(scope)
+    if resolution is not None:
+        return {'id': mid, **resolve_confirmation(scope, mid, resolution, revision, review, 'restore')}
+    with _lock, db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        conn.row_factory = sqlite3.Row
+        row, peers, snapshot = _confirmation_snapshot(conn, scope, mid, review, 'restore')
+        if peers or snapshot['truncated']:
+            raise MemoryConflict('恢复前需要核对与当前事实的关系，原记录尚未改变', snapshot)
+        before = {mid: dict(row)}
+        conn.execute("UPDATE memories SET status='active',superseded_by='' WHERE id=?", (mid,))
+        _matrix_cache_clear()
+        return {'id': mid, 'status': 'active', 'changed': 1, 'undo': _record_confirmation(conn, scope, before)}
 
 
 def decay(prune: bool = True) -> dict:
@@ -1040,8 +1280,8 @@ def stats() -> dict:
         messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         summaries = conn.execute("SELECT COUNT(*) FROM session_summaries WHERE status='active'").fetchone()[0]
     return {
-        'version': '0.8.1',
-        'capabilities': ['transactional-confirm', 'context-window', 'event-merge'],
+        'version': '0.8.11',
+        'capabilities': ['transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
         'embed_threads': EMBED_THREADS,
         'index': 'exact-cache',
         'ann_threshold': ANN_MIN,
@@ -1158,9 +1398,18 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == '/list':
                 b = self._body()
                 self._send(200, {'ok': True, 'memories': list_memories(b.get('scope'), b.get('status', 'active'))})
+            elif self.path == '/confirm/context':
+                b = self._body()
+                self._send(200, {'ok': True, **confirmation_context(b.get('scope'), b.get('id'), b.get('operation', 'confirm'))})
+            elif self.path == '/confirm/review':
+                b = self._body()
+                self._send(200, {'ok': True, **save_review_page(b.get('scope'), b.get('id'), b.get('operation', 'confirm'), b.get('offset'), b.get('review'))})
+            elif self.path == '/restore':
+                b = self._body()
+                self._send(200, {'ok': True, **restore_memory(b.get('scope'), b.get('id'), b.get('resolution'), b.get('revision'), b.get('review'))})
             elif self.path == '/confirm':
                 b = self._body()
-                self._send(200, {'ok': True, **confirm_memory(b.get('scope'), b.get('id'))})
+                self._send(200, {'ok': True, **confirm_memory(b.get('scope'), b.get('id'), b.get('resolution'), b.get('revision'), b.get('review'))})
             elif self.path == '/confirm/undo':
                 b = self._body()
                 self._send(200, {'ok': True, **undo_confirm(b.get('scope'), b.get('operationId'))})
@@ -1176,7 +1425,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send(404, {"ok": False, "error": "not found"})
         except MemoryConflict as e:
-            self._send(409, {'ok': False, 'error': str(e)})
+            self._send(409, {'ok': False, 'error': str(e), **({'conflict': e.conflict} if e.conflict else {})})
         except ValueError as e:
             self._send(400, {'ok': False, 'error': str(e)})
         except Exception as e:  # noqa: BLE001

@@ -192,7 +192,12 @@ async function api(path, { method = 'GET', body, headers = {} } = {}) {
   })
   let data = {}
   try { data = await res.json() } catch {}
-  if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`)
+  if (!res.ok || data.ok === false) {
+    const error = new Error(data.error || `HTTP ${res.status}`)
+    error.status = res.status
+    error.conflict = data.conflict
+    throw error
+  }
   return data
 }
 
@@ -223,7 +228,7 @@ function toast(message, kind = '') {
 
 // ---------------------------------------------------------------- 弹窗
 
-function openModal({ title, desc, fields = [], submit = '保存', danger = false, cancel = '取消', footerLeft = null }) {
+function openModal({ title, desc, fields = [], submit = '保存', danger = false, cancel = '取消', footerLeft = null, content = null }) {
   return new Promise((resolve) => {
     const root = $('#modal-root')
     root.innerHTML = ''
@@ -234,6 +239,7 @@ function openModal({ title, desc, fields = [], submit = '保存', danger = false
     form.appendChild(el('h3', { text: title }))
     if (desc) form.appendChild(el('p', { class: 'desc', text: desc }))
 
+    if (content) form.appendChild(content)
     const controls = new Map()
 
     for (const field of fields) {
@@ -378,6 +384,7 @@ function buildTopbar() {
     ),
     health,
     el('div', { class: 'top-actions' },
+      el('span', { class: 'app-version', title: '当前加载的插件版本', text: S.version ? `v${S.version}` : '版本未知' }),
       el('button', { class: 'btn', title: '重新读一遍', on: { click: () => refreshAll() } }, icon('refresh'), '刷新'),
       el('button', { class: 'btn primary', on: { click: () => openAdd('') } }, icon('plus'), '记一条'),
       themeBtn,
@@ -558,6 +565,7 @@ async function refreshOverview({ paint = true } = {}) {
 
 async function refreshAll() {
   try {
+    try { S.version = (await api('/version')).version; const badge = $('.app-version'); if (badge) badge.textContent = `v${S.version}` } catch {}
     await refreshOverview({ paint: false })
     if (S.tab === 'library') { S.library.loaded = false; await loadLibrary() }
     else if (S.tab === 'persona') { S.persona = null; await loadPersona() }
@@ -573,6 +581,7 @@ async function refreshAll() {
 
 async function afterChange() {
   try {
+    try { S.version = (await api('/version')).version; const badge = $('.app-version'); if (badge) badge.textContent = `v${S.version}` } catch {}
     await refreshOverview({ paint: false })
     if (S.tab === 'library') await loadLibrary()
     else if (S.tab === 'light' && S.light.key) await loadLight(S.light.key)
@@ -793,6 +802,14 @@ function renderOverview() {
         on: { click: () => toggleAssociation(o.association !== true) },
       }, o.association ? '关闭关联' : '开启关联'),
     ),
+    el('hr'),
+    el('h3', { text: '空闲联想 · 试验' }),
+    el('p', { class: 'note' }, '仅用于你的私聊。安静两分钟后，沿真实记忆最多联想两步，保留十分钟；不会因此主动发消息或改变情绪。每轮最多两次模型调用，两轮至少间隔三十分钟。'),
+    el('div', { class: 'row', style: { gap: '10px' } },
+      el('span', { class: 'pill', text: o.idleAssociation ? '已开启' : '已关闭' }),
+      el('button', { class: 'btn sm', on: { click: () => toggleIdleAssociation(!o.idleAssociation) } }, o.idleAssociation ? '关闭空闲联想' : '开启空闲联想'),
+      el('button', { class: 'btn sm', on: { click: () => showIdleAssociation() } }, '查看近期联想'),
+    ),
   )
   return frag(
     hero,
@@ -814,6 +831,27 @@ async function toggleAssociation(enabled) {
   } catch (error) {
     toast(error.message, 'error')
   }
+}
+async function toggleIdleAssociation(enabled) {
+  try {
+    await api('/association/idle', { method: 'POST', body: { enabled } })
+    if (S.overview) S.overview.idleAssociation = enabled
+    toast(enabled ? '已开启空闲联想试验' : '已关闭并清空临时联想', 'ok')
+    paintCurrent()
+  } catch (error) { toast(error.message, 'error') }
+}
+async function showIdleAssociation() {
+  try {
+    const data = await api('/association/idle')
+    const labels = { disabled:'已关闭', 'waiting-for-message':'等待新的私聊消息', waiting:'等待空闲', exploring:'正在联想', ready:'有可用话题', stopped:'已收束', 'no-source':'没有相关事实', unavailable:'本轮未完成', used:'已提供给一次相关回复', expired:'已过期', 'irrelevant-or-stale':'话题不相关或来源已变化' }
+    const content = el('div', null, el('p', { text: labels[data.status] || '暂无可用联想' }))
+    for (const node of data.nodes || []) content.appendChild(el('p', { text: `${node.kind === 'question' ? '开放问题' : '话题设想'}：${node.topic}` }))
+    if (data.sources?.length) {
+      content.appendChild(el('strong', { text: '依据的真实记忆' }))
+      for (const source of data.sources) content.appendChild(el('p', { text: source.text }))
+    }
+    await openModal({ title:'近期联想', desc:'这些是临时话题设想，不是新增事实，也不是情绪依据。', content, submit:'知道了', cancel:'关闭', fields:[] })
+  } catch (error) { toast(error.message, 'error') }
 }
 async function toggleMemoryShare(enabled) {
   try {
@@ -1173,14 +1211,77 @@ async function runSemantic(query) {
 }
 
 async function act(op, payload, { success } = {}) {
+  let progressBox = null, stopped = false
+  const initialHash = location.hash
   try {
-    await withBusy(() => api('/action', { method: 'POST', body: { op, ...payload } }))
+    await withBusy(async () => {
+      const reviewing = ['confirm','restore'].includes(op) && !payload.resolution
+      let previous = 0, resets = 0
+      while (true) {
+        if (stopped || location.hash !== initialHash) { stopped = true; return }
+        let data = await api('/action', { method: 'POST', body: { op, ...payload, ...(reviewing ? {reviewOnly:true} : {}) } })
+        if (data.readyToApply && !stopped && location.hash === initialHash) data = await api('/action', { method:'POST', body:{op,...payload} })
+        if (!data.pending) {
+          if (stopped || location.hash !== initialHash) { stopped = true; return }
+          return
+        }
+        if (!progressBox) {
+          progressBox = el('div', { class:'review-progress', attrs:{role:'status'} },
+            el('span', {class:'review-progress-text'}),
+            el('button', {class:'btn sm',on:{click:()=>{stopped=true}}}, '停止后续检查'))
+          document.body.appendChild(progressBox)
+        }
+        $('.review-progress-text',progressBox).textContent = `历史已复核 ${data.reviewed || 0}/${data.total || 0} 条；进度已保存`
+        if ((data.reviewed || 0) < previous) resets++
+        previous = data.reviewed || 0
+        if (data.reviewError || resets > 2) throw new Error(data.reviewError || '历史持续变化，已停止本轮检查，请稍后继续')
+      }
+    })
+    if (stopped) { toast('已停止后续检查，已完成的批次会保留'); return }
     toast(success || '改好了', 'ok')
     S.semantic = null
     await afterChange()
   } catch (error) {
+    if (['confirm', 'restore'].includes(op) && error.conflict?.kind === 'confirmation-conflict') {
+      await resolveMemoryConflict(error.conflict, error.message)
+      return
+    }
     toast(error.message, 'error')
+  } finally { progressBox?.remove() }
+}
+
+async function resolveMemoryConflict(conflict, message) {
+  const operation = conflict.operation === 'restore' ? 'restore' : 'confirm'
+  const content = el('div', { class: 'conflict-comparison' })
+  const show = (title, row) => el('section', { class: 'conflict-fact' },
+    el('strong', { text: title }),
+    el('p', { text: row.text }),
+    el('p', { class: 'muted small', text: `原话时间：${fmtDate(Number(row.source_time) * 1000)} · ${tierLabel(row.tier)}` }),
+    row.source_text ? el('details', null, el('summary', { text: '查看原话' }), el('p', { text: row.source_text })) : null,
+  )
+  content.appendChild(show(operation === 'restore' ? '待恢复记忆' : '待确认候选', conflict.candidate))
+  for (const row of conflict.confirmed || []) content.appendChild(show('当前已确认事实', row))
+  if (conflict.truncated) {
+    content.appendChild(el('p', {class:'note',text:`历史尚未检查完（${conflict.reviewed || 0}/${conflict.total || 0}），不能据此确认或替换。关闭后重新点击，可继续复核。`}))
+    await openModal({title:'历史复核尚未完成',desc:message,content,submit:'知道了',cancel:'关闭',fields:[]})
+    return
   }
+  if (!conflict.confirmed?.length && !conflict.truncated) content.appendChild(el('p', { class: 'note', text: '原关联事实已不再有效，未找到当前已确认的替代事实。' }))
+  const choice = await openModal({
+    title: '核对这条记忆与已有事实的关系',
+    desc: `${message}。请对照原话后选择。处理记录可在「整理 → 操作记录」中撤销。`,
+    content,
+    submit: '应用选择', cancel: '暂不处理',
+    fields: [{ name: 'resolution', label: '如何处理', type: 'select', value: 'keep-confirmed', options: [
+      { value: 'keep-confirmed', label: operation === 'restore' ? '保留现状，暂不恢复' : '保留现状，归档这条候选' },
+      { value: 'coexist', label: '两条都成立，分别保留' },
+      { value: 'use-candidate', label: '以候选为准，替换上面列出的已确认事实' },
+    ] }],
+  })
+  if (!choice) return
+  await act(operation, { id: conflict.candidate.id, scope: conflict.scope, resolution: choice.resolution, revision: conflict.revision, review: conflict.review }, {
+    success: choice.resolution === 'coexist' ? '已分别保留，原有事实没有被覆盖' : choice.resolution === 'keep-confirmed' ? (operation === 'restore' ? '已保留现状，未恢复这条记忆' : '已保留现状，候选移入「已归档」') : '已按所选记忆更新，旧事实保留在「被取代」中',
+  })
 }
 
 async function removeMemory(row) {
@@ -1263,7 +1364,7 @@ async function openAdd(presetScope = '') {
       { name: 'text', label: '内容', type: 'textarea', maxlength: 500, rows: 5, required: true, placeholder: '比如：老大喜欢在凌晨四点调东西，别催他睡…' },
       { name: 'tier', label: '层级', type: 'select', value: 'normal', options: [{ value: 'normal', label: '普通 —— 会慢慢淡' }, { value: 'core', label: '核心 —— 一直记得' }, { value: 'task', label: '待办 —— 做完为止' }] },
       { name: 'importance', label: '重要度', type: 'range', value: 0.7, min: 0, max: 1, step: 0.05 },
-      { name: 'factKey', label: '事实键（可选）', type: 'text', placeholder: '她.身高 —— 同一个键只留最新一条', maxlength: 100 },
+      { name: 'factKey', label: '事实键（可选）', type: 'text', placeholder: '例如：饮食偏好；仅作分类，不按同键自动覆盖', maxlength: 100 },
       { name: 'subjectId', label: '说话人 QQ（可选）', type: 'text', placeholder: '只有这一条属于某个具体的人时才填', maxlength: 30 },
     ],
   })
@@ -2535,6 +2636,10 @@ function renderUpkeep() {
     ),
     !canFlush ? el('p', { class: 'note', style: { margin: '0 0 8px' } }, '「整理这格」按钮要重启一次 DSH 后端才会出现；重启前可以先等自动提炼。') : null,
     el('div', { id: 'queue-box', class: 'queue-table' }, el('div', { class: 'empty', text: S.upkeep.queue ? '' : '正在读队列…' })),
+    el('details', {class:'processing-details'},
+      el('summary', {text:'查看消息处理状态与遗漏检查'}),
+      el('p',{class:'note',text:'显示最近最多 500 条记录。已检查不等于已记住；事实状态是提取时的快照，当前状态以长期记忆页为准。这里只记录升级后的处理进度。'}),
+      el('div',{id:'processing-box'})),
   )
 
   const dataCard = el('section', { class: 'card pad' },
@@ -2543,7 +2648,7 @@ function renderUpkeep() {
     el('div', { class: 'row', style: { marginTop: '10px' } },
       el('a', { class: 'btn', href: `${BASE}/api/export`, download: 'feiyu-memories.json' }, '导出全部记忆'),
     ),
-    el('p', { class: 'note', style: { marginBottom: 0 } }, '控制台只读本机文件，也只连 127.0.0.1 上的记忆服务和桥接。没有把任何一条记忆发到外面。'),
+    el('p', { class: 'note', style: { marginBottom: 0 } }, '记忆库保存在本机。模型整理、遗漏检查和语义复核会把相关文本发送给你配置的模型服务。'),
   )
 
   const auditCard = el('section', { class: 'card pad', style: { gridColumn: '1 / -1' } },
@@ -2566,7 +2671,7 @@ function renderUpkeep() {
 async function flushQueue(row) {
   const ok = await confirmDialog({
     title: '现在手动整理这一格？',
-    desc: `只处理「${row.label}」这一格，最多 12 条消息；新增的是候选记忆，之后还要确认。\n\n手动不受今天自动额度限制，但会花一次模型调用。如果这 12 条只是闲聊，提炼出 0 条候选也是正常的。`,
+    desc: `只处理「${row.label}」这一格，最多 12 条消息；新增的是候选记忆，之后还要确认。\n\n手动不受今天自动额度限制。提取后会独立检查遗漏，通常调用两次模型；发现遗漏会保留消息继续处理。如果只是闲聊，提炼出 0 条候选也是正常的。`,
     ok: '开始整理',
   })
   if (!ok) return
@@ -2593,11 +2698,27 @@ async function loadQueue() {
   try {
     const data = await withBusy(() => api('/queue'))
     S.upkeep.queue = data
+    const processingBox = $('#processing-box')
+    if (processingBox) {
+      const labels = {queued:'待处理',processing:'正在提取',checking:'正在检查遗漏',partial:'发现遗漏 / 继续处理', 'review-needed':'待复核',retrying:'失败重试',checked:'已检查，无新增有效事实',memorized:'提取时已记住','pending-confirmation':'提取时待确认','capacity-limited':'队列容量限制'}
+      processingBox.replaceChildren()
+      for(const row of data.processing || []) {
+        const details=el('details', {class:'queue-item'},
+          el('summary',{text:`${labels[row.status]||row.status} · ${row.label||row.key} · ${String(row.text||'').slice(0,70)}`}),
+          el('p',{text:row.text}),el('p',{class:'note',text:row.reason||'等待整理'}),
+          row.nextRetryAt>Date.now()?el('p',{class:'note',text:`下次尝试：${fmtDate(row.nextRetryAt)}`}):null,
+          row.pauseUntil>Date.now()?el('p',{class:'note',text:`自动整理暂缓至：${fmtDate(row.pauseUntil)}`}):null)
+        for(const quote of row.missingQuotes||[]) details.appendChild(el('p',{text:`待补齐原话：${quote}`}))
+        for(const evidence of row.evidence||[]) details.appendChild(el('p',{text:`${evidence.outcome==='excluded'?'已排除':'已提取'}：${evidence.quote}${evidence.memories?.length?'（记录 '+evidence.memories.map(m=>m.id.slice(0,8)).join('、')+'）':''}`}))
+        processingBox.appendChild(details)
+      }
+      if(!data.processing?.length)processingBox.appendChild(el('p',{class:'note',text:'尚无消息处理记录。'}))
+    }
     const box = $('#queue-box')
     if (!box) return
     box.replaceChildren()
     if (!data.byScope.length) {
-      box.appendChild(el('div', { class: 'empty', text: '队列是空的，都整理完了。' }))
+      box.appendChild(el('div', { class: 'empty', text: '当前没有排队消息；最近的处理结果见下方记录。' }))
       return
     }
     const canFlush = Array.isArray(S.overview?.health?.capabilities) && S.overview.health.capabilities.includes('queue-flush')
@@ -2611,7 +2732,7 @@ async function loadQueue() {
             ? el('span', { class: 'pill deleted', text: '低产出暂停 7 天' })
             : el('span', { class: 'muted small', text: `产出 ${row.yieldCandidates || 0}/${row.yieldBatches || 0} 批` }),
           el('span', { class: 'muted small', text: row.lastAt ? `最后一条 ${fmtWhen(row.lastAt)}` : '' }),
-          canFlush ? el('button', { class: 'btn sm', title: '会调用一次模型，最多处理 12 条', on: { click: () => flushQueue(row) } }, '整理这格') : null,
+          canFlush ? el('button', { class: 'btn sm', title: '提取并检查遗漏，通常调用两次模型，最多处理 12 条', on: { click: () => flushQueue(row) } }, '整理这格') : null,
         ),
         el('div', { class: 'samples' }, row.samples.map((m) => el('div', { class: 'sample' },
           el('span', { text: m.sender || '—' }),
@@ -2670,6 +2791,7 @@ async function undoEntry(entry) {
   try {
     const data = await withBusy(() => api('/undo', { method: 'POST', body: { id: entry.id } }))
     toast(`已撤销：${data.summary}`, 'ok')
+    try { S.version = (await api('/version')).version; const badge = $('.app-version'); if (badge) badge.textContent = `v${S.version}` } catch {}
     await refreshOverview({ paint: false })
     if (S.tab === 'library') await loadLibrary()
     if (S.tab === 'diary') { S.diary.books = null; S.diary.days = {}; paintCurrent() }
@@ -3731,7 +3853,12 @@ async function loadGraph({ quiet = false, more = false } = {}) {
       return
     }
     let data = await res.json()
-    if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`)
+    if (!res.ok || data.ok === false) {
+    const error = new Error(data.error || `HTTP ${res.status}`)
+    error.status = res.status
+    error.conflict = data.conflict
+    throw error
+  }
     const prev = new Map((S.graph.data?.nodes || []).map((n) => [n.id, n]))
     const now = performance.now()
     if (prev.size) {
@@ -4445,6 +4572,7 @@ async function boot() {
   if (bootParams.get('embed') === '1') document.body.classList.add('embed')
   applyTheme()
   try { await api('/persona'); S.personaAvailable = true } catch { S.personaAvailable = false }
+  try { S.version = (await api('/version')).version } catch { S.version = null }
   mountShell()
   try {
     await refreshOverview({ paint: false })

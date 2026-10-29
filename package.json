@@ -1,6 +1,6 @@
 {
   "name": "dsh-feiyu-memory-console",
-  "version": "0.8.10",
+  "version": "0.8.11",
   "private": false,
   "description": "可塑性记忆：查看和维护 QQ 角色的长期记忆、日记、性格与情绪；本地优先，支持审计和撤销。",
   "license": "MIT",
@@ -48,7 +48,9 @@
     "CHANGELOG.md",
     "LICENSE",
     "test",
-    "UPGRADE.md"
+    "UPGRADE.md",
+    "manual/USER_GUIDE-0.8.11.md",
+    "manual/可塑性记忆-使用手册-0.8.11.pdf"
   ],
   "dsh": {
     "bundle": {

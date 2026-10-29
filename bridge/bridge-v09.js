@@ -1,5 +1,7 @@
 import {appraisalContext, expectedAbsence} from './emotion-context.mjs';
 import {reserveAppraisal} from './appraisal-budget.mjs';
+import { reviewMemoryFacts } from './fact-review.mjs';
+import { IdleAssociations } from './idle-association.mjs';
 import { TurnTraces, sendResult } from './turn-traces.mjs';
 // QQ ↔ DeepSeek Harness 桥接主程序。
 //
@@ -13,7 +15,7 @@ import os from 'node:os';
 import http from 'node:http';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { DailyMemory, recallQuery, recallBlock, memoryScope, parseMemoryCommand, memoryCommandReply } from './daily-memory.js';
+import { DailyMemory, memoryAdmission, recallQuery, recallBlock, memoryScope, parseMemoryCommand, memoryCommandReply } from './daily-memory.js';
 import { buildHumanContext, humanContextEnabled, shouldRecallMemory, fetchSessionContext, buildSessionBlock, fetchContextBundle, buildSummaryBlock, buildSummaryPrompt, parseSummaryOutput, filterNovelFacts } from './human-context.mjs';
 import { DEFAULT_LIMITS as PERSONA_DEFAULT_LIMITS, addPersonaEvent, applyPersonaProposal, bandFor, breakthroughEligible, breakthroughOf, buildConsolidationPrompt, createPersona, dimsOf, normalizePersona, normalizeSpec, parsePersonaProposal, pendingEvents, pendingWeight, renderPersonaBlock, shouldConsolidate } from './persona.js';
 import { refineEmotionEvent, validateSemanticAppraisal, applyEmotionEvent, appraise, emotionPromptLine, emotionSummary, emptyEmotion, normalizeEmotion, suggestChatPersonalityDrift, suggestPersonalityDrift, tickEmotion } from './emotion.js';
@@ -3418,6 +3420,7 @@ async function main() {
       if (!res.ok) throw new Error(`memory HTTP ${res.status}`);
       const j = await res.json();
       // 跨聊天共享：只取非当前聊天、且管理员私聊隐私已过滤的记忆。
+      if (context.allowIdleAssociation === true) promptText = idleAssociations.take(key, j.results || []) + promptText;
       const shareCfg = cfg.socialV2?.memoryShare || {};
       let sharedRows = [];
       if (shareCfg.enabled === true) {
@@ -3526,54 +3529,16 @@ async function main() {
       try { await api.workspace.archiveSession({ sessionId }); } catch {}
     }
   }
-  // 记忆入口策略：
-  //   · 老大私聊：全量进，优先整理
-  //   · 非管理员私聊：明确“记住/喜欢…”或信号词才进
-  //   · 群聊：默认只收“冲她来的（@/引用）”和“明确要记的”，普通闲聊不进模型
-  //     另外 24 小时内重复出现的事实也算信号（重复本身就是重要）
-  const MEMORY_EXPLICIT_RE = /(记住|记一下|记着|以后叫我|叫我|我喜欢|我不喜欢|我讨厌|我习惯|我的生日|我过敏|我不吃|我爱吃|我想要|我打算)/;
-  const MEMORY_SIGNAL_RE = /(喜欢|不喜欢|讨厌|习惯|总是|每次|生日|忌口|不吃|爱吃|过敏|害怕|想要|打算|答应)/;
-  const memoryRepeat = new Map(); // key -> Map(normalized -> { at, msg })
-  function normalizeMemoryText(text) {
-    return String(text || '').replace(/[\s\p{P}\p{S}]+/gu, '').slice(0, 40);
-  }
-  const MEMORY_BOT_NAME_RE = /(bot|机器人|【bot】)/i;
-  function memoryDecision(key, text, { directedAtSelf = false, msg = null, sender = '' } = {}) {
-    if (cfg.socialV2?.dailyMemory?.enabled === false) return { queue: false };
-    const body = String(text || '');
-    const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
-    if (ownerKey && key === ownerKey) return { queue: true };
-    if (!key.startsWith('group:')) {
-      return { queue: MEMORY_EXPLICIT_RE.test(body) || MEMORY_SIGNAL_RE.test(body) };
-    }
-    // 群里那些名字带 bot/but/升级中的“鱼”，一律不记
-    if (MEMORY_BOT_NAME_RE.test(String(sender || ''))) return { queue: false };
-    const policy = cfg.socialV2?.dailyMemory?.groupPolicy || 'addressed';
-    if (policy === 'off') return { queue: false };
-    if (directedAtSelf) {
-      // 只剩一个 @ 的“@大肥鱼 bot”不算事实，要求至少还有 4 个字
-      const bare = body.replace(/@\S+/g, '').replace(/\[[^\]]*\]/g, '').trim();
-      if (bare.length >= 4) return { queue: true };
-    }
-    if (MEMORY_EXPLICIT_RE.test(body)) return { queue: true };
-    if (policy === 'signals') return { queue: MEMORY_SIGNAL_RE.test(body) };
-    // addressed 模式：普通群聊只有“重复出现的事实”才进
-    const norm = normalizeMemoryText(body);
-    if (norm.length < 4) return { queue: false };
-    let map = memoryRepeat.get(key);
-    if (!map) { map = new Map(); memoryRepeat.set(key, map); }
-    const prev = map.get(norm);
-    if (msg) {
-      map.set(norm, { at: Date.now(), msg });
-      if (map.size > 300) map.delete(map.keys().next().value);
-    }
-    return prev && Date.now() - prev.at < 86400000 ? { queue: true, replay: prev.msg } : { queue: false };
+  // Admission follows authorized conversation participation, not content vocabulary.
+  function memoryDecision(key, text, { directedAtSelf = false, sender = '' } = {}) {
+    return memoryAdmission(key, text, { enabled: cfg.socialV2?.dailyMemory?.enabled !== false,
+      directedAtSelf, sender, policy: cfg.socialV2?.dailyMemory?.groupPolicy || 'addressed' });
   }
 
   const dailyMemory = new DailyMemory({
     load: () => readJsonSafe(path.join(STATE_DIR, 'daily-memory-queue.json'), null),
     save: data => atomicWriteJson(path.join(STATE_DIR, 'daily-memory-queue.json'), data),
-    // 老大的私聊里他自己说的偏好直接生效（没有确认界面，候选等于永远不生效）
+    // 主人私聊仅在事实归属明确、置信度足够时自动确认；不确定仍待确认
     autoConfirmFor: key => Boolean(cfg.ownerQQ) && String(key) === 'private:' + String(cfg.ownerQQ),
     allowed: key => isSessionAllowedInCurrentMode(key),
     enabled: () => dshReady && cfg.socialV2?.dailyMemory?.enabled !== false && !socialV2.paused,
@@ -3584,8 +3549,19 @@ async function main() {
     log, request: memoryRequest,
     // DailyMemory 会把 key 作为第二个参数传进来；这里必须只接 prompt，
     // 否则 key 会被当成 timeoutMs（setTimeout 收到字符串 → 0ms，必然超时）。
-    extract: (prompt) => runHeadlessPrompt(prompt, 120000)
+    extract: (prompt) => runHeadlessPrompt(prompt, 120000),
+    verify: (prompt) => runHeadlessPrompt(prompt, 60000)
   });
+
+  const idleAssociations = new IdleAssociations({
+    enabled: () => cfg.socialV2?.association?.idleEnabled === true,
+    allowed: key => Boolean(cfg.ownerQQ) && key === `private:${String(cfg.ownerQQ)}` && isSessionAllowedInCurrentMode(key),
+    ready: () => dshReady && !dailyMemory.busy && !socialV2.paused,
+    request: memoryRequest,
+    generate: (prompt, timeout) => runHeadlessPrompt(prompt, timeout),
+  });
+  const idleAssociationTimer = setInterval(() => { void idleAssociations.tick(); }, 30000);
+  idleAssociationTimer.unref?.();
 
   // ── 性格状态（慢变量）────────────────────────────────────────────────────
   // 事件先攒着，够重/够久/够多才合并一次；单次变化有上限，永远围着角色底色。
@@ -5072,6 +5048,16 @@ async function main() {
           }
           return;
         }
+        if (req.method === 'POST' && url.pathname === '/api/memory/fact-review') {
+          const body = await readBody();
+          const review = await reviewMemoryFacts(body.context, runHeadlessPrompt);
+          sendJson({ ok: true, review });
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/memory/idle-association') {
+          sendJson({ok:true,...idleAssociations.snapshot(`private:${String(cfg.ownerQQ || '')}`)});
+          return;
+        }
         if (req.method === 'GET' && url.pathname === '/api/status') {
           const rs = readRoleState();
           // 带 agent token 的调用来自 QQ 群里的 AI：只能拿到它自己该知道的运行状态。
@@ -6256,7 +6242,7 @@ async function main() {
             }
             if (merged.dailyMemory.enabled !== undefined) merged.dailyMemory.enabled = merged.dailyMemory.enabled === true;
             if (merged.dailyMemory.groupPolicy !== undefined) {
-              merged.dailyMemory.groupPolicy = ['addressed', 'signals', 'off'].includes(merged.dailyMemory.groupPolicy)
+              merged.dailyMemory.groupPolicy = ['addressed', 'semantic', 'signals', 'off'].includes(merged.dailyMemory.groupPolicy)
                 ? merged.dailyMemory.groupPolicy
                 : (current.dailyMemory?.groupPolicy ?? 'addressed');
             }
@@ -6272,6 +6258,8 @@ async function main() {
           if (body.association && typeof body.association === 'object') {
             merged.association = { ...(current.association ?? {}), ...body.association };
             if (merged.association.enabled !== undefined) merged.association.enabled = merged.association.enabled === true;
+            if (merged.association.idleEnabled !== undefined) merged.association.idleEnabled = merged.association.idleEnabled === true;
+            if (body.association.idleEnabled === false) idleAssociations.reset();
             if (merged.association.maxExtra !== undefined) merged.association.maxExtra = Math.min(2, Math.max(1, Math.round(Number(merged.association.maxExtra) || 1)));
           }          // sticker：表情包体系参数归一化
           if (body.sticker && typeof body.sticker === 'object') {
@@ -11265,7 +11253,7 @@ ${roleText.slice(0, 9000)}`;
         promptText += `\n\n【本次消息快照】\n${JSON.stringify(wakeSnapshot)}\n以上消息已提供，无需重复查询；partial=true 时用 qq_get_unread_messages(afterSeq=readThroughSeq) 继续读取。先处理当前消息；回复前如需确认后续补充，用 qq_wait_for_messages(purpose="reply") 补足短静默，已安静够久会立即返回，不要先长等。收尾只确认你已处理的 readThroughSeq（本地 seq，非 QQ messageId），传给 qq_mark_read 或 qq_set_wake_config 的 throughSeq；新到消息留待处理。`;
       }
     }
-    const traceContext = {};
+    const traceContext = { allowIdleAssociation: opts.userMessage === true || (wakeSnapshot?.includedUnreadCount || 0) > 0 };
     promptText = await withMemoryContext(key, promptText, traceContext);
     promptText = withStyleNudge(promptText);
     promptText = withQzoneNudge(key, promptText);
@@ -13178,6 +13166,7 @@ ${roleText.slice(0, 9000)}`;
     if (!isSessionAllowedInCurrentMode(key)) return;
     if (!plainContent && !quoteTargetIsSelf) return;
     const isOwner = String(event.user_id) === String(cfg.ownerQQ ?? '');
+    if (kind === 'private' && isOwner) idleAssociations.note(key, plainContent, !SENSITIVE_RE.test(plainContent) && !plainContent.startsWith('/'));
     const roleState = readRoleState();
 
     // 若该会话有挂起的提问/审批，先当作回答处理（用当前消息自己的文字，不含引用原文）。
@@ -13493,7 +13482,7 @@ ${roleText.slice(0, 9000)}`;
       const promptText = `${roleHint ? roleHint + '\n\n' : ''}【群聊上下文】\n${buildContextBlock(key)}\n【当前消息】${currentLine}${mediaHintFor(key, messageRef, mediaList)}\n\n${replyInstruction}`;
       if (isOwner && kind === 'private') {
         log(`社交模式：管理员私聊触发，立即投递 ${key}`);
-        await deliverPrompt(key, promptText, { media: mediaList });
+        await deliverPrompt(key, promptText, { media: mediaList, userMessage: true });
       } else {
         scheduleSocialReply(
           key, promptText,
@@ -13535,7 +13524,7 @@ ${roleText.slice(0, 9000)}`;
       }
       throw error;
     }
-    const traceContext = {};
+    const traceContext = { allowIdleAssociation: true };
     promptText = await withMemoryContext(key, promptText, traceContext);
     promptText = withStyleNudge(promptText);
     promptText = withQzoneNudge(key, promptText);
