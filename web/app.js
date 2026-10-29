@@ -155,6 +155,7 @@ const S = {
   personaLoading: false,
   personaAvailable: null,
   personaEdit: null,
+  continuity: {data:null,loading:false,error:'',timer:0},
   emotion: null,
   emotionEpisodes: null,
   emotionLoading: false,
@@ -398,6 +399,7 @@ function buildTabs() {
     { id: 'graph', label: '记忆图', count: S.graph.data?.count },
     { id: 'persona', label: '性格', count: S.persona?.pending },
     { id: 'emotion', label: '情绪' },
+    { id: 'continuity', label: '当前心绪' },
     { id: 'memes', label: '玩梗' },
     { id: 'cost', label: '花费' },
     { id: 'library', label: '长期记忆', count: S.overview?.active },
@@ -407,12 +409,11 @@ function buildTabs() {
   ]
   const bar = el('nav', { class: 'tabs', 'aria-label': '分区' })
   for (const tab of tabs) {
-    if (tab.id === 'persona' && S.personaAvailable === false) continue
     bar.appendChild(el('button', {
       class: `tab ${S.tab === tab.id ? 'active' : ''}`,
       dataset: { tab: tab.id },
       on: { click: () => go(tab.id) },
-    }, tab.label, (tab.id === 'overview' || tab.id === 'emotion') ? null : el('span', { class: 'n', text: tab.count == null ? '…' : String(tab.count) })))
+    }, tab.label, (tab.id === 'overview' || tab.id === 'emotion' || tab.id === 'continuity') ? null : el('span', { class: 'n', text: tab.count == null ? '…' : String(tab.count) })))
   }
   // 会话上下文是独立页（原文层 + 摘要层），不在 SPA 里，单独挂一个入口。
   bar.appendChild(el('a', {
@@ -447,7 +448,8 @@ function updateTabs() {
     const active = id === S.tab
     btn.classList.toggle('active', active)
     btn.setAttribute('aria-current', active ? 'page' : 'false')
-    if ((id === 'persona' && !hasCap('persona')) || (id === 'emotion' && (!hasCap('emotion') || !hasBridgeCap('emotion'))) || (id === 'graph' && !hasCap('graph'))) btn.style.display = 'none'
+    // Keep navigation stable during startup, outage or an older host handshake.
+    btn.style.display = ''
     const n = btn.querySelector('.n')
     if (n && counts[id] !== undefined && counts[id] !== null) n.textContent = String(counts[id])
   }
@@ -493,7 +495,7 @@ function route(force = false) {
     if (params.get('book') === 'private' || params.get('book') === 'public') S.diary.book = params.get('book')
     if (params.get('date')) { S.diary.wantDate = params.get('date'); S.diary.showIntro = false }
   }
-  if (!['overview', 'graph', 'persona', 'emotion', 'memes', 'cost', 'library', 'light', 'diary', 'upkeep'].includes(tab)) { go('overview', { replace: true }); return }
+  if (!['overview', 'graph', 'persona', 'emotion', 'continuity', 'memes', 'cost', 'library', 'light', 'diary', 'upkeep'].includes(tab)) { go('overview', { replace: true }); return }
   if (tab !== S.tab || force) {
     const changed = tab !== S.tab
     S.tab = tab
@@ -507,6 +509,7 @@ function route(force = false) {
 function paintCurrent() {
   if (!mainEl) return
   if (S.tab !== 'graph') stopGraphLoop()
+  if (S.tab !== 'continuity' && S.continuity.timer) {clearInterval(S.continuity.timer);S.continuity.timer=0}
   if (S.tab !== 'emotion' && S.emotionTimer) { clearInterval(S.emotionTimer); S.emotionTimer = 0 }
   mainEl.replaceChildren()
   const missing = S.capabilities ? ['queue-limit', 'persona', 'emotion', 'graph'].filter((cap) => !S.capabilities.has(cap)) : []
@@ -514,7 +517,7 @@ function paintCurrent() {
     mainEl.appendChild(el('div', {
       class: 'note',
       style: { margin: '0 0 14px', padding: '10px 14px', border: '1px solid var(--line-strong)', borderRadius: '10px' },
-      text: '插件后端还是旧版本：重启一次 DSH 后，「额度保存 / 性格页 / 情绪页 / 记忆图」才会出现。页面本身已经是最新的。',
+      text: '部分功能尚未就绪或版本不匹配，入口仍保留。请先检查服务状态；升级后需要重启 DSH 和配套服务。',
     }))
   }
   const bridgeMissing = S.bridgeCaps && S.bridgeCaps.size
@@ -536,6 +539,7 @@ function paintCurrent() {
   else if (S.tab === 'graph') { mainEl.appendChild(renderGraphTab()); startGraphLoop() }
   else if (S.tab === 'persona') { mainEl.appendChild(renderPersona()); if (!S.persona && !S.personaLoading) void loadPersona(); if (S.chatProfiles === null) void loadChatProfiles() }
   else if (S.tab === 'emotion') { mainEl.appendChild(renderEmotion()); if (!S.emotion && !S.emotionLoading) void loadEmotion() }
+  else if (S.tab === 'continuity') { mainEl.appendChild(renderContinuity()); if (!S.continuity.data && !S.continuity.loading && !S.continuity.error) void loadContinuity() }
   else if (S.tab === 'memes') { mainEl.appendChild(renderMemes()); if (!S.memes.data && !S.memes.loading) void loadMemes() }
   else if (S.tab === 'cost') { mainEl.appendChild(renderCost()); if (!S.cost.data && !S.cost.loading) void loadCost() }
   else if (S.tab === 'library') mainEl.appendChild(renderLibrary())
@@ -1272,7 +1276,15 @@ async function resolveMemoryConflict(conflict, message) {
     row.source_text ? el('details', null, el('summary', { text: '查看原话' }), el('p', { text: row.source_text })) : null,
   )
   content.appendChild(show(operation === 'restore' ? '待恢复记忆' : '待确认候选', conflict.candidate))
-  for (const row of conflict.confirmed || []) content.appendChild(show('当前已确认事实', row))
+  const conflicts = Array.isArray(conflict.conflicts) ? conflict.conflicts : []
+  const uncertain = Array.isArray(conflict.uncertain) ? conflict.uncertain : (conflict.confirmed || [])
+  for (const row of conflicts) content.appendChild(show('需要核对的明确矛盾', row))
+  if (uncertain.length) content.appendChild(el('details', {class:'conflict-uncertain'},
+    el('summary', {text:`${uncertain.length} 条关系尚不确定（不代表互相矛盾，点击展开）`}),
+    el('p', {class:'muted',text:'模型未能可靠判断关联，不是要求你在这些真实记忆中只留一条。选择保留全部时，它们不会被修改。'}),
+    ...uncertain.map(row=>show('已有记忆 · 尚未确认矛盾',row))))
+  if (conflict.duplicates?.length) content.appendChild(el('p',{class:'note',text:`另有 ${conflict.duplicates.length} 条表达相同事实，已有记录将保留。`}))
+  if (conflict.coexistingCount) content.appendChild(el('p',{class:'muted',text:`已识别 ${conflict.coexistingCount} 条可以共存或互为补充的记忆，无需在它们之间做选择。`}))
   if (conflict.truncated) {
     content.appendChild(el('p', {class:'note',text:`历史尚未检查完（${conflict.reviewed || 0}/${conflict.total || 0}），不能据此确认或替换。关闭后重新点击，可继续复核。`}))
     await openModal({title:'历史复核尚未完成',desc:message,content,submit:'知道了',cancel:'关闭',fields:[]})
@@ -1280,14 +1292,14 @@ async function resolveMemoryConflict(conflict, message) {
   }
   if (!conflict.confirmed?.length && !conflict.truncated) content.appendChild(el('p', { class: 'note', text: '原关联事实已不再有效，未找到当前已确认的替代事实。' }))
   const choice = await openModal({
-    title: '核对这条记忆与已有事实的关系',
-    desc: `${message}。请对照原话后选择。处理记录可在「整理 → 操作记录」中撤销。`,
+    title: conflicts.length ? '核对明确矛盾；其余记忆保留' : '这些记忆可以都是真的',
+    desc: `${message}。确认这条是真的，不意味着否定其他记忆。不需要选出唯一正确的一条；处理记录可在「整理 → 操作记录」中撤销。`,
     content,
     submit: '应用选择', cancel: '暂不处理',
-    fields: [{ name: 'resolution', label: '如何处理', type: 'select', value: 'keep-confirmed', options: [
+    fields: [{ name: 'resolution', label: '如何处理', type: 'select', value: 'coexist', options: [
       { value: 'keep-confirmed', label: operation === 'restore' ? '保留现状，暂不恢复' : '保留现状，归档这条候选' },
-      { value: 'coexist', label: '两条都成立，分别保留' },
-      { value: 'use-candidate', label: '以候选为准，替换上面列出的已确认事实' },
+      { value: 'coexist', label: '确认这条，并保留全部已有记忆' },
+      ...(conflicts.length ? [{ value: 'use-candidate', label: `以这条为准，仅替换 ${conflicts.length} 条明确矛盾的事实` }] : []),
     ] }],
   })
   if (!choice) return
@@ -3174,7 +3186,9 @@ async function loadEmotion(quiet = false) {
       startEmotionPolling()
     }
   } catch (error) {
+    S.emotion = {error:error.message}
     if (!quiet) toast(error.message, 'error')
+    if (S.tab === 'emotion') paintCurrent()
   } finally {
     S.emotionLoading = false
   }
@@ -3191,6 +3205,7 @@ function startEmotionPolling() {
 function renderEmotion() {
   const data = S.emotion
   if (!data) return el('div', { class: 'empty', text: '正在读她的情绪…' })
+  if (data.error) return el('section',{class:'card pad'},el('p',{role:'alert',text:`读不到情绪状态：${data.error}`}),el('button',{class:'btn',on:{click:()=>loadEmotion()}},'重试读取情绪'))
   if (!data.emotion) {
     return el('section', { class: 'card pad' },
       el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '情绪层还没开始' })),
@@ -4613,3 +4628,67 @@ async function boot() {
 }
 
 boot()
+
+// ---------------------------------------------------------------- 当前心绪
+const CONTINUITY_STATUS = {open:'进行中',paused:'暂不聊',closed:'已结束',expired:'已过期',tentative:'待验证',observed:'多次经历支持，仍可修正',rejected:'已否定',understood:'已理解事件',unavailable:'本轮使用原有处理',interrupted:'已丢弃过时理解',busy:'繁忙，保持原有处理',injected:'已交给聊天模型',rejected_delivery:'投递未接受','delivery-unknown':'投递结果未知',manual:'手动修正','reply-result':'回复结果'}
+async function loadContinuity() {
+  if (S.continuity.loading) return
+  S.continuity.loading = true
+  try { S.continuity.data = await api('/continuity'); S.continuity.error = '' }
+  catch (e) { S.continuity.error = `当前心绪不可用：${e.message}。请确认桥接已更新到配套版本。` }
+  finally { S.continuity.loading = false; if (S.tab === 'continuity') { paintCurrent(); if (!S.continuity.timer) S.continuity.timer=setInterval(()=>{if(S.tab==='continuity')void loadContinuity()},15000) } }
+}
+async function changeContinuity(body) {
+  if (S.continuity.loading) return
+  S.continuity.loading = true
+  try { S.continuity.data = await api('/continuity', {method:'POST',body}); S.continuity.error=''; toast('当前心绪已更新','ok') }
+  catch(e) { toast(e.message,'error') }
+  finally { S.continuity.loading=false; if(S.tab==='continuity')paintCurrent() }
+}
+function renderContinuity() {
+  const d=S.continuity.data, wrap=el('div',{class:'stack',style:{display:'grid',gap:'16px'}})
+  wrap.appendChild(el('section',{class:'card pad'},
+    el('h2',{text:'当前心绪 · 试验'}),
+    el('p',{class:'muted',text:'查看她正在挂念什么、暂时怎样理解，以及这些变化来自哪里。这里展示结构化事件结果，不展示模型内部思考。'}),
+    el('button',{class:'btn sm',disabled:S.continuity.loading,on:{click:()=>loadContinuity()}},'刷新当前心绪'),
+    S.continuity.error ? el('p',{role:'alert',text:S.continuity.error}) : null))
+  if(!d)return wrap
+  wrap.appendChild(el('section',{class:'card pad'},
+    el('label',{},el('input',{type:'checkbox',checked:d.enabled,disabled:S.continuity.loading,on:{change:e=>changeContinuity({enabled:e.target.checked})}}),' 启用连续事件理解（试验）'),
+    el('p',{class:'muted',text:'默认关闭，仅主人私聊。开启后每条符合条件的消息最多新增一次事件理解调用，成功时复用情绪判断；花费单列“事件理解”，不设每日硬上限。单次等待最多约 8 秒，失败时保持原有处理。'}),
+    !d.enabled?el('p',{text:'当前关闭：保留历史记录，但不会生成或使用挂念、认识及关系参考。'}):null,
+    d.storageError?el('p',{role:'alert',text:'状态保存异常，重启后可能丢失最近变化。请检查磁盘和权限。'}):null))
+  const evidence=rows=>el('details',{},el('summary',{text:'查看原话依据'}),...(rows||[]).map(e=>el('p',{text:`${fmtWhen(e.at)} · 消息 ${e.messageId || e.id}：${e.quote}`})))
+  const concerns=el('section',{class:'card pad'},el('h2',{text:'当前挂念'}),el('p',{class:'muted',text:'有明确来源的未完事项。不相关时继续保留；暂停、结束和过期后不再进入回复参考。'}))
+  if(!d.concerns?.length)concerns.appendChild(el('p',{text:'暂时没有挂念。普通聊天不必产生新挂念。'}))
+  for(const r of [...(d.concerns||[])].reverse())concerns.appendChild(el('article',{class:'card pad'},
+    el('h3',{text:r.title}),el('p',{text:r.detail}),el('p',{class:'muted',text:`${CONTINUITY_STATUS[r.status]||r.status} · ${d.enabled&&r.status==='open'&&d.focus?.includes(r.id)?'本轮相关 · ':''}到期 ${new Date(r.expiresAt).toLocaleString()}`}),evidence(r.evidence),
+    ['open','paused'].includes(r.status)?el('div',{},
+      r.status==='open'?el('button',{class:'btn sm',on:{click:()=>changeContinuity({collection:'concerns',id:r.id,action:'pause'})}},'暂不聊这件事'):null,
+      el('button',{class:'btn sm',on:{click:()=>changeContinuity({collection:'concerns',id:r.id,action:'close'})}},'结束这件事')):null))
+  wrap.appendChild(concerns)
+  const beliefs=el('section',{class:'card pad'},el('h2',{text:'待验证认识'}),el('p',{class:'muted',text:'这些是可能的理解，始终不是已确认事实。修正后重新积累证据，不会自动写入长期事实或人格。'}))
+  if(!d.beliefs?.length)beliefs.appendChild(el('p',{text:'暂时没有待验证认识。'}))
+  for(const r of [...(d.beliefs||[])].reverse())beliefs.appendChild(el('article',{class:'card pad'},
+    el('h3',{text:r.text}),el('p',{text:`${CONTINUITY_STATUS[r.status]||r.status} · 独立原话 ${r.evidence?.length||0} 条`}),
+    Number.isFinite(r.confidence)?el('p',{class:'muted',text:`参考强度 ${Math.round(r.confidence*100)}%（非准确率）${r.fading?' · 缺少新证据，正在淡化':''}；上次有效证据：${fmtWhen(r.lastEvidenceAt)}；到期：${new Date(r.expiresAt).toLocaleString()}`}):null,evidence(r.evidence),
+    r.revisions?.length?el('details',{},el('summary',{text:'修正前的理解'}),...r.revisions.map(v=>el('p',{text:`${fmtWhen(v.at)}：${v.text}`}))):null,
+    ['tentative','observed'].includes(r.status)?el('button',{class:'btn sm',on:{click:()=>changeContinuity({collection:'beliefs',id:r.id,action:'reject'})}},'这个理解不对'):null))
+  wrap.appendChild(beliefs)
+  if(d.relation)wrap.appendChild(el('section',{class:'card pad'},el('h2',{text:'关系观察'}),
+    el('p',{class:'muted',text:'程序内部慢变量，不是人类感情的测量值。只接受明确关系证据；忙碌、沉默、任务纠错及联想不会自行扣分。'}),
+    el('p',{text:`信任倾向 ${Math.round(d.relation.trust*100)} / 熟悉积累 ${Math.round(d.relation.familiarity*100)} / 未解决张力 ${Math.round(d.relation.tension*100)}`}),
+    el('p',{class:'muted',text:'初始信任倾向 50、熟悉积累 0、张力 0；这些是设计基线。关系数值用于观察，不直接放大情绪，也不直接改写人格。'})))
+  const events=el('section',{class:'card pad'},el('h2',{text:'变化来由与回复去向'}),el('p',{class:'muted',text:'模型接受参考不代表表达了它；QQ 发送成功也不能证明采用了某条认识。'}))
+  for(const e of [...(d.events||[])].reverse().slice(0,30))events.appendChild(el('article',{class:'card pad'},
+    el('h3',{text:e.status==='rejected'?'投递未接受':CONTINUITY_STATUS[e.status]||e.status}),el('p',{text:e.summary}),el('p',{class:'muted',text:fmtWhen(e.at)}),
+    e.appraisal?el('p',{text:`事件分类 ${({neutral:'平常交流',uncertain:'尚不确定',user_distress:'用户困扰',third_party:'第三方事件',criticism:'任务纠错',conflict:'关系冲突',repair:'关系修复',affection:'亲近表达'})[e.appraisal.kind]||e.appraisal.kind} · 指向 ${({none:'无特定对象',unknown:'不确定',user:'用户自身',third_party:'其他人',task:'任务或回答',character:'角色'})[e.appraisal.target]||e.appraisal.target} · ${e.appraisal.evidence.join(' / ')||'没有明确情绪证据'}`}):null,
+    e.emotion?el('p',{text:`实际情绪变化：愉悦 ${Number(e.emotion.deltaV||0).toFixed(3)}，唤醒 ${Number(e.emotion.deltaA||0).toFixed(3)}`}):null,
+    e.relation?el('p',{text:`关系变化：信任 ${e.relation.delta.trust}，熟悉 ${e.relation.delta.familiarity}，张力 ${e.relation.delta.tension}${e.relation.quote?'；依据：'+e.relation.quote:''}`}):null,
+    ...(e.changes||[]).map(c=>el('p',{text:`${c.type==='concern'?'挂念':'认识'} · ${({open:'新增',update:'更新',pause:'暂停',close:'结束',propose:'提出',support:'新增依据',revise:'修正',reject:'否定','repeat-evidence':'旧事重述，不续期','uncertain-evidence':'新证据不确定，不续期'})[c.action]||c.action} · ${c.text}；依据：${c.quote}`})),
+    e.replyStatus?el('p',{text:`发送结果 ${({sent:'已发送',failed:'失败',partial:'部分发送','send-failed':'发送失败','no-reply':'没有发出回复',unknown:'结果未知',cancelled:'已取消',command:'命令处理'})[e.replyStatus]||e.replyStatus} · 已发送 ${e.sent} 条`}):null,
+    e.eventId?el('p',{class:'muted',text:`关联事件 ${e.eventId}`}):null))
+  if(!d.events?.length)events.appendChild(el('p',{text:'开启后，符合条件的新消息会在这里留下记录。'}))
+  wrap.appendChild(events)
+  return wrap
+}

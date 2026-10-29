@@ -2,14 +2,14 @@
 
 面向 DSH 与 QQ 桥接的本地记忆管理插件。集中查看和维护长期记忆、聊天原文与摘要、日记、性格和情绪，提供来源核对、处理进度和部分操作的撤销能力。
 
-![Version](https://img.shields.io/static/v1?label=version&message=0.8.12-preview.1&color=0e5a68)
+![Version](https://img.shields.io/static/v1?label=version&message=0.8.13&color=0e5a68)
 ![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078d4)
 ![License](https://img.shields.io/badge/license-MIT-2e8696)
 
-[下载 v0.8.12-preview.1](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.8.12-preview.1) · [用户手册](manual/USER_GUIDE-0.8.12-preview.1.md) · [PDF 手册](manual/USER_GUIDE-0.8.12-preview.1.pdf) · [升级指南](UPGRADE.md) · [更新日志](CHANGELOG.md)
+[下载 v0.8.13](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.8.13) · [用户手册](manual/USER_GUIDE-0.8.13.md) · [PDF 手册](manual/USER_GUIDE-0.8.13.pdf) · [升级指南](UPGRADE.md) · [更新日志](CHANGELOG.md)
 
-> **预发布版本**：包含空闲联想和主观感受试验功能，建议备份后使用。稳定版仍为 [v0.8.11](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.8.11)。详见[功能补充说明](docs/usage-and-association.md)。
+> **v0.8.13** 整合记忆确认修复、模型调用分项记账和“当前心绪”。连续事件理解、空闲联想及主观感受仍为可独立关闭的试验功能；新安装默认关闭，升级保留已有设置。详见[当前心绪说明](docs/continuity.md)和[花费与联想说明](docs/usage-and-association.md)。
 
 ## 项目定位
 
@@ -32,12 +32,19 @@
 | 主动联系与催睡 | 配置时间窗、概率、次数和冷却；满足条件时由桥接发起联系 |
 | 轻量记忆与玩梗 | 查看临时话题和印象，管理可选梗库功能；梗库需另行准备 |
 | 用量与审计 | 按功能查看累计与所选时段的 token、估算花费和用量记录；查看审计和可撤销操作 |
+| 当前心绪（试验） | 连续事件理解、挂念生命周期、可修正认识、关系观察与回复去向；支持查看来源、暂停、结束和否定 |
 | 空闲联想（试验） | 主人私聊空闲时，从同一聊天真实记忆出发形成短程话题设想、显示去向；可独立开启轻微主观感受，默认关闭 |
 
 不同对象的偏好不应仅因同属“饮食”而互相覆盖。例如“不喜欢煎饼”和“喜欢小笼包”可以同时成立。模型仍可能判断错误，请以原话和实际情况为准。
 
 ## 本版更新重点
 
+- 待验证认识按七天半衰期淡化，重复证据不续期；新增证据必须通过原话和新经历检查。
+- 情绪、性格等入口始终保留，服务不可用时显示说明。
+- 记忆确认区分明确矛盾与不确定关联，默认确认并保留全部；替换只影响明确矛盾。
+- 新增主人私聊统一事件理解，成功时复用情绪判断，模型调用计入独立“事件理解”分项。
+- 挂念能跨轮保留；认识支持修正和否定，同一原话不重复计证据。关系慢变量只接受明确关系事件。
+- 新增“当前心绪”页，展示原话依据、变化和回复结果；开启后会增加调用与等待，不设每日硬上限。
 - 后台模型调用按记忆提取、查漏、事实复核、联想、情绪复核等用途分项记账；旧记录保留“历史未分项”。
 - 修正 24 小时、7 天和 30 天图表范围；累计分项不受聊天分页影响，推理 token 不重复累加。
 - 无关联想在原十分钟有效期内等待，使用前重新核对原始事实；来源失效时丢弃。
@@ -101,19 +108,20 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 1. 总览完成启动检查，确认数据库路径一致、桥接在线。
 2. 在允许的聊天中正常交流；群聊默认只处理 @ 或回复机器人的消息。
 3. “整理”查看队列和“消息处理状态与遗漏检查”；普通闲聊可能没有新增事实。
-4. “长期记忆 → 待确认”核对原话。遇到冲突，可暂不处理、保留当前事实、分别保留或以候选为准。
+4. “长期记忆 → 待确认”核对原话。先区分明确矛盾与尚不确定；内容都成立时选“确认这条，并保留全部已有记忆”。
 5. “语义找”检查检索结果；控制台预览不证明 QQ 回复已经使用这些记忆。
-6. 按需调整情绪复核、主动联系和试验功能。详细操作见 [用户手册](manual/USER_GUIDE-0.8.12-preview.1.md)。
+6. 按需调整情绪复核、主动联系和试验功能。详细操作见 [用户手册](manual/USER_GUIDE-0.8.13.md)。
 
 ## 模型调用与配置
 
-提取一批消息通常有一次提取和一次独立查漏调用；遗漏续处理会增加调用。确认/恢复时，每八条旧事实可能增加一次复核。复杂情绪复核开启后按需触发；空闲联想每轮最多两次调用。
+提取一批消息通常有一次提取和一次独立查漏调用；遗漏续处理会增加调用。确认/恢复时，每八条旧事实可能增加一次复核。复杂情绪复核开启后按需触发；空闲联想每轮最多两次调用。连续事件理解开启后，每条合格的主人私聊消息最多新增一次调用，计入“事件理解”；成功时复用情绪分类，不设每日调用硬上限。
 
 整理额度按成功批次计，不等于模型请求次数或 token 上限；`0` 表示不限。新环境的总额度默认不限，群聊仍有独立额度和低产出暂停。**升级保留已有配置**，不会把已有数值强制改为不限。情绪模型复核的每日不限与记忆整理额度是两套设置。实际费用以模型服务账单为准。
 
 ## 数据与隐私
 
 - 默认数据根目录为 `~/.dsh`。长期记忆、原文与摘要在 `memvec/memories.db`，整理队列在 `qq-bridge/state/daily-memory-queue.json`。
+- 连续心绪及其原话证据保存在 `qq-bridge/state/continuity.json`，需随桥接状态一起备份。
 - 配置、日记、性格、情绪与审计记录分布在桥接和 `feiyu-memory-console` 目录；备份不能只有插件源码。
 - 数据库运行时可能存在 WAL/SHM 文件。应使用 SQLite 在线备份，或停止服务后备份完整数据，不能把运行中单独复制 `.db` 视为一致备份。
 - 默认按聊天隔离。跨聊天共享需明确开启，隐私过滤存在局限，不等同于可靠匿名化。
@@ -128,6 +136,7 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 - 超过 12000 字的消息保留待拆分；队列容量达到上限时，移出项会留下状态。
 - 情绪理解使用有限规则和上下文，复杂反讽、指代和角色扮演仍可能误判。
 - 空闲联想是有限的候选话题机制，不代表持续自主思考，质量和重复话题需要观察。
+- 待验证认识会淡化、过期，不能自动变成事实或人格；不同措辞是否属于同一次经历仍可能误判。
 - 审计不等于所有操作都能撤销；已发送消息不会因记忆撤销自动收回。
 
 ## 开发与发布
@@ -136,15 +145,17 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 npm test
 npm run test:browser
 npm run test:browser:context
+npm run test:browser:usage
+npm run test:browser:continuity
 ```
 
-基础回归包含 15 组隔离测试。浏览器测试另需 Playwright 和兼容浏览器；测试使用隔离数据，不向 QQ 发消息。[发布规范](docs/RELEASING.md) 说明版本、标签、测试、附件、校验和草稿发布流程。
+基础回归包含 18 组隔离测试。浏览器测试另需 Playwright 和兼容浏览器；测试使用隔离数据，不向 QQ 发消息。[发布规范](docs/RELEASING.md) 说明版本、标签、测试、附件、校验和草稿发布流程。
 
 反馈问题时请附版本、操作步骤、期望与实际结果，以及去除个人信息后的错误信息。
 
 ## 文档与许可
 
-- [详细用户手册](manual/USER_GUIDE-0.8.12-preview.1.md) / [PDF](manual/USER_GUIDE-0.8.12-preview.1.pdf)
+- [详细用户手册](manual/USER_GUIDE-0.8.13.md) / [PDF](manual/USER_GUIDE-0.8.13.pdf)
 - [升级与回退](UPGRADE.md) / [更新日志](CHANGELOG.md)
 - [情绪与复杂情境](docs/complex-emotion.md) / [记忆服务说明](docs/memvec.md)
 - [致谢与来源](ACKNOWLEDGEMENTS.md) / [免责声明](DISCLAIMER.md)

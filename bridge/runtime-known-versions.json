@@ -64,5 +64,64 @@
       "idle-association.mjs": "0fe430e7b2e4c06a157bc9589db5065077ce8a04c1a3ae5c7e36e81d08a881e5",
       "memory-coverage.mjs": "db2ae2874cffa49366970a07798d959a44cb4401987c3a7c2a762b24f8e70635"
     }
+  },
+  {
+    "version": "0.8.12-preview.1",
+    "files": {
+      "bridge.js": "718e2e7c920746d9aef716b0618d1f481f06345d22ce475a244694a1412e747a",
+      "human-context.mjs": "5a0de4c1ba9bb2b80a07c737499d1a76d0156b93562b1a7ebd6667fc4ffcc349",
+      "emotion.js": "c1e7462d57fa619ff4254973e6aec999b41f378cda17facc65addf1bdb44f21b",
+      "emotion-appraisal.mjs": "2957fed39a0303e9d48cba96a2ccc4f0a88e8b290f5e6a52f0f5ed7ac5a36f88",
+      "turn-traces.mjs": "5a048fd589d168fdf02c4c08282bf4c5a7b672f6b60e8b42d5b46759d8af365c",
+      "emotion-context.mjs": "ed0a846e6e5be8b326ffceda32e5512cbbc5aee4dc723f8d67e66eb6eb0e8c7c",
+      "appraisal-budget.mjs": "bb271e1b372570d5a679e75f096aed33be8e6de873aff16fe104241dcb090256",
+      "daily-memory.js": "fda3edb5c4d5a11aec3fa0dbbf90c85d48515d30cc2083f9bc4da11c762c12e9",
+      "fact-review.mjs": "c4b53dcd284611d101379c77bd92c2e61cd00323fa51891492111fbff2561c24",
+      "idle-association.mjs": "bcfa78e7c054818bb68d1c77f949a764f592244d80e2da53d8b1959c525b0378",
+      "memory-coverage.mjs": "db2ae2874cffa49366970a07798d959a44cb4401987c3a7c2a762b24f8e70635",
+      "feature-token-ledger.mjs": "4b56d4aace538d07ade5c43a9624cfd9a78e89772108bc8ce80ee357e599f5e2",
+      "feature-model-prices.mjs": "06d717cff7967f54b93077d3e631d656466c5df72fce083212fab44ab7e6e91b",
+      "usage-features.mjs": "9a04b773663c38931a89f60c9224967cae37520f4f579d069410b5c9d3bc9b56"
+    }
+  },
+  {
+    "version": "0.8.12-preview.2",
+    "files": {
+      "bridge.js": "afd3507c3ab0b919c3e2a8546bde1edaa6dfe7588e40883467c754ca3007d595",
+      "human-context.mjs": "5a0de4c1ba9bb2b80a07c737499d1a76d0156b93562b1a7ebd6667fc4ffcc349",
+      "emotion.js": "c1e7462d57fa619ff4254973e6aec999b41f378cda17facc65addf1bdb44f21b",
+      "emotion-appraisal.mjs": "2957fed39a0303e9d48cba96a2ccc4f0a88e8b290f5e6a52f0f5ed7ac5a36f88",
+      "turn-traces.mjs": "5a048fd589d168fdf02c4c08282bf4c5a7b672f6b60e8b42d5b46759d8af365c",
+      "emotion-context.mjs": "ed0a846e6e5be8b326ffceda32e5512cbbc5aee4dc723f8d67e66eb6eb0e8c7c",
+      "appraisal-budget.mjs": "bb271e1b372570d5a679e75f096aed33be8e6de873aff16fe104241dcb090256",
+      "daily-memory.js": "fda3edb5c4d5a11aec3fa0dbbf90c85d48515d30cc2083f9bc4da11c762c12e9",
+      "fact-review.mjs": "c4b53dcd284611d101379c77bd92c2e61cd00323fa51891492111fbff2561c24",
+      "idle-association.mjs": "2c827290f2b8b4fe763c5797a9dce8fa7a4789224fac3bdbcf34ea84ef352b6f",
+      "memory-coverage.mjs": "db2ae2874cffa49366970a07798d959a44cb4401987c3a7c2a762b24f8e70635",
+      "feature-token-ledger.mjs": "4b56d4aace538d07ade5c43a9624cfd9a78e89772108bc8ce80ee357e599f5e2",
+      "feature-model-prices.mjs": "06d717cff7967f54b93077d3e631d656466c5df72fce083212fab44ab7e6e91b",
+      "usage-features.mjs": "a79c333e6169f6305c3341211ab1a68bfb17d4b0606498b330c2961ba55c47b7",
+      "continuity.mjs": "502be1fd547d3e18c8681a81a6cbf73fb1883d0bd33988deca7eba8cbf4b5753"
+    }
+  },
+  {
+    "version": "0.8.12-preview.3",
+    "files": {
+      "bridge.js": "afd3507c3ab0b919c3e2a8546bde1edaa6dfe7588e40883467c754ca3007d595",
+      "human-context.mjs": "5a0de4c1ba9bb2b80a07c737499d1a76d0156b93562b1a7ebd6667fc4ffcc349",
+      "emotion.js": "c1e7462d57fa619ff4254973e6aec999b41f378cda17facc65addf1bdb44f21b",
+      "emotion-appraisal.mjs": "2957fed39a0303e9d48cba96a2ccc4f0a88e8b290f5e6a52f0f5ed7ac5a36f88",
+      "turn-traces.mjs": "5a048fd589d168fdf02c4c08282bf4c5a7b672f6b60e8b42d5b46759d8af365c",
+      "emotion-context.mjs": "ed0a846e6e5be8b326ffceda32e5512cbbc5aee4dc723f8d67e66eb6eb0e8c7c",
+      "appraisal-budget.mjs": "bb271e1b372570d5a679e75f096aed33be8e6de873aff16fe104241dcb090256",
+      "daily-memory.js": "fda3edb5c4d5a11aec3fa0dbbf90c85d48515d30cc2083f9bc4da11c762c12e9",
+      "fact-review.mjs": "c4b53dcd284611d101379c77bd92c2e61cd00323fa51891492111fbff2561c24",
+      "idle-association.mjs": "2c827290f2b8b4fe763c5797a9dce8fa7a4789224fac3bdbcf34ea84ef352b6f",
+      "memory-coverage.mjs": "db2ae2874cffa49366970a07798d959a44cb4401987c3a7c2a762b24f8e70635",
+      "feature-token-ledger.mjs": "4b56d4aace538d07ade5c43a9624cfd9a78e89772108bc8ce80ee357e599f5e2",
+      "feature-model-prices.mjs": "06d717cff7967f54b93077d3e631d656466c5df72fce083212fab44ab7e6e91b",
+      "usage-features.mjs": "a79c333e6169f6305c3341211ab1a68bfb17d4b0606498b330c2961ba55c47b7",
+      "continuity.mjs": "51a55100884327d3ab73805555f32fabcbbbb942a21c3bc5fc99156153fd1dbd"
+    }
   }
 ]

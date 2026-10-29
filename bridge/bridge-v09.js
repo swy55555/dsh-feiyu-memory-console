@@ -1,3 +1,4 @@
+import {Continuity} from './continuity.mjs';
 import {featureKey} from './usage-features.mjs';
 import {appraisalContext, expectedAbsence} from './emotion-context.mjs';
 import {reserveAppraisal} from './appraisal-budget.mjs';
@@ -86,7 +87,7 @@ const PRIVATE_SECRET_FILE = path.join(STATE_DIR, 'private-diary.secret.json');
 const BRIDGE_CAPABILITIES = [
   'diary-vault', 'diary-password', 'diary-auto-import',
   'persona-chat', 'persona-draft', 'emotion', 'emotion-drift',
-  'episodes', 'queue-limit', 'owner-contact',
+  'episodes', 'queue-limit', 'owner-contact', 'continuity',
 ];
 const LEGACY_PERSONA_FILE = path.join(STATE_DIR, 'persona.json');
 const DIARY_STATE_FILE = path.join(STATE_DIR, 'diary-state.json');
@@ -1567,7 +1568,7 @@ async function main() {
     saveSpillover(pending);
     if (activeSpillover?.emotionEventId === correction.eventId) activeSpillover = null;
   }
-  function noteEmotion({ source = 'owner', text = '', directed = true, weight = 1, kind = '', key = '', speakerId = '', messageId = '', replyToId = '', replyTarget = 'unknown', recentMessages } = {}) {    if (cfg.socialV2?.emotion?.enabled === false) return;
+  function noteEmotion({ source = 'owner', text = '', directed = true, weight = 1, kind = '', key = '', speakerId = '', messageId = '', replyToId = '', replyTarget = 'unknown', recentMessages, semanticAppraisal } = {}) {    if (cfg.socialV2?.emotion?.enabled === false) return;
     const body = String(text || '').trim();
     if (!body) return;
     const now = Date.now();
@@ -1584,13 +1585,14 @@ async function main() {
     }
     const eventId = messageId ? `${key}/${speakerId}/${messageId}` : crypto.randomUUID();
     if (emotionState.seenEvents?.includes(eventId)) return;
-    const emotionInput = { source, text: body, directed, weight, kind, chatKey: key, key, speakerId, messageId, replyToId, replyTarget, recentMessages,
+    const sharedAppraisal = validateSemanticAppraisal(semanticAppraisal, body);
+    const emotionInput = { appraisal: sharedAppraisal || undefined, source, text: body, directed, weight, kind, chatKey: key, key, speakerId, messageId, replyToId, replyTarget, recentMessages,
       deferToModel: cfg.socialV2?.emotion?.appraisalModel?.enabled === true && source === 'owner' && key.startsWith('private:'), eventId, at: now };
     emotionState = applyEmotionEvent(emotionState, emotionInput, now, emotionRecoveryCfg());
     ap = emotionState.lastEvent;
     if (ap.correction?.status === 'replayed') reconcileEmotionCorrection(ap.correction);
     saveEmotionState();
-    return refineEmotionWithModel(emotionInput, ap, beforeEmotion).then((refined) => {
+    return (sharedAppraisal ? Promise.resolve(ap) : refineEmotionWithModel(emotionInput, ap, beforeEmotion)).then((refined) => {
       if (emotionState.latestEventId !== emotionInput.eventId) return;
       // Finalize external side effects only after optional appraisal settles.
       const finalAp = refined || ap;
@@ -1598,6 +1600,7 @@ async function main() {
       if (ep && emotionState.triggers?.[0]) emotionState.triggers[0].episodeId = ep.id;
       maybeQueueSpillover({ source, key, text: body, ap: finalAp, eventId: emotionInput.eventId });
       saveEmotionState();
+      return finalAp;
     }).catch(error => log('[emotion] 事件记录失败：', error?.message ?? error));
   }
   // On-demand review with bounded context; daily count is telemetry, not a limit.
@@ -3327,6 +3330,7 @@ async function main() {
   const retrievalReplyFile = path.join(STATE_DIR, 'retrieval-trace-replies.jsonl');
   const turnTraces = new TurnTraces((row) => {
     try { fs.appendFileSync(retrievalReplyFile, JSON.stringify(row) + '\n'); } catch {}
+    if (typeof continuity !== 'undefined') continuity.reply(row);
   });
   setInterval(() => turnTraces.sweep(), 60000).unref();
   async function dispatchTracedPrompt(params, context = {}) {
@@ -3334,12 +3338,14 @@ async function main() {
     const ticket = key ? turnTraces.enqueue(params.sessionId, context.traceId || null, key) : null;
     try {
       const result = await api.sessions.prompt(params);
+      if (context.continuity) continuity.delivery(context.continuity, result.result.ok && !result.result.value?.command ? 'injected' : 'rejected');
       if (context.idleAssociation) idleAssociations.delivery(context.idleAssociation,
         result.result.ok && !result.result.value?.command ? 'injected' : 'rejected');
       if (!result.result.ok) turnTraces.cancel(ticket, 'prompt rejected');
       else if (result.result.value?.command) turnTraces.cancel(ticket, 'command completed without model turn', 'command');
       return result;
     } catch (error) {
+      if (context.continuity) continuity.delivery(context.continuity, 'delivery-unknown');
       if (context.idleAssociation) idleAssociations.delivery(context.idleAssociation, 'delivery-unknown');
       turnTraces.invalidate(params.sessionId, 'dispatch outcome unknown'); throw error;
     }
@@ -3372,6 +3378,7 @@ async function main() {
 
   async function withMemoryContext(key, promptText, context = {}) {
     context.traceId = crypto.randomUUID();
+    if (context.allowIdleAssociation === true && typeof continuity !== 'undefined') promptText = continuity.prompt(key, context) + promptText;
     const recordTrace = (data) => recordRetrievalTrace({traceId: context.traceId, ...data});
     const traceStart = Date.now();
     // 每次投递记一轮；够轮数且安静下来后，由 scheduleRotationCheck 触发摘要+轮换。
@@ -3563,7 +3570,15 @@ async function main() {
     verify: (prompt) => runHeadlessPrompt(prompt, 60000, [], 'coverage_check')
   });
 
+  const continuity = new Continuity({
+    enabled: () => cfg.socialV2?.continuity?.enabled === true,
+    allowed: key => Boolean(cfg.ownerQQ) && key === `private:${String(cfg.ownerQQ)}` && isSessionAllowedInCurrentMode(key),
+    load: () => readJsonSafe(path.join(STATE_DIR, 'continuity.json'), null),
+    save: data => atomicWriteJson(path.join(STATE_DIR, 'continuity.json'), data),
+    generate: (prompt, timeout) => runHeadlessPrompt(prompt, timeout, [], 'event_understanding'),
+  });
   const idleAssociations = new IdleAssociations({
+    seedFor: key => continuity.idleQuery(key),
     enabled: () => cfg.socialV2?.association?.idleEnabled === true,
     affectEnabled: () => cfg.socialV2?.association?.idleAffectEnabled === true && cfg.socialV2?.emotion?.enabled !== false,
     load: () => readJsonSafe(path.join(STATE_DIR, 'idle-association-audit.json'), null),
@@ -5066,6 +5081,27 @@ async function main() {
           const review = await reviewMemoryFacts(body.context, (prompt, timeout) => runHeadlessPrompt(prompt, timeout, [], 'fact_review'));
           sendJson({ ok: true, review });
           return;
+        }
+        if (url.pathname === '/api/continuity') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) { sendJson({ok:false,error:'仅管理端可访问连续状态'},403); return; }
+          const key = `private:${String(cfg.ownerQQ || '')}`;
+          if (req.method === 'GET') { sendJson({ok:true,...continuity.snapshot(key)}); return; }
+          if (req.method === 'POST') {
+            const body = await readBody();
+            if (typeof body.enabled === 'boolean') {
+              const configFile = path.join(ROOT, 'config.json');
+              const file = readConfigObject(configFile);
+              const continuityConfig = {...(file.socialV2?.continuity || {}),enabled:body.enabled};
+              file.socialV2 = {...(file.socialV2 || {}),continuity:continuityConfig};
+              atomicWriteJson(configFile,file);
+              cfg.socialV2 = {...(cfg.socialV2 || {}),continuity:continuityConfig};
+              continuity.invalidate();
+            } else {
+              try { continuity.edit(key,body); } catch { sendJson({ok:false,error:'无效的状态修正'},400);return; }
+            }
+            sendJson({ok:true,...continuity.snapshot(key)});return;
+          }
+          sendJson({ok:false,error:'method not allowed'},405);return;
         }
         if (req.method === 'GET' && url.pathname === '/api/memory/idle-association') {
           sendJson({ok:true,...idleAssociations.snapshot(`private:${String(cfg.ownerQQ || '')}`)});
@@ -13181,6 +13217,8 @@ ${roleText.slice(0, 9000)}`;
     if (!isSessionAllowedInCurrentMode(key)) return;
     if (!plainContent && !quoteTargetIsSelf) return;
     const isOwner = String(event.user_id) === String(cfg.ownerQQ ?? '');
+    const continuityTicket = kind === 'private' && isOwner
+      ? continuity.begin(key, String(event.message_id ?? event.msg_id ?? crypto.randomUUID()), !SENSITIVE_RE.test(plainContent) && !plainContent.startsWith('/')) : null;
     if (kind === 'private' && isOwner) idleAssociations.note(key, plainContent, !SENSITIVE_RE.test(plainContent) && !plainContent.startsWith('/'));
     const roleState = readRoleState();
 
@@ -13380,7 +13418,11 @@ ${roleText.slice(0, 9000)}`;
         const emotionMeta = {speakerId:String(event.user_id || ''),messageId:String(event.message_id ?? event.msg_id ?? ''),replyToId,
           replyTarget:replyToId ? (quoteTargetIsSelf ? 'character' : 'other') : (kind === 'private' ? 'character' : 'unknown')};
         if (kind === 'private' && isOwner) {
-          await noteEmotion({ ...emotionMeta, source: 'owner', text: plainContent, weight: cfg.socialV2?.emotion?.weights?.owner ?? 1.1, key });
+          const understood = await continuity.observe(key, {text:plainContent,...emotionMeta}, continuityTicket);
+          if (!continuityTicket || continuity.isCurrent(key, continuityTicket)) {
+            const actualEmotion = await noteEmotion({ ...emotionMeta, semanticAppraisal: understood?.appraisal, source: 'owner', text: plainContent, weight: cfg.socialV2?.emotion?.weights?.owner ?? 1.1, key });
+            continuity.outcome(key, understood?.id, actualEmotion);
+          }
         } else if (kind === 'group') {
           const atSelf = (event.message || []).some((seg) => seg.type === 'at' && String(seg.data?.qq) === String(event.self_id));
           if (quoteTargetIsSelf || atSelf) await noteEmotion({ ...emotionMeta, source: 'group', text: plainContent, weight: cfg.socialV2?.emotion?.weights?.group ?? 1, key });
@@ -13539,7 +13581,7 @@ ${roleText.slice(0, 9000)}`;
       }
       throw error;
     }
-    const traceContext = { allowIdleAssociation: true };
+    const traceContext = { allowIdleAssociation: true, continuityMessageId: String(event.message_id ?? event.msg_id ?? '') };
     promptText = await withMemoryContext(key, promptText, traceContext);
     promptText = withStyleNudge(promptText);
     promptText = withQzoneNudge(key, promptText);

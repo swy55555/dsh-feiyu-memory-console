@@ -1125,14 +1125,20 @@ def _confirmation_snapshot(conn, scope, mid, review=None, operation='confirm'):
     relations = _validated_review(review, context) if review is not None else cached
     if review is not None and relations is None:
         raise MemoryConflict('语义复核已过期或证据不完整，请刷新后重新确认')
-    active = [r for r in selected if relations.get(r['id'], fact_relation(candidate, r)) not in ('coexist', 'supplement')]
+    effective = {r['id']: relations.get(r['id'], fact_relation(candidate, r)) for r in selected}
+    # Uncertainty is not contradiction, and equivalent facts are not competing truths.
+    active = [r for r in selected if effective[r['id']] not in ('coexist', 'supplement', 'equivalent')]
     incomplete = len(selected) > 8 and len(relations) < len(selected)
     def public(row):
         return {key: row[key] for key in ('id', 'text', 'source_time', 'source_text', 'tier', 'status', 'fact_key')}
     return candidate, active, {'kind': 'confirmation-conflict', 'scope': scope, 'revision': context['revision'],
                                'operation': operation, 'review': review, 'truncated': incomplete,
                                'reviewed': len(relations), 'total': len(selected),
-                               'candidate': public(candidate), 'confirmed': [public(r) for r in active]}
+                               'candidate': public(candidate), 'confirmed': [public(r) for r in active],
+                               'conflicts': [public(r) for r in selected if effective[r['id']] in ('conflict', 'replace')],
+                               'uncertain': [public(r) for r in selected if effective[r['id']] == 'uncertain'],
+                               'duplicates': [public(r) for r in selected if effective[r['id']] == 'equivalent'],
+                               'coexistingCount': sum(effective[r['id']] in ('coexist', 'supplement') for r in selected)}
 
 
 def _confirmation_error(conn, scope, mid, message):
@@ -1169,10 +1175,14 @@ def resolve_confirmation(scope, mid, resolution, revision, review=None, operatio
             if operation == 'confirm':
                 conn.execute("UPDATE memories SET status='archived' WHERE id=?", (mid,))
         elif resolution == 'use-candidate':
-            for row in active:
+            replace_ids = {r['id'] for r in snapshot['conflicts']}
+            if not replace_ids:
+                raise MemoryConflict('尚未发现明确矛盾，不能据此覆盖已有事实；可以确认这条并保留全部已有记忆', snapshot)
+            replacements = [r for r in active if r['id'] in replace_ids]
+            for row in replacements:
                 before[row['id']] = dict(row)
                 conn.execute("UPDATE memories SET status='superseded',superseded_by=? WHERE id=?", (mid, row['id']))
-            if any(row['tier'] == 'core' for row in active):
+            if any(row['tier'] == 'core' for row in replacements):
                 conn.execute("UPDATE memories SET tier='core',expires_at=0 WHERE id=?", (mid,))
             conn.execute("UPDATE memories SET status='active' WHERE id=?", (mid,))
         if resolution == 'coexist':
@@ -1191,7 +1201,7 @@ def _confirm_one(conn, scope, mid, before, review=None):
         return 0
     _, peers, snapshot = _confirmation_snapshot(conn, scope, mid, review)
     if peers or snapshot['truncated']:
-        raise MemoryConflict('相关记忆需要核对；未能确认矛盾的记录可以分别保留，截短的历史不会自动被忽略', snapshot)
+        raise MemoryConflict('请核对明确矛盾或尚不确定的关联；不确定不等于互相冲突，全部成立时可以确认并保留', snapshot)
     before[mid] = dict(row)
     conn.execute("UPDATE memories SET status='active' WHERE id=?", (mid,))
     return 1
@@ -1292,8 +1302,8 @@ def stats() -> dict:
         messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         summaries = conn.execute("SELECT COUNT(*) FROM session_summaries WHERE status='active'").fetchone()[0]
     return {
-        'version': '0.8.12-preview.1',
-        'capabilities': ['source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
+        'version': '0.8.13',
+        'capabilities': ['confirmation-relation-groups', 'source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
         'embed_threads': EMBED_THREADS,
         'index': 'exact-cache',
         'ann_threshold': ANN_MIN,

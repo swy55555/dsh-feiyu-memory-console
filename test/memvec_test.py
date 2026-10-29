@@ -34,7 +34,7 @@ class MemoryLifecycleTests(unittest.TestCase):
         except m.MemoryConflict as error:
             if not error.conflict:
                 raise
-            return m.confirm_memory(scope, mid, 'use-candidate', error.conflict['revision'])
+            return m.confirm_memory(scope, mid, 'use-candidate', error.conflict['revision'], self.review(mid, 'conflict'))
 
     def row(self, mid):
         with m.db() as c:
@@ -128,8 +128,8 @@ class MemoryLifecycleTests(unittest.TestCase):
             m.undo_confirm('private:10001', op)
 
     def conflict_pair(self):
-        candidate = self.add('older candidate', fact_key='drink', source_time=m.now()-100)
-        active = self.add('newer confirmed', fact_key='drink', confirmed=True, source_time=m.now(), tier='core')
+        candidate = self.add('older candidate', fact_key='drink', source_time=m.now()-100, fact=self.fact('同一饮品', '旧值', 'older candidate'))
+        active = self.add('newer confirmed', fact_key='drink', confirmed=True, source_time=m.now(), tier='core', fact=self.fact('同一饮品', '新值', 'newer confirmed'))
         with self.assertRaises(m.MemoryConflict) as raised:
             m.confirm_memory('private:10001', candidate)
         conflict = raised.exception.conflict
@@ -286,7 +286,7 @@ class MemoryLifecycleTests(unittest.TestCase):
         before = [self.row(a), self.row(b)]
         with self.assertRaises(m.MemoryConflict) as error:
             m.restore_memory('private:10001', a)
-        result = m.restore_memory('private:10001', a, 'use-candidate', error.exception.conflict['revision'])
+        result = m.restore_memory('private:10001', a, 'use-candidate', error.exception.conflict['revision'], self.review(a,'conflict',operation='restore'))
         self.assertEqual(self.row(b)['status'], 'superseded')
         m.undo_confirm('private:10001', result['undo']['operationId'])
         self.assertEqual([self.row(a), self.row(b)], before)
@@ -433,7 +433,7 @@ class MemoryLifecycleTests(unittest.TestCase):
         with self.assertRaises(m.MemoryConflict) as raised:
             m.confirm_memory('private:10001', candidate)
         self.assertEqual([r['id'] for r in raised.exception.conflict['confirmed']], [latest])
-        m.confirm_memory('private:10001', candidate, 'use-candidate', raised.exception.conflict['revision'])
+        m.confirm_memory('private:10001', candidate, 'use-candidate', raised.exception.conflict['revision'], self.review(candidate,'conflict'))
         self.assertEqual(self.row(latest)['superseded_by'], candidate)
 
     def test_conflict_resolution_journal_failure_rolls_back(self):
@@ -444,6 +444,58 @@ class MemoryLifecycleTests(unittest.TestCase):
         with self.assertRaises(m.sqlite3.IntegrityError):
             m.confirm_memory('private:10001', candidate, 'use-candidate', revision)
         self.assertEqual([self.row(candidate), self.row(active)], before)
+
+    def test_uncertain_is_not_conflict_and_coexist_preserves_all_rows(self):
+        old = [self.add(t, confirmed=True) for t in ['喜欢小笼包', '周末去散步', '喜欢猫']]
+        candidate = self.add('不喜欢吃煎饼')
+        review = self.review(candidate)
+        for relation in review['relations']:
+            relation['confidence'] = .85  # Likely coexist, but not a confident verdict.
+        with self.assertRaises(m.MemoryConflict) as raised:
+            m.confirm_memory('private:10001', candidate, review=review)
+        snapshot = raised.exception.conflict
+        self.assertEqual(snapshot['conflicts'], [])
+        self.assertEqual(len(snapshot['uncertain']), 3)
+        before = [self.row(i) for i in old]
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', candidate, 'use-candidate', snapshot['revision'], review)
+        result = m.confirm_memory('private:10001', candidate, 'coexist', snapshot['revision'], review)
+        self.assertEqual([self.row(i) for i in old], before)
+        self.assertEqual(self.row(candidate)['status'], 'active')
+        m.undo_confirm('private:10001', result['undo']['operationId'])
+        self.assertEqual(self.row(candidate)['status'], 'candidate')
+        self.assertEqual([self.row(i) for i in old], before)
+
+    def test_replace_only_known_conflicts_preserves_uncertain_and_equivalent(self):
+        conflict = self.add('现在喝咖啡', confirmed=True)
+        unknown = self.add('周末会出门', confirmed=True)
+        duplicate = self.add('现在不喝咖啡', confirmed=True)
+        candidate = self.add('现在不喝咖啡了')
+        review = self.review(candidate)
+        for item in review['relations']:
+            item['relation'] = 'conflict' if item['id'] == conflict else 'uncertain' if item['id'] == unknown else 'equivalent'
+        before = [self.row(i) for i in [conflict, unknown, duplicate, candidate]]
+        with self.assertRaises(m.MemoryConflict) as raised:
+            m.confirm_memory('private:10001', candidate, review=review)
+        snapshot = raised.exception.conflict
+        self.assertEqual([r['id'] for r in snapshot['conflicts']], [conflict])
+        self.assertEqual([r['id'] for r in snapshot['uncertain']], [unknown])
+        self.assertEqual([r['id'] for r in snapshot['duplicates']], [duplicate])
+        result = m.confirm_memory('private:10001', candidate, 'use-candidate', snapshot['revision'], review)
+        self.assertEqual(self.row(conflict)['status'], 'superseded')
+        self.assertEqual(self.row(unknown), before[1])
+        self.assertEqual(self.row(duplicate), before[2])
+        m.undo_confirm('private:10001', result['undo']['operationId'])
+        self.assertEqual([self.row(i) for i in [conflict,unknown,duplicate,candidate]], before)
+
+    def test_equivalent_facts_do_not_force_a_conflict_choice(self):
+        existing = self.add('喜欢小笼包', confirmed=True)
+        candidate = self.add('爱吃小笼包')
+        before = self.row(existing)
+        result = m.confirm_memory('private:10001', candidate, review=self.review(candidate, 'equivalent'))
+        self.assertEqual(result['confirmed'], 1)
+        self.assertEqual(self.row(existing), before)
+        self.assertEqual(self.row(candidate)['status'], 'active')
 
     def test_noop_produces_no_undo_recipe(self):
         active = self.add('already active', confirmed=True)

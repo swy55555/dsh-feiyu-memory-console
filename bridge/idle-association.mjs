@@ -36,8 +36,8 @@ export function parseAssociation(raw, sources, previous = [], affectEnabled = fa
 }
 
 export class IdleAssociations {
-  constructor({enabled, allowed, ready=()=>true, affectEnabled=()=>false, load=()=>null, save=()=>{}, request, generate, now=Date.now, idleMs=120000, cooldownMs=1800000, ttlMs=600000}) {
-    Object.assign(this,{enabled,allowed,ready,affectEnabled,save,request,generate,now,idleMs,cooldownMs,ttlMs});
+  constructor({enabled, allowed, seedFor=()=>'', ready=()=>true, affectEnabled=()=>false, load=()=>null, save=()=>{}, request, generate, now=Date.now, idleMs=120000, cooldownMs=1800000, ttlMs=600000}) {
+    Object.assign(this,{enabled,allowed,seedFor,ready,affectEnabled,save,request,generate,now,idleMs,cooldownMs,ttlMs});
     this.states=new Map();this.busy=false;this.serial=0;
     this.audit=[];
     try { const old=load(); if(Array.isArray(old?.events)) this.audit=old.events.filter(e=>e&&typeof e.key==='string'&&this.allowed(e.key)&&e.at>this.now()-7*86400000).slice(-40); } catch {}
@@ -95,7 +95,7 @@ export class IdleAssociations {
     if(s.ready) return {reason:'pending-topic'};
     this.busy=true;s.lastRun=this.now();s.processed=epoch;this.transition(key,s,'exploring');
     try {
-      const found=await this.request('/related',{scope:key,subject_id:key.slice(8),query:s.text});
+      const found=await this.request('/related',{scope:key,subject_id:key.slice(8),query:[s.text,this.seedFor(key)].filter(Boolean).join('；').slice(0,1400)});
       if (!current()) return {reason:'interrupted'};
       const sources=(found.results||[]).filter(r=>r && typeof r.id==='string' && typeof r.text==='string' && r.text.length<=500 && String(r.subject_id)===key.slice(8)).slice(0,3)
         .map(r=>({id:r.id,text:r.text,source_time:r.source_time}));

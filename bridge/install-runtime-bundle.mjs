@@ -4,8 +4,9 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.8.12-preview.1";
+export const RUNTIME_VERSION = "0.8.13";
 const files = {
+  "continuity.mjs": "continuity.mjs",
   "feature-token-ledger.mjs": "feature-token-ledger.mjs",
   "feature-model-prices.mjs": "feature-model-prices.mjs",
   "usage-features.mjs": "usage-features.mjs",
@@ -113,7 +114,7 @@ export function installRuntime(
       return false;
     }
   });
-  if (identical)
+  if (identical && previous?.version === RUNTIME_VERSION)
     return { status: "already-installed", version: RUNTIME_VERSION };
   if (previous?.files) {
     for (const [name, record] of Object.entries(previous.files)) {
