@@ -112,3 +112,9 @@ body::before { background:radial-gradient(ellipse at 0 0,#193d443d 0,transparent
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important;transition:none!important;scroll-behavior:auto!important; } }
 .mind-controls{display:flex;gap:20px;flex-wrap:wrap;margin:16px 0}.mind-controls label{display:flex;gap:7px;align-items:center}.mind-flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}.mind-stage{padding:18px;border:1px solid var(--line-strong);border-radius:14px;min-width:0;overflow-wrap:anywhere;background:var(--panel-solid)}.mind-stage h3{margin:8px 0 14px}.mind-stage p{line-height:1.7}.mind-flow.text-view{grid-template-columns:1fr}.mind-flow.text-view .mind-stage{border-left:3px solid var(--accent)}.auto-review-record{padding:12px 0;border-top:1px solid var(--line-strong)}
 @media(max-width:1050px){.mind-flow{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.mind-flow{grid-template-columns:1fr}.mind-controls{display:grid;gap:12px}}
+
+/* History audit labels must show the full purpose and inclusion status. */
+#usage-history-audit .mini { grid-template-columns:minmax(200px,1fr) minmax(180px,1fr); gap:12px; padding:12px 8px; border-bottom:1px solid var(--line); }
+#usage-history-audit .mini .t { white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; }
+#usage-history-audit .mini .r { text-align:right; min-width:0; overflow-wrap:anywhere; }
+@media(max-width:600px) { #usage-history-audit .mini { grid-template-columns:1fr; gap:5px; } #usage-history-audit .mini .r { text-align:left; } }
