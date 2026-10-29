@@ -24,6 +24,7 @@ const steps = [
   { file: 'install-contrarian.mjs', name: '情绪低唱反调' },
   { file: 'install-emotion-spillover.mjs', name: '跨聊天情绪分享' },
   { file: 'install-emotion-recovery.mjs', name: '情绪回弹' },
+  { file: 'install-v09-runtime.mjs', name: '0.9 trace/回复绑定/关联' },
 ];
 
 const mode = has('--apply') ? '--apply' : has('--undo') ? '--undo' : '--check';

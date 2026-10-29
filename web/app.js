@@ -783,17 +783,38 @@ function renderOverview() {
       }, o.memoryShare !== false ? '关闭共享' : '开启共享'),
     ),
   )
+  const associationCard = el('section', { class: 'card pad' },
+    el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '有边界的关联' })),
+    el('p', { class: 'note', style: { margin: '0 0 8px' } }, '开启后，只沿同一事实或同一来源走一跳，最多补 1 条，并标成「只作联想，不当事实」。'),
+    el('div', { class: 'row', style: { gap: '10px' } },
+      el('span', { class: 'pill', text: o.association ? '已开启' : '已关闭' }),
+      el('button', {
+        class: 'btn sm ' + (o.association ? '' : 'primary'),
+        on: { click: () => toggleAssociation(o.association !== true) },
+      }, o.association ? '关闭关联' : '开启关联'),
+    ),
+  )
   return frag(
     hero,
     startupChecks(o.health),
     o.unavailable ? null : stats,
     o.unavailable ? null : el('div', { class: 'overview-grid' },
       el('div', { class: 'panel-stack' }, scopeCard, recentCard),
-      el('div', { class: 'panel-stack' }, fadingCard, queueCard, diaryCard, shareCard, titleCard),
+      el('div', { class: 'panel-stack' }, fadingCard, queueCard, diaryCard, shareCard, associationCard, titleCard),
     ),
   )
 }
 
+async function toggleAssociation(enabled) {
+  try {
+    await api('/association', { method: 'POST', body: { enabled } })
+    if (S.overview) S.overview.association = enabled
+    toast(enabled ? '已开启有边界的关联' : '已关闭关联', 'ok')
+    paintCurrent()
+  } catch (error) {
+    toast(error.message, 'error')
+  }
+}
 async function toggleMemoryShare(enabled) {
   try {
     await api('/memory-share', { method: 'POST', body: { enabled } })
@@ -1112,7 +1133,11 @@ function memRow(row, { semantic = false } = {}) {
     actions.appendChild(actionBtn('restore', '恢复这条', () => act('restore', { id: row.id }, { success: '捞回来了' })))
   }
   if (['active', 'candidate'].includes(row.status)) {
-    if (row.scope !== 'global') actions.appendChild(actionBtn('pencil', '改正文', () => editMemory(row)))
+    if (row.scope !== 'global') {
+      actions.appendChild(actionBtn('pencil', '记错了', () => correctMemory(row, 'wrong')))
+      actions.appendChild(actionBtn('refresh', '已经过时', () => correctMemory(row, 'outdated')))
+    }
+    actions.appendChild(actionBtn('close', '这次不相关', () => markIrrelevant(row)))
     actions.appendChild(actionBtn('layers', '改层级和重要度', () => editMeta(row)))
     actions.appendChild(actionBtn('trash', '删掉（软删，还能恢复）', () => removeMemory(row), 'danger'))
   }
@@ -1167,6 +1192,31 @@ async function removeMemory(row) {
   })
   if (!ok) return
   await act('delete', { id: row.id, scope: row.scope }, { success: '删掉了，去「已删」还能找回来' })
+}
+
+async function correctMemory(row, mode) {
+  const outdated = mode === 'outdated'
+  const result = await openModal({
+    title: outdated ? '这条已经过时了？' : '这条记错了？',
+    desc: outdated
+      ? '写现在的情况。旧的那条会被标成「被取代」，保留历史关系，下次检索优先用新的。'
+      : '写正确的事实。旧的那条不会消失，会保留可追溯的更正关系。',
+    submit: outdated ? '保存新情况' : '保存更正',
+    fields: [{ name: 'text', label: outdated ? '现在的事实' : '正确的事实', type: 'textarea', value: row.text, maxlength: 500, rows: 6, required: true }],
+  })
+  if (!result) return
+  if (result.text === row.text) { toast('跟原来一模一样，不用改', 'error'); return }
+  await act('edit', { id: row.id, text: result.text, correction: mode }, { success: outdated ? '已按新情况更新' : '已更正' })
+}
+
+async function markIrrelevant(row) {
+  const ok = await confirmDialog({
+    title: '这次不相关？',
+    desc: '只记下这轮“不相关”的反馈，不删除记忆，也不会自动改全局权重。',
+    ok: '记下',
+  })
+  if (!ok) return
+  await act('irrelevant', { id: row.id, scope: row.scope }, { success: '记下了，这条记忆没动' })
 }
 
 async function editMemory(row) {

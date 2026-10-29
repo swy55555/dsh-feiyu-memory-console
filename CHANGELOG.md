@@ -1,4 +1,13 @@
-﻿# 0.8.7 — 一次性完成旧版迁移（2026-10-29）
+﻿# 0.8.8 — 每轮依据与纠错入口（2026-10-29）
+
+- **每轮 trace**：记录查询、候选、`kind/scope/score/subject/tags/reasons`、最终注入、耗时；回复成功/失败通过 `traceId` 绑定到对应轮次。
+- **会话上下文页**：新增「最近记忆注入」卡片，可看候选、注入、来源、分数、回复状态。
+- **三个纠错入口**：记错了、已经过时、这次不相关；不相关只写 `relevance-feedback.jsonl`，不删记忆、不改全局权重。
+- **有边界的关联**：memvec `/associate` 只沿 `fact_key`/`source_id` 走一跳，最多 2 条；默认关闭，总览页可开；结果标「只作联想，不当事实」。
+- **安装**：新增 `install-v09-runtime.mjs`，整份替换桥接运行时并备份；已加入一键安装器最后一步，干净安装/升级都覆盖 trace、回复绑定、关联和 human-context 放行。
+- 回归：npm 8/8 组、Python 13/13 项；干净桥接安装通过。
+
+# 0.8.7 — 一次性完成旧版迁移（2026-10-29）
 
 - **0.8.3 直接升级一次完成**：修正 runtime-extras 里 `else if` 误绑定，`include_global=false` 与 `shared:true` 标记在同一次 `--apply` 生效；不再需要第二次执行。
 - **升级回归**：新增 `test/runtime-extras.test.mjs`，覆盖旧桥接首次升级、`include_global`、共享标记、human-context 放行和重复执行幂等；测试总数 8/8。

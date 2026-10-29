@@ -700,6 +700,50 @@ def _cached_memory_matrix(conn, scope: str, shared: bool = False, include_global
     return rows, mat
 
 
+def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2) -> list[dict]:
+    """只沿 fact_key / source_id 走一跳；不递归、不扩散。"""
+    scope = valid_scope(scope)
+    mid = str(memory_id or '').strip()
+    if not mid:
+        return []
+    limit = max(1, min(3, int(limit)))
+    with _lock, db() as conn:
+        row = conn.execute(
+            "SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at,fact_key,status FROM memories WHERE id=? AND status='active'",
+            (mid,),
+        ).fetchone()
+        if not row:
+            return []
+        fact_key = str(row[17] or '')
+        source_id = str(row[11] or '')
+        clauses = []
+        params = [mid, scope]
+        if fact_key:
+            clauses.append("(fact_key <> '' AND fact_key = ?)")
+            params.append(fact_key)
+        if source_id:
+            clauses.append("(source_id <> '' AND source_id = ?)")
+            params.append(source_id)
+        if not clauses:
+            return []
+        sql = ("SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at,fact_key FROM memories "
+               "WHERE status='active' AND id <> ? AND (scope=? OR scope='global') AND (" + " OR ".join(clauses) + ") LIMIT 12")
+        rows = conn.execute(sql, params).fetchall()
+        out = []
+        for r in rows:
+            if not _shareable(r, r[3]):
+                continue
+            reason = 'same_source' if source_id and str(r[11] or '') == source_id else 'same_fact'
+            out.append({
+                'id': r[0], 'text': r[1], 'tags': r[2], 'scope': r[3],
+                'importance': r[4], 'created_at': r[5], 'last_access': r[6],
+                'tier': r[10], 'source_id': r[11], 'source_time': r[13],
+                'subject_id': r[14], 'confidence': r[15], 'reason': reason,
+            })
+            if len(out) >= limit:
+                break
+        return out
+
 def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: float = 0.35, shared: bool = False, exclude_scope: str | None = None, include_global: bool = True) -> list[dict]:
     scope = valid_scope(scope)
     if not isinstance(query, str) or not query.strip() or len(query) > 2000:
@@ -1083,6 +1127,10 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/context/stats":
                 b = self._body()
                 self._send(200, {"ok": True, **context_stats(b.get("key", ""))})
+            elif self.path == "/associate":
+                b = self._body()
+                r = associate_memory(b.get("id", ""), b.get("scope"), int(b.get("limit", 2)))
+                self._send(200, {"ok": True, "results": r})
             elif self.path == "/search":
                 b = self._body()
                 r = search_memory(b.get("query", ""), int(b.get("k", 5)), b.get("scope"), float(b.get('min_score', 0.35)), bool(b.get('shared', False)), b.get('exclude_scope'), bool(b.get('include_global', True)))

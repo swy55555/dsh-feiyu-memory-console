@@ -51,7 +51,7 @@ export function buildHumanContext({ key, subjectId = '', currentMessage = '', pr
     for (const r of rows) {
       if (!r || typeof r !== 'object' || typeof r.id !== 'string' || !r.id || r.id.length > 100) continue;
       const scope = r.scope ?? (isPriority ? key : '');
-      if (!r.shared && scope !== key && scope !== 'global') continue;
+      if (!r.shared && !r.associated && scope !== key && scope !== 'global') continue;
       if (r.status !== undefined && r.status !== 'active') continue;
       if (r.expires_at !== undefined && (!Number.isFinite(Number(r.expires_at)) || (Number(r.expires_at) !== 0 && Number(r.expires_at) * 1000 <= now))) continue;
       const score = Number(r.score);

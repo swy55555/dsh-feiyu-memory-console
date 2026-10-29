@@ -3,7 +3,7 @@ const KEY_RE = /^(private|group):\d+$/
 // 挂在 DSH 下时页面在 /dsh-feiyu-memory/ 前缀里，裸 /api 会打到根路径。
 const BASE = location.pathname.replace(/\/[^/]*$/, '')
 const apiUrl = (path) => `${BASE}${path}`
-const state = { keys: [], key: '', ctx: null, older: [], filter: '', timer: null, busy: false }
+const state = { keys: [], key: '', ctx: null, traces: [], older: [], filter: '', timer: null, busy: false }
 
 function toast(text, ms = 2400) {
   const box = $('#toast')
@@ -111,11 +111,16 @@ async function load(showToast = false) {
   state.busy = true
   $('#refresh').disabled = true
   try {
-    const ctx = await api(`/api/context?key=${encodeURIComponent(state.key)}`)
+    const [ctx, traceData] = await Promise.all([
+      api(`/api/context?key=${encodeURIComponent(state.key)}`),
+      api(`/api/context/traces?key=${encodeURIComponent(state.key)}&limit=20`).catch(() => ({ traces: [] })),
+    ])
     state.ctx = ctx
+    state.traces = Array.isArray(traceData.traces) ? traceData.traces : []
     renderHeader()
     renderStats()
     renderBudget()
+    renderTraces()
     renderSummaries()
     renderMessages()
     if (showToast) toast('已刷新')
@@ -125,6 +130,40 @@ async function load(showToast = false) {
     state.busy = false
     $('#refresh').disabled = false
   }
+}
+
+function renderTraces() {
+  const box = $('#traces')
+  if (!box) return
+  const traces = Array.isArray(state.traces) ? state.traces : []
+  if (!traces.length) {
+    box.replaceChildren(el('div', { class: 'muted small', text: '还没有记录。聊一轮后，这里会显示这轮检索到了什么、哪些真的进了提示词。' }))
+    return
+  }
+  const reasonText = { ok: '正常', 'no-query': '本轮没有检索查询', 'no-memory': '没有召回记忆', error: '检索失败' }
+  box.replaceChildren(...traces.slice().reverse().map((t) => {
+    const injected = new Set((t.injected || []).map((r) => r.id))
+    const candidates = Array.isArray(t.candidates) ? t.candidates : []
+    const rows = candidates.map((r) => el('div', {
+      class: 'muted small',
+      style: { padding: '4px 0', borderTop: '1px solid var(--line)', opacity: injected.has(r.id) ? 1 : .55 },
+    },
+    el('b', { text: injected.has(r.id) ? '注入' : '候选' }),
+    ' ',
+    el('span', { text: `[${r.scope || '?'}] ${String(r.text || '').slice(0, 100)}` }),
+    el('span', { text: ` · ${Number(r.score || 0).toFixed(2)}${r.shared ? ' · 共享' : ''}` }),
+    ))
+    return el('details', { style: { padding: '6px 0', borderTop: '1px solid var(--line)' } },
+      el('summary', { style: { cursor: 'pointer' } },
+        el('b', { text: fmt(t.at, false) }),
+        el('span', { text: ` · ${reasonText[t.reason] || t.reason || '记录'} · 注入 ${(t.injected || []).length} / 候选 ${candidates.length} · ${Number(t.durationMs || 0)}ms` }),
+      ),
+      el('div', { style: { marginTop: '6px' } },
+        el('div', { class: 'muted small', text: '查询：' + String(t.query || '（空）') }),
+        rows.length ? el('div', { style: { marginTop: '6px' } }, rows) : el('div', { class: 'muted small', text: '没有候选记录' }),
+      ),
+    )
+  }))
 }
 
 function renderHeader() {
