@@ -2777,6 +2777,21 @@ function renderPersona() {
     el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '她最近的自述' })),
     el('p', { class: p.narrative ? '' : 'muted', text: p.narrative || '还没什么变化，还是老样子。' }),
   )
+  const pendingEvents = Array.isArray(data.pendingEvents) ? data.pendingEvents : []
+  const pendingCard = el('section', { class: 'card pad' },
+    el('div', { class: 'section-head' },
+      el('h2', { class: 'h2', text: '攒着的事' }),
+      el('span', { class: 'spacer' }),
+      el('span', { class: 'muted small', text: `权重 ${data.pendingWeight ?? 0} / ${limits.minWeight ?? 12}，够重才合并成变化` }),
+    ),
+    pendingEvents.length
+      ? el('div', { class: 'mini-list' }, pendingEvents.slice().reverse().map((e) => el('div', { class: 'mini' },
+          el('span', { class: 'd', text: fmtWhen(e.at) }),
+          el('span', { class: 't', text: `${e.summary || ''}${e.quote ? `（原话：${e.quote}）` : ''}` }),
+          el('span', { class: 'r', text: `+${e.weight || 0}` }),
+        )))
+      : el('div', { class: 'empty', text: '还没攒着什么事；够分量的夸奖、受伤、想通或新鲜事才会进来。' }),
+  )
   const hist = Array.isArray(data.history) ? [...data.history].reverse() : []
   const histCard = el('section', { class: 'card pad' },
     el('div', { class: 'section-head' },
@@ -2792,7 +2807,7 @@ function renderPersona() {
         )))
       : el('div', { class: 'empty', text: '还没变过。等攒够有分量的事。' }),
   )
-  return frag(S.personaEdit ? renderPersonaEditor() : null, hero, stats, el('div', { class: 'panel-stack' }, traitCard, renderChatPersonaCard(), narrativeCard, histCard))
+  return frag(S.personaEdit ? renderPersonaEditor() : null, hero, stats, el('div', { class: 'panel-stack' }, traitCard, renderChatPersonaCard(), narrativeCard, pendingCard, histCard))
 }
 
 async function loadChatProfiles() {
