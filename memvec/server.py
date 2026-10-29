@@ -995,6 +995,18 @@ def related_memories(scope, subject_id, query):
     return [{k:r[k] for k in ('id','text','source_time','subject_id','tier')} for score,r in scored[:8] if score >= .35]
 
 
+def lookup_memories(scope, ids):
+    """Revalidate a bounded set of original facts without embedding or recall side effects."""
+    scope = valid_scope(scope)
+    if not isinstance(ids, list) or not 1 <= len(ids) <= 3 or any(not isinstance(i, str) or len(i) > 100 for i in ids):
+        raise ValueError('lookup requires 1..3 memory IDs')
+    with _lock, db() as conn:
+        conn.row_factory = sqlite3.Row
+        marks = ','.join('?' for _ in ids)
+        rows = conn.execute(f"SELECT id,text,source_time,subject_id FROM memories WHERE scope=? AND status='active' AND (expires_at=0 OR expires_at>?) AND id IN ({marks})", (scope, now(), *ids)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def priority_memories(scope, subject_id):
     scope = valid_scope(scope)
     # Core context belongs to the current human, not all members of a group.
@@ -1280,8 +1292,8 @@ def stats() -> dict:
         messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         summaries = conn.execute("SELECT COUNT(*) FROM session_summaries WHERE status='active'").fetchone()[0]
     return {
-        'version': '0.8.11',
-        'capabilities': ['transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
+        'version': '0.8.12-preview.1',
+        'capabilities': ['source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
         'embed_threads': EMBED_THREADS,
         'index': 'exact-cache',
         'ann_threshold': ANN_MIN,
@@ -1387,6 +1399,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {'ok': True, 'results': priority_memories(b.get('scope'), b.get('subject_id'))})
             elif self.path == '/manage':
                 self._send(200, {'ok': True, **manage_memory(**self._body())})
+            elif self.path == '/lookup':
+                b = self._body()
+                self._send(200, {'ok': True, 'results': lookup_memories(b.get('scope'), b.get('ids'))})
             elif self.path == '/related':
                 self._send(200, {'ok': True, 'results': related_memories(**self._body())})
             elif self.path == '/finish':

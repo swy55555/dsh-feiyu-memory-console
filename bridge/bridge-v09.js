@@ -1,3 +1,4 @@
+import {featureKey} from './usage-features.mjs';
 import {appraisalContext, expectedAbsence} from './emotion-context.mjs';
 import {reserveAppraisal} from './appraisal-budget.mjs';
 import { reviewMemoryFacts } from './fact-review.mjs';
@@ -18,7 +19,7 @@ import crypto from 'node:crypto';
 import { DailyMemory, memoryAdmission, recallQuery, recallBlock, memoryScope, parseMemoryCommand, memoryCommandReply } from './daily-memory.js';
 import { buildHumanContext, humanContextEnabled, shouldRecallMemory, fetchSessionContext, buildSessionBlock, fetchContextBundle, buildSummaryBlock, buildSummaryPrompt, parseSummaryOutput, filterNovelFacts } from './human-context.mjs';
 import { DEFAULT_LIMITS as PERSONA_DEFAULT_LIMITS, addPersonaEvent, applyPersonaProposal, bandFor, breakthroughEligible, breakthroughOf, buildConsolidationPrompt, createPersona, dimsOf, normalizePersona, normalizeSpec, parsePersonaProposal, pendingEvents, pendingWeight, renderPersonaBlock, shouldConsolidate } from './persona.js';
-import { refineEmotionEvent, validateSemanticAppraisal, applyEmotionEvent, appraise, emotionPromptLine, emotionSummary, emptyEmotion, normalizeEmotion, suggestChatPersonalityDrift, suggestPersonalityDrift, tickEmotion } from './emotion.js';
+import { withSubjectiveFeeling, refineEmotionEvent, validateSemanticAppraisal, applyEmotionEvent, appraise, emotionPromptLine, emotionSummary, emptyEmotion, normalizeEmotion, suggestChatPersonalityDrift, suggestPersonalityDrift, tickEmotion } from './emotion.js';
 import { loadMemePlayConfig, pickMemeCandidates, renderMemeBlock, recordMemeUse, usedTitlesFromMemories } from './meme-play.js';
 import { createVault, makePassword, openVault, passwordMatches } from './private-diary.js';
 import { DIARY_DEFAULTS, buildDiaryPrompt, collectDiaryMaterial, dayRange, diaryTimeToday, hasDiaryEntry, parseDiaryOutput, renderDiaryEntry, shanghaiDate } from './diary.js';
@@ -40,7 +41,7 @@ import { discoverSnowLumaConnection, persistSnowLumaEndpoint, persistToken } fro
 import { hardenDir, manualDirCommand } from './state-acl.mjs';
 import { extractForwardIds, forwardIdFromData, sanitizeForwardId, formatForwardResponse } from './forward.js';
 import { resolvePriceTable } from './model-prices.js';
-import { createTokenLedger } from './token-ledger.js';
+import { createTokenLedger } from './feature-token-ledger.mjs';
 import {
   loadSlang,
   saveSlang,
@@ -1617,7 +1618,7 @@ async function main() {
 情境：${JSON.stringify(context)}
 当前消息：${JSON.stringify(input.text)}`;
       mark('pending', {count:budget.count, maximum:budget.maximum});
-      const output = await runHeadlessPrompt(prompt, Math.max(2000,Math.min(15000,Number(c.timeoutMs)||8000)));
+      const output = await runHeadlessPrompt(prompt, Math.max(2000,Math.min(15000,Number(c.timeoutMs)||8000)), [], 'emotion_review');
       const text = String(output || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
       const start = text.indexOf('{'), end = text.lastIndexOf('}');
       if (start < 0 || end <= start) { mark('invalid-result'); return; }
@@ -1772,6 +1773,7 @@ async function main() {
       climate: { all: { ...fresh }, owner: { ...fresh }, chats: {} },
       updatedAt: now,
     });
+    idleAssociations.clearImpressions();
     saveEmotionState();
     log('[emotion] 已手动重置情绪/心情/气候');
     return { ok: true, emotion: emotionSummary(emotionState) };
@@ -1963,6 +1965,7 @@ async function main() {
   const slangSubmitTimes = new Map();   // key -> [timestamp]：AI 提交黑话候选限频（内存态）
   const feedbackTimes = new Map();      // key -> [timestamp]：AI 反馈限频（内存态）
   const slangResearchingIds = new Set(); // 正在研究中的候选 id，防止重复排队
+  const learnerFeatures = new Map(); // Only active sessions; ledger persists the resolved category.
   const learnerSessions = new Set();    // sessionId -> 学习会话（不映射 QQ，不发送）
   const learnerCollectors = new Map();  // sessionId -> turn collector
   const learnerWaiters = new Map();     // sessionId -> [{resolve,reject,timer}]
@@ -3028,7 +3031,7 @@ async function main() {
               imageDesc = await runHeadlessPrompt(
                 '看这张聊天图片，用一两句话描述：画面里是谁/什么、图上的文字、有没有角色名或梗名。只描述看到的，不分析、不猜。',
                 20000,
-                images,
+                images, 'image_description',
               );
               imageDesc = String(imageDesc || '').trim().slice(0, 300);
               if (imageDesc) {
@@ -3237,7 +3240,7 @@ async function main() {
       ? await memoryRequest('/search', { query: memoryQuery, scope: key, k: 5, min_score: 0.2 }, 4000)
         .then((r) => (Array.isArray(r.results) ? r.results : [])).catch(() => [])
       : [];
-    const output = await runHeadlessPrompt(buildSummaryPrompt(body, { memories: related }), 120000);
+    const output = await runHeadlessPrompt(buildSummaryPrompt(body, { memories: related }), 120000, [], 'context_summary');
     const parsed = parseSummaryOutput(output);
     if (!parsed.summary) return { ok: false, reason: 'bad-output' };
     // 模型可能还是把旧事实写回来；落库前按记忆原文再去一层重。
@@ -3331,10 +3334,15 @@ async function main() {
     const ticket = key ? turnTraces.enqueue(params.sessionId, context.traceId || null, key) : null;
     try {
       const result = await api.sessions.prompt(params);
+      if (context.idleAssociation) idleAssociations.delivery(context.idleAssociation,
+        result.result.ok && !result.result.value?.command ? 'injected' : 'rejected');
       if (!result.result.ok) turnTraces.cancel(ticket, 'prompt rejected');
       else if (result.result.value?.command) turnTraces.cancel(ticket, 'command completed without model turn', 'command');
       return result;
-    } catch (error) { turnTraces.invalidate(params.sessionId, 'dispatch outcome unknown'); throw error; }
+    } catch (error) {
+      if (context.idleAssociation) idleAssociations.delivery(context.idleAssociation, 'delivery-unknown');
+      turnTraces.invalidate(params.sessionId, 'dispatch outcome unknown'); throw error;
+    }
   }
   function traceRow(r, kind = '') {
     const score = Number(r.score) || 0;
@@ -3420,7 +3428,7 @@ async function main() {
       if (!res.ok) throw new Error(`memory HTTP ${res.status}`);
       const j = await res.json();
       // 跨聊天共享：只取非当前聊天、且管理员私聊隐私已过滤的记忆。
-      if (context.allowIdleAssociation === true) promptText = idleAssociations.take(key, j.results || []) + promptText;
+      if (context.allowIdleAssociation === true) promptText = await idleAssociations.take(key, j.results || [], context) + promptText;
       const shareCfg = cfg.socialV2?.memoryShare || {};
       let sharedRows = [];
       if (shareCfg.enabled === true) {
@@ -3501,7 +3509,7 @@ async function main() {
     return data;
   }
   // 无工具的一次性后台整理会话（记忆整理、性格合并共用）。
-  async function runHeadlessPrompt(prompt, timeoutMs = 90000, images = []) {
+  async function runHeadlessPrompt(prompt, timeoutMs = 90000, images = [], feature = 'other') {
     // A fresh tool-free session for every batch prevents cross-chat context carryover.
     const { presets } = unwrap(await api.agentPresets.list({}), 'memory presets');
     if (!presets.some(p => p.id === 'qq-memory')) throw new Error('qq-memory preset 尚未加载，请重启 DSH');
@@ -3510,6 +3518,7 @@ async function main() {
     const ws = unwrap(await api.workspace.create({ path: dir }), 'memory workspace');
     const { sessionId } = unwrap(await api.sessions.create({ workspaceId: ws.workspace.workspaceId, agentPreset: 'qq-memory' }), 'memory session');
     learnerSessions.add(sessionId);
+    learnerFeatures.set(sessionId, featureKey(feature));
     api.events.follow(sessionId);
     try {
       if (await ensureChatModel(sessionId) !== 'applied') throw new Error('后台整理模型不可用');
@@ -3525,6 +3534,7 @@ async function main() {
       learnerWaiters.delete(sessionId);
       learnerCollectors.delete(sessionId);
       learnerSessions.delete(sessionId);
+      learnerFeatures.delete(sessionId);
       api.events.forget(sessionId);
       try { await api.workspace.archiveSession({ sessionId }); } catch {}
     }
@@ -3549,16 +3559,19 @@ async function main() {
     log, request: memoryRequest,
     // DailyMemory 会把 key 作为第二个参数传进来；这里必须只接 prompt，
     // 否则 key 会被当成 timeoutMs（setTimeout 收到字符串 → 0ms，必然超时）。
-    extract: (prompt) => runHeadlessPrompt(prompt, 120000),
-    verify: (prompt) => runHeadlessPrompt(prompt, 60000)
+    extract: (prompt) => runHeadlessPrompt(prompt, 120000, [], 'memory_extract'),
+    verify: (prompt) => runHeadlessPrompt(prompt, 60000, [], 'coverage_check')
   });
 
   const idleAssociations = new IdleAssociations({
     enabled: () => cfg.socialV2?.association?.idleEnabled === true,
+    affectEnabled: () => cfg.socialV2?.association?.idleAffectEnabled === true && cfg.socialV2?.emotion?.enabled !== false,
+    load: () => readJsonSafe(path.join(STATE_DIR, 'idle-association-audit.json'), null),
+    save: data => atomicWriteJson(path.join(STATE_DIR, 'idle-association-audit.json'), data),
     allowed: key => Boolean(cfg.ownerQQ) && key === `private:${String(cfg.ownerQQ)}` && isSessionAllowedInCurrentMode(key),
     ready: () => dshReady && !dailyMemory.busy && !socialV2.paused,
     request: memoryRequest,
-    generate: (prompt, timeout) => runHeadlessPrompt(prompt, timeout),
+    generate: (prompt, timeout) => runHeadlessPrompt(prompt, timeout, [], 'idle_association'),
   });
   const idleAssociationTimer = setInterval(() => { void idleAssociations.tick(); }, 30000);
   idleAssociationTimer.unref?.();
@@ -3657,7 +3670,7 @@ async function main() {
     if (!personaEnabled()) return '';
     const base = renderPersonaBlock(personaStateForChat(key), { isOwner: personaIsOwnerKey(key), ownerTitle: cfg.socialV2?.ownerTitle || '老大' });
     if (cfg.socialV2?.emotion?.enabled === false) return base;
-    const line = emotionPromptLine(emotionState, { isOwner: personaIsOwnerKey(key) });
+    const line = emotionPromptLine(withSubjectiveFeeling(emotionState, idleAssociations.feeling(key)), { isOwner: personaIsOwnerKey(key) });
     const epLine = episodeRecallBlock(key);
     return [base, line, epLine, contrarianPrompt(key)].filter(Boolean).join('\n');
   }
@@ -3727,7 +3740,7 @@ async function main() {
         if (roleName) roleExcerpt = fs.readFileSync(path.join(ROOT, 'roles', `${roleName}.md`), 'utf8').slice(0, 1800);
       } catch {}
       const prompt = buildConsolidationPrompt(personaState, pending, roleExcerpt, await personaMemoryEvidence());
-      const output = await runHeadlessPrompt(prompt, 120000);
+      const output = await runHeadlessPrompt(prompt, 120000, [], 'persona_consolidation');
       const proposal = parsePersonaProposal(output, personaLimits(), {
         dims: dimsOf(personaState),
         breakthrough: breakthroughOf(personaState),
@@ -3943,7 +3956,7 @@ async function main() {
         roleExcerpt,
         biliReport: biliReportFor(date)
       });
-      const output = await runHeadlessPrompt(prompt, 120000);
+      const output = await runHeadlessPrompt(prompt, 120000, [], 'diary');
       const parsed = parseDiaryOutput(output);
       if (!parsed) return { ok: false, reason: 'bad-output', output: String(output).slice(0, 300) };
       if (preview) return { ok: true, preview: parsed, needPublic, needPrivate };
@@ -4092,7 +4105,7 @@ async function main() {
     log: (...args) => log(...args),
     priceTable,
     // 会话 → QQ 会话归属：学习会话单独记账，其余未知会话归入「未归属」。
-    resolveKey: (sessionId) => reverse.get(sessionId)
+    resolveKey: (sessionId) => reverse.get(sessionId) ?? learnerFeatures.get(sessionId)
       ?? (slangLearnerSessionId && sessionId === slangLearnerSessionId
         ? 'internal:黑话学习'
         : learnerSessions.has(sessionId)
@@ -5050,7 +5063,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/memory/fact-review') {
           const body = await readBody();
-          const review = await reviewMemoryFacts(body.context, runHeadlessPrompt);
+          const review = await reviewMemoryFacts(body.context, (prompt, timeout) => runHeadlessPrompt(prompt, timeout, [], 'fact_review'));
           sendJson({ ok: true, review });
           return;
         }
@@ -6259,6 +6272,8 @@ async function main() {
             merged.association = { ...(current.association ?? {}), ...body.association };
             if (merged.association.enabled !== undefined) merged.association.enabled = merged.association.enabled === true;
             if (merged.association.idleEnabled !== undefined) merged.association.idleEnabled = merged.association.idleEnabled === true;
+            if (merged.association.idleAffectEnabled !== undefined) merged.association.idleAffectEnabled = merged.association.idleAffectEnabled === true;
+            if (body.association.idleAffectEnabled === false) idleAssociations.clearImpressions();
             if (body.association.idleEnabled === false) idleAssociations.reset();
             if (merged.association.maxExtra !== undefined) merged.association.maxExtra = Math.min(2, Math.max(1, Math.round(Number(merged.association.maxExtra) || 1)));
           }          // sticker：表情包体系参数归一化
@@ -6397,7 +6412,7 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/emotion') {
-          sendJson({ ok: true, driftEnabled: cfg.socialV2?.emotion?.drift?.enabled !== false, emotion: emotionSummary(emotionState) });
+          sendJson({ ok: true, driftEnabled: cfg.socialV2?.emotion?.drift?.enabled !== false, emotion: emotionSummary(withSubjectiveFeeling(emotionState, idleAssociations.feeling(`private:${String(cfg.ownerQQ || '')}`))) });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/persona/draft') {
@@ -6417,7 +6432,7 @@ async function main() {
 
 【角色卡】
 ${roleText.slice(0, 9000)}`;
-            const output = await runHeadlessPrompt(prompt, 120000);
+            const output = await runHeadlessPrompt(prompt, 120000, [], 'persona_draft');
             const text = String(output || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
             const start = text.indexOf('{');
             const end = text.lastIndexOf('}');
@@ -12367,7 +12382,7 @@ ${roleText.slice(0, 9000)}`;
       const lastSeen = Number(st.lastIncomingAt) || Number(st.lastAiReplyAt) || Number(oc.since) || Date.now();
       const hours = Math.max(0, (Date.now() - lastSeen) / 3600000);
       const hText = hours >= 1 ? `${hours.toFixed(1)} 小时` : `${Math.max(1, Math.round(hours * 60))} 分钟`;
-      const emoLine = emotionPromptLine(emotionState, { isOwner: true });
+      const emoLine = emotionPromptLine(withSubjectiveFeeling(emotionState, idleAssociations.feeling(`private:${String(cfg.ownerQQ || '')}`)), { isOwner: true });
       return `${base}${emoLine}\n\n【主动联系】${key}\n距上次交流 ${hText}。${reason === 'ownerSulk' ? '你有点想他，也有一点小失落，可以轻轻撒娇或带一点小脾气，如“好久没见你啦，有点想你”。' : '可以自然地分享想到的事。'}不把没联系解释成不在乎；不质问、不要求道歉。对方回来正常说话就自然缓和。对方一直没回复时收住，不连续追问。`;
     }
     if (reason === 'proactiveCheck') {

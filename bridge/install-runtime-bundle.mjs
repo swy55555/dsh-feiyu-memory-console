@@ -4,8 +4,11 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.8.11";
+export const RUNTIME_VERSION = "0.8.12-preview.1";
 const files = {
+  "feature-token-ledger.mjs": "feature-token-ledger.mjs",
+  "feature-model-prices.mjs": "feature-model-prices.mjs",
+  "usage-features.mjs": "usage-features.mjs",
   "memory-coverage.mjs": "memory-coverage.mjs",
   "idle-association.mjs": "idle-association.mjs",
   "daily-memory.js": "daily-memory.js",
@@ -131,7 +134,7 @@ export function installRuntime(
     throw Error(
       "未知或自定义运行时：未覆盖。确认需要整份替换时使用 --replace-legacy（先备份）。",
     );
-  for (const name of ["daily-memory.js", "fact-review.mjs", "idle-association.mjs", "memory-coverage.mjs"]) {
+  for (const name of ["feature-token-ledger.mjs", "feature-model-prices.mjs", "usage-features.mjs", "daily-memory.js", "fact-review.mjs", "idle-association.mjs", "memory-coverage.mjs"]) {
     const file = path.join(src, name);
     if (!replaceLegacy && !previous?.files?.[name] && fs.existsSync(file) &&
         sourceHash(file) !== sourceHash(path.join(here, files[name])) && !recognizedAuxiliary(name, file))

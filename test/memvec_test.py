@@ -506,6 +506,21 @@ class MemoryLifecycleTests(unittest.TestCase):
                 rows = m.associate_memory(seed, 'private:10001')
                 self.assertEqual([r['id'] for r in rows], [peer])
 
+    def test_lookup_scoped_active_sources_without_embedding(self):
+        active = self.add('雨声', confirmed=True)
+        foreign = self.add('别人的事实', scope='private:20002', subject='20002', confirmed=True)
+        candidate = self.add('待确认')
+        rows = m.lookup_memories('private:10001', [active, foreign, candidate])
+        self.assertEqual([r['id'] for r in rows], [active])
+        with m.db() as c:
+            c.execute('UPDATE memories SET expires_at=? WHERE id=?', (m.now()-1, active))
+        self.assertEqual(m.lookup_memories('private:10001', [active]), [])
+        with m.db() as c:
+            c.execute("UPDATE memories SET expires_at=0, status='deleted' WHERE id=?", (active,))
+        self.assertEqual(m.lookup_memories('private:10001', [active]), [])
+        with self.assertRaises(ValueError):
+            m.lookup_memories('private:10001', [active]*4)
+
     def test_association_seed_scope_global_toggle_and_limit(self):
         seed = self.add('seed', scope='group:1', confirmed=True)
         local = self.add('local', scope='group:1', confirmed=True)

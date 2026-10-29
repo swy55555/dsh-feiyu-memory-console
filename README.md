@@ -2,12 +2,14 @@
 
 面向 DSH 与 QQ 桥接的本地记忆管理插件。集中查看和维护长期记忆、聊天原文与摘要、日记、性格和情绪，提供来源核对、处理进度和部分操作的撤销能力。
 
-![Version](https://img.shields.io/badge/version-0.8.11-0e5a68)
+![Version](https://img.shields.io/static/v1?label=version&message=0.8.12-preview.1&color=0e5a68)
 ![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078d4)
 ![License](https://img.shields.io/badge/license-MIT-2e8696)
 
-[下载 v0.8.11](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.8.11) · [用户手册](manual/USER_GUIDE-0.8.11.md) · [PDF 手册](manual/可塑性记忆-使用手册-0.8.11.pdf) · [升级指南](UPGRADE.md) · [更新日志](CHANGELOG.md)
+[下载 v0.8.12-preview.1](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.8.12-preview.1) · [用户手册](manual/USER_GUIDE-0.8.12-preview.1.md) · [PDF 手册](manual/USER_GUIDE-0.8.12-preview.1.pdf) · [升级指南](UPGRADE.md) · [更新日志](CHANGELOG.md)
+
+> **预发布版本**：包含空闲联想和主观感受试验功能，建议备份后使用。稳定版仍为 [v0.8.11](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.8.11)。详见[功能补充说明](docs/usage-and-association.md)。
 
 ## 项目定位
 
@@ -29,20 +31,20 @@
 | 日记与情景 | 管理公开日记、查看私密日记及补页；查看事件、解释、情绪与结果 |
 | 主动联系与催睡 | 配置时间窗、概率、次数和冷却；满足条件时由桥接发起联系 |
 | 轻量记忆与玩梗 | 查看临时话题和印象，管理可选梗库功能；梗库需另行准备 |
-| 用量与审计 | 查看调用分类和费用统计，核对操作记录；有撤销入口的操作可尝试撤销 |
-| 空闲联想（试验） | 主人私聊空闲时，从同一聊天真实记忆出发形成短程话题设想；默认关闭 |
+| 用量与审计 | 按功能查看累计与所选时段的 token、估算花费和用量记录；查看审计和可撤销操作 |
+| 空闲联想（试验） | 主人私聊空闲时，从同一聊天真实记忆出发形成短程话题设想、显示去向；可独立开启轻微主观感受，默认关闭 |
 
 不同对象的偏好不应仅因同属“饮食”而互相覆盖。例如“不喜欢煎饼”和“喜欢小笼包”可以同时成立。模型仍可能判断错误，请以原话和实际情况为准。
 
-## v0.8.11 更新重点
+## 本版更新重点
 
-- 网页显示实际加载版本；确认与恢复统一处理事实关系、历史变化和撤销。
-- 内容入队不再依赖固定记忆词表，仍受会话授权和群聊参与策略约束。
-- 旧事实每批核对 8 条，继续检查同聊天、同主体全部有效事实，不再把八条当作总上限。
-- 提取声明完成后增加独立遗漏检查，显示最近最多 500 条消息处理记录。
-- 新增默认关闭的空闲联想试验；它不直接写记忆、改情绪或发送消息。
+- 后台模型调用按记忆提取、查漏、事实复核、联想、情绪复核等用途分项记账；旧记录保留“历史未分项”。
+- 修正 24 小时、7 天和 30 天图表范围；累计分项不受聊天分页影响，推理 token 不重复累加。
+- 无关联想在原十分钟有效期内等待，使用前重新核对原始事实；来源失效时丢弃。
+- 展示联想的生成、等待、模型接受、投递失败、未知和过期记录；接受提示词不等于模型实际表达。
+- 新增默认关闭的主观感受试验：轻微好奇、温暖或担心，限幅并衰减，新消息清除；相关聊天可以参考过去的未确认印象。
 
-本版不自动回填历史漏记，也不自动开启跨聊天共享。完整变更见 [更新日志](CHANGELOG.md)。
+升级保留原配置；不会自动打开新开关或回填历史用量分类。完整变化见 [更新日志](CHANGELOG.md)。
 
 ## 界面预览
 
@@ -101,7 +103,7 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 3. “整理”查看队列和“消息处理状态与遗漏检查”；普通闲聊可能没有新增事实。
 4. “长期记忆 → 待确认”核对原话。遇到冲突，可暂不处理、保留当前事实、分别保留或以候选为准。
 5. “语义找”检查检索结果；控制台预览不证明 QQ 回复已经使用这些记忆。
-6. 按需调整情绪复核、主动联系和试验功能。详细操作见 [用户手册](manual/USER_GUIDE-0.8.11.md)。
+6. 按需调整情绪复核、主动联系和试验功能。详细操作见 [用户手册](manual/USER_GUIDE-0.8.12-preview.1.md)。
 
 ## 模型调用与配置
 
@@ -142,7 +144,7 @@ npm run test:browser:context
 
 ## 文档与许可
 
-- [详细用户手册](manual/USER_GUIDE-0.8.11.md) / [PDF](manual/可塑性记忆-使用手册-0.8.11.pdf)
+- [详细用户手册](manual/USER_GUIDE-0.8.12-preview.1.md) / [PDF](manual/USER_GUIDE-0.8.12-preview.1.pdf)
 - [升级与回退](UPGRADE.md) / [更新日志](CHANGELOG.md)
 - [情绪与复杂情境](docs/complex-emotion.md) / [记忆服务说明](docs/memvec.md)
 - [致谢与来源](ACKNOWLEDGEMENTS.md) / [免责声明](DISCLAIMER.md)

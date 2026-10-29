@@ -1,17 +1,17 @@
-# v0.8.11 升级与回退
+# v0.8.12-preview.1 升级与回退
 
 本版需同时更新插件、QQ 桥接运行时和独立 memvec 服务。保留原数据库及配置；不会自动回填历史漏记、开启跨聊天共享或打开空闲联想试验。
 
 ## 适用范围
 
-用于已有 DSH/QQ 桥接环境，基础 SDK、账号和服务环境需自行准备。安装器按已知源码哈希或有效回执识别版本；未知或自定义桥接会拒绝覆盖。首次安装与功能操作见 `manual/USER_GUIDE-0.8.11.md`。
+用于已有 DSH/QQ 桥接环境，基础 SDK、账号和服务环境需自行准备。安装器按已知源码哈希或有效回执识别版本；未知或自定义桥接会拒绝覆盖。首次安装与通用操作见 `manual/USER_GUIDE-0.8.12-preview.1.md`；本次功能变化见 `docs/usage-and-association.md`。
 
 ## 1. 下载与核验
 
-从 v0.8.11 Release 下载同版本 `.tgz` 或 `-source.zip`，以及升级指南、手册和 `SHA256SUMS-0.8.11.txt`。核对示例：
+从 v0.8.12-preview.1 预发布页下载同版本 `.tgz` 或 `-source.zip`，以及升级指南、手册和 `SHA256SUMS-0.8.12-preview.1.txt`。核对示例：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\dsh-feiyu-memory-console-0.8.11.tgz
+Get-FileHash -Algorithm SHA256 .\dsh-feiyu-memory-console-0.8.12-preview.1.tgz
 ```
 
 将结果与校验文件对应行比较。不要混用预览版安装器和正式版源码；不要覆盖已经公开的旧版本附件。
@@ -34,7 +34,7 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 
 示例路径替换为实际桥接目录。`--check` 不写入；compatible 表示可以安装，already-installed 表示运行时内容一致。拒绝覆盖时先检查自定义修改，不能把 `--replace-legacy` 当作普通升级步骤；该高级选项意味着接受整份运行时替换。
 
-本版统一管理 11 个模块：bridge.js、human-context.mjs、emotion.js、emotion-appraisal.mjs、turn-traces.mjs、emotion-context.mjs、appraisal-budget.mjs、daily-memory.js、fact-review.mjs、idle-association.mjs、memory-coverage.mjs。它们必须作为同一包安装。备份位于桥接 `.runtime-backups/`，回执位于 `state/runtime-bundle.json`。
+本版统一管理 14 个模块：feature-token-ledger.mjs、feature-model-prices.mjs、usage-features.mjs、bridge.js、human-context.mjs、emotion.js、emotion-appraisal.mjs、turn-traces.mjs、emotion-context.mjs、appraisal-budget.mjs、daily-memory.js、fact-review.mjs、idle-association.mjs、memory-coverage.mjs。它们必须作为同一包安装。备份位于桥接 `.runtime-backups/`，回执位于 `state/runtime-bundle.json`。
 
 ## 4. 更新实际 memvec 服务
 
@@ -48,7 +48,7 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 
 启动 memvec、DSH 和桥接，刷新控制台：
 
-1. 网页后端版本显示 0.8.11，总览的数据库路径与服务检查正常。
+1. 网页后端版本显示 0.8.12-preview.1，总览的数据库路径与服务检查正常。
 2. `http://127.0.0.1:9881/stats` 返回 ok，capabilities 包含 paged-fact-review 与 unified-fact-review。
 3. QQ 连接恢复，原事实、队列和设置仍在；不能用新空库代替旧数据验证。
 4. 整理页出现消息处理状态入口，确认/恢复操作能显示分批进度。
@@ -66,7 +66,7 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 
 ## 回退
 
-先停止桥接，再使用**本次安装所用的 v0.8.11 包**执行：
+先停止桥接，再使用**本次安装所用的 v0.8.12-preview.1 包**执行：
 
 ```powershell
 node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --undo

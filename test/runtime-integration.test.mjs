@@ -10,6 +10,8 @@ import crypto from "node:crypto";
 import * as emotion from "../bridge/emotion.js";
 import * as human from "../bridge/human-context-v09.mjs";
 import { TurnTraces } from "../bridge/turn-traces.mjs";
+import {featureKey} from '../bridge/usage-features.mjs';
+import {createTokenLedger} from '../bridge/feature-token-ledger.mjs';
 const source = fs.readFileSync(
   new URL("../bridge/bridge-v09.js", import.meta.url),
   "utf8",
@@ -20,6 +22,45 @@ const between = (a, b) => {
   assert.ok(start >= 0 && end > start);
   return source.slice(start, end);
 };
+
+test('actual headless sessions record isolated feature keys before follow and preserve attribution after cleanup', async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'feiyu-feature-routing-'));
+  t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const features=new Map(), learners=new Set();let serial=0;
+  const ledger=createTokenLedger({file:path.join(dir,'usage.jsonl'),resolveKey:id=>features.get(id)});
+  const ctx=vm.createContext({path,fs,STATE_DIR:dir,featureKey,learnerFeatures:features,learnerSessions:learners,
+    learnerWaiters:new Map(),learnerCollectors:new Map(),clearTimeout,
+    unwrap:x=>x,ensureChatModel:async()=> 'applied',waitLearnerTurn:async()=> 'ok',
+    dispatchTracedPrompt:async()=>({result:{ok:true}}),
+    api:{agentPresets:{list:async()=>({presets:[{id:'qq-memory'}]})},
+      workspace:{create:async()=>({workspace:{workspaceId:'w'}}),archiveSession:async()=>{}},
+      sessions:{create:async()=>({sessionId:`s${++serial}`})},
+      events:{follow:id=>{
+        assert.ok(features.has(id));
+        ledger.ingestEvent({sessionId:id,event:{type:'assistant/message',seq:1,data:{turn:1,step:1,usage:{inputTokens:10,outputTokens:5}}}});
+      },forget:()=>{}}},
+  });
+  const run=vm.runInContext(between('  async function runHeadlessPrompt(', '  // Admission follows')+';runHeadlessPrompt',ctx);
+  await Promise.all([run('a',1000,[],'memory_extract'),run('b',1000,[],'idle_association')]);
+  assert.equal(features.size,0);assert.equal(learners.size,0);
+  assert.deepEqual(ledger.summary().features.map(f=>f.key).sort(),[featureKey('idle_association'),featureKey('memory_extract')].sort());
+  assert.equal(ledger.summary().plugin.totalTokens,30);
+});
+
+test('actual prompt dispatch distinguishes accepted, rejected and unknown association delivery',async()=>{
+  const delivery=[];
+  let result={result:{ok:true,value:{}}};
+  const ctx=vm.createContext({reverse:new Map([['s','private:1']]),turnTraces:new TurnTraces(()=>{}),
+    idleAssociations:{delivery:(ref,status)=>delivery.push({ref,status})},
+    api:{sessions:{prompt:async()=>{if(result instanceof Error)throw result;return result;}}},
+  });
+  const dispatch=vm.runInContext(between('  async function dispatchTracedPrompt(', '  function traceRow(')+';dispatchTracedPrompt',ctx);
+  const reference={key:'private:1',ideaId:'idea'};
+  await dispatch({sessionId:'s'},{idleAssociation:reference});
+  result={result:{ok:false}};await dispatch({sessionId:'s'},{idleAssociation:reference});
+  result=new Error('offline');await assert.rejects(dispatch({sessionId:'s'},{idleAssociation:reference}));
+  assert.deepEqual(delivery.map(x=>x.status),['injected','rejected','delivery-unknown']);
+});
 
 test("actual bridge dispatch wrapper cancels rejected/command slots and binds accepted turns", async () => {
   const rows = [],
@@ -200,8 +241,10 @@ test("actual noteEmotion/refinement replaces scores once and ignores a late resp
 });
 
 test("manual reset invalidates in-flight appraisal and clears dynamics", () => {
+  let impressionsCleared = false;
   const ctx = vm.createContext({
     ...emotion,
+    idleAssociations: {clearImpressions: () => { impressionsCleared = true; }},
     emotionState: emotion.applyEmotionEvent(emotion.emptyEmotion(), {
       text: "你是废物",
       eventId: "pending",
@@ -217,6 +260,7 @@ test("manual reset invalidates in-flight appraisal and clears dynamics", () => {
   assert.equal(ctx.emotionState.dynamics.v, 0);
   assert.equal(ctx.emotionState.latestEventId, null);
   assert.equal(ctx.emotionState.lastCause, null);
+  assert.equal(impressionsCleared, true);
 });
 
 test("actual model gate avoids ordinary calls and handles malformed output, outage and ignores legacy daily limits", async (t) => {

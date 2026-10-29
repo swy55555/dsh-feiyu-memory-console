@@ -21,10 +21,16 @@ fs.writeFileSync(path.join(stateDir, 'daily-memory-queue.json'), JSON.stringify(
 // 假桥接：接收 dailyMemory 配置和 persona reload
 let bridgePort = 0
 let mockChatProfiles = {}
+let mockEmotion = null
 const bridgeServer = http.createServer(async (req, res) => {
   let body = ''
   for await (const chunk of req) body += chunk
   const data = body ? JSON.parse(body) : {}
+  if (req.url === '/api/emotion' && mockEmotion) {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ok:true, emotion:mockEmotion}))
+    return
+  }
   if (req.url === '/api/socialV2/config') {
     const cfg = JSON.parse(fs.readFileSync(path.join(bridgeDir, 'config.json'), 'utf8'))
     cfg.socialV2 = cfg.socialV2 || {}
@@ -98,6 +104,11 @@ const post = (route, body) => fetch(`${api}${route}`, {
   const data = await hit.json()
   assert.equal(data.missing, false)
   assert.equal(data.emotion.state.label, '平静')
+    mockEmotion = {state:{label:'平静',valence:.08,arousal:.34},subjective:{text:'可能有些压力',valence:-.04}}
+    const live = await (await fetch(`${api}/api/emotion`)).json()
+    assert.equal(live.emotion.subjective.text, '可能有些压力')
+    assert.equal(live.emotion.state.valence, .08)
+    mockEmotion = null
 }
 
 // 2) persona：没有文件返回 missing 空状态；有文件返回 200

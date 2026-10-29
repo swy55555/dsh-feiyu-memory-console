@@ -48,5 +48,21 @@
       "emotion-context.mjs": "ed0a846e6e5be8b326ffceda32e5512cbbc5aee4dc723f8d67e66eb6eb0e8c7c",
       "appraisal-budget.mjs": "bb271e1b372570d5a679e75f096aed33be8e6de873aff16fe104241dcb090256"
     }
+  },
+  {
+    "version": "0.8.11",
+    "files": {
+      "bridge.js": "d78b83947012ed269c287a43d74505fa1576e33978bc80c89c4f947230402485",
+      "human-context.mjs": "5a0de4c1ba9bb2b80a07c737499d1a76d0156b93562b1a7ebd6667fc4ffcc349",
+      "emotion.js": "151073520367f3983e42f1a298b1e6781bb25b9645f24347a65b98a77228c147",
+      "emotion-appraisal.mjs": "2957fed39a0303e9d48cba96a2ccc4f0a88e8b290f5e6a52f0f5ed7ac5a36f88",
+      "turn-traces.mjs": "5a048fd589d168fdf02c4c08282bf4c5a7b672f6b60e8b42d5b46759d8af365c",
+      "emotion-context.mjs": "ed0a846e6e5be8b326ffceda32e5512cbbc5aee4dc723f8d67e66eb6eb0e8c7c",
+      "appraisal-budget.mjs": "bb271e1b372570d5a679e75f096aed33be8e6de873aff16fe104241dcb090256",
+      "daily-memory.js": "fda3edb5c4d5a11aec3fa0dbbf90c85d48515d30cc2083f9bc4da11c762c12e9",
+      "fact-review.mjs": "c4b53dcd284611d101379c77bd92c2e61cd00323fa51891492111fbff2561c24",
+      "idle-association.mjs": "0fe430e7b2e4c06a157bc9589db5065077ce8a04c1a3ae5c7e36e81d08a881e5",
+      "memory-coverage.mjs": "db2ae2874cffa49366970a07798d959a44cb4401987c3a7c2a762b24f8e70635"
+    }
   }
 ]

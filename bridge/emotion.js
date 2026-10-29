@@ -539,6 +539,20 @@ export function refineEmotionEvent(
   );
   return tickEmotion(revised, now, recovery);
 }
+// Presentation-only feeling: never feeds the event journal, climate, personality or conflict.
+export function withSubjectiveFeeling(raw, impression, now = Date.now()) {
+  const s = tickEmotion(raw, now);
+  delete s.subjective;
+  delete s.eventState;
+  if (!impression || impression.expiresAt <= now) return s;
+  s.eventState = {...s.state};
+  s.state.valence = clamp(s.state.valence + clamp(impression.valence, -.04, .04), -1, 1);
+  s.state.arousal = clamp(s.state.arousal + clamp(impression.arousal, 0, .03), 0, 1);
+  // A guess may add a mild tone; it must not promote the categorical label to anger.
+  s.state.intensity = labelFor(s).intensity;
+  s.subjective = {...impression, uncertain:true};
+  return s;
+}
 export function emotionPromptLine(raw, { isOwner = false } = {}) {
   const s = normalizeEmotion(raw),
     cause = s.lastCause;
@@ -546,7 +560,9 @@ export function emotionPromptLine(raw, { isOwner = false } = {}) {
     isOwner && cause?.source === "owner" && s.state.intensity >= 0.1
       ? `；相关事件：${JSON.stringify(cause.evidence || []).slice(0, 120)}`
       : "";
-  return `现在情绪：${s.state.label}（强度 ${s.state.intensity.toFixed(2)}）；回应态度：${s.stance}${reason}。用户诉苦时关切用户；普通请求和纠错正常处理，不要求对方安抚。`;
+  const i = isOwner ? s.subjective : null;
+  const subjective = i ? `\n【暂时的主观感受，不是事实】${JSON.stringify({text:i.text,feeling:i.feeling,confidence:i.confidence})}。只是轻微的好奇、温暖或担心，可以影响措辞；不要把猜测说成用户的意图，不要求安抚或解释，不责备。当前消息和澄清优先。` : '';
+  return `现在情绪：${s.state.label}（强度 ${s.state.intensity.toFixed(2)}）；回应态度：${s.stance}${reason}。用户诉苦时关切用户；普通请求和纠错正常处理，不要求对方安抚。${subjective}`;
 }
 function updateClimate(c, s, ap, now) {
   const n = Number(c.samples || 0);
@@ -769,7 +785,9 @@ export function emotionSummary(rawState) {
   const s = normalizeEmotion(rawState);
   const lab = labelFor(s);
   return {
-    state: { ...s.state, label: lab.label, intensity: lab.intensity },
+    state: { ...s.state, label: s.subjective ? s.state.label : lab.label, intensity: lab.intensity },
+    subjective: s.subjective || null,
+    eventState: s.eventState || null,
     mood: { ...s.mood, label: moodLabel(s) },
     baseline: { ...s.baseline },
     climate: s.climate,

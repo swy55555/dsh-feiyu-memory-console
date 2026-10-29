@@ -804,12 +804,20 @@ function renderOverview() {
     ),
     el('hr'),
     el('h3', { text: '空闲联想 · 试验' }),
-    el('p', { class: 'note' }, '仅用于你的私聊。安静两分钟后，沿真实记忆最多联想两步，保留十分钟；不会因此主动发消息或改变情绪。每轮最多两次模型调用，两轮至少间隔三十分钟。'),
+    el('p', { class: 'note' }, '仅用于你的私聊。安静两分钟后，沿真实记忆最多联想两步，保留十分钟；不相关时暂存，有效期内等合适话题；不会因此主动发消息。每轮最多两次模型调用，两轮至少间隔三十分钟。'),
     el('div', { class: 'row', style: { gap: '10px' } },
       el('span', { class: 'pill', text: o.idleAssociation ? '已开启' : '已关闭' }),
       el('button', { class: 'btn sm', on: { click: () => toggleIdleAssociation(!o.idleAssociation) } }, o.idleAssociation ? '关闭空闲联想' : '开启空闲联想'),
-      el('button', { class: 'btn sm', on: { click: () => showIdleAssociation() } }, '查看近期联想'),
+      el('button', { class: 'btn sm', on: { click: () => showIdleAssociation() } }, '查看联想去向'),
     ),
+    el('label', {class:'row', style:{marginTop:'10px'}},
+      el('input', {type:'checkbox', checked:o.idleAffect===true, on:{change:async event=>{
+        const affectEnabled=event.target.checked;
+        try {await api('/association/idle',{method:'POST',body:{affectEnabled}});S.overview.idleAffect=affectEnabled;toast(affectEnabled?'已开启轻微主观感受':'已关闭并清除主观感受','ok');} catch(error){event.target.checked=!affectEnabled;toast(error.message,'error');}
+      }}}),
+      el('span', {text:'允许联想产生轻微主观感受（试验）'}),
+    ),
+    el('p', {class:'note',text:'主观印象与事实分开：只会轻微好奇、温暖或担心，五分钟减半、十分钟失效；新的私聊消息会清除旧感受。不会积累成关系恶化或人格变化。'}),
   )
   return frag(
     hero,
@@ -843,14 +851,18 @@ async function toggleIdleAssociation(enabled) {
 async function showIdleAssociation() {
   try {
     const data = await api('/association/idle')
-    const labels = { disabled:'已关闭', 'waiting-for-message':'等待新的私聊消息', waiting:'等待空闲', exploring:'正在联想', ready:'有可用话题', stopped:'已收束', 'no-source':'没有相关事实', unavailable:'本轮未完成', used:'已提供给一次相关回复', expired:'已过期', 'irrelevant-or-stale':'话题不相关或来源已变化' }
-    const content = el('div', null, el('p', { text: labels[data.status] || '暂无可用联想' }))
-    for (const node of data.nodes || []) content.appendChild(el('p', { text: `${node.kind === 'question' ? '开放问题' : '话题设想'}：${node.topic}` }))
+    const labels = {disabled:'已关闭', 'waiting-for-message':'等待新的私聊消息', waiting:'等待空闲', exploring:'正在联想', ready:'已生成，等待合适话题', 'waiting-topic':'本轮不相关，继续暂存', stopped:'没有新话题，已收束', 'no-source':'没有相关事实', unavailable:'生成失败，本轮未完成', provided:'已准备回复参考，等待投递', injected:'已交给聊天模型（不代表实际表达）', rejected:'投递未接受或未启动模型，参考已丢弃', 'delivery-unknown':'投递结果未知，不重复注入', expired:'话题已过期', 'source-changed':'来源已变化或失效，已丢弃', 'validation-unavailable':'来源校验暂不可用，继续暂存', interrupted:'被新消息打断', cleared:'已清空', 'sensitive-cleared':'敏感消息或命令已清空话题', 'restart-cleared':'重启后清除临时状态', impression:'形成了临时主观印象', 'impression-cleared':'已关闭或重置主观感受', 'impression-expired':'主观感受已到期', 'new-message-cleared-impression':'新消息到来，旧主观感受已清除'}
+    const content = el('div', null, el('p', {text:labels[data.status] || data.status || '暂无可用联想'}))
+    if(data.expiresAt) content.appendChild(el('p',{class:'note',text:`有效期至 ${new Date(data.expiresAt).toLocaleString()}`}))
+    for (const node of data.nodes || []) content.appendChild(el('p', {text:`${node.kind==='question'?'开放问题':'话题设想'}：${node.topic}`}))
+    if (data.impression) content.appendChild(el('p',{text:`模糊理解（未确认）：${data.impression.text}；当前感受偏移 V ${Number(data.impression.valence).toFixed(3)} / A ${Number(data.impression.arousal).toFixed(3)}`}))
     if (data.sources?.length) {
-      content.appendChild(el('strong', { text: '依据的真实记忆' }))
-      for (const source of data.sources) content.appendChild(el('p', { text: source.text }))
+      content.appendChild(el('strong', {text:'依据的真实记忆'}))
+      for(const source of data.sources) content.appendChild(el('p',{text:source.text}))
     }
-    await openModal({ title:'近期联想', desc:'这些是临时话题设想，不是新增事实，也不是情绪依据。', content, submit:'知道了', cancel:'关闭', fields:[] })
+    content.appendChild(el('h3',{text:'近期去向记录'}))
+    for(const event of data.events || []) content.appendChild(el('p',{text:`${new Date(event.at).toLocaleString()} · ${labels[event.status]||event.status}${event.topics?.length?' · '+event.topics.join(' / '):''}${event.impression?' · '+event.impression.text:''}`}))
+    await openModal({title:'联想去向',desc:'保留最近的状态记录；主观印象不是事实记忆。“已交给聊天模型”不等于模型实际说了出来。重启保留记录、清除临时想法。',content,submit:'知道了',cancel:'关闭',fields:[]})
   } catch (error) { toast(error.message, 'error') }
 }
 async function toggleMemoryShare(enabled) {
@@ -1515,7 +1527,7 @@ async function loadCostSeries(hours) {
 }
 function bucketTotal(b) {
   if (!b) return 0
-  return Number(b.cacheMiss || 0) + Number(b.cacheHit || 0) + Number(b.cacheWrite || 0) + Number(b.output || 0) + Number(b.reasoning || 0)
+  return Number(b.cacheMiss || 0) + Number(b.cacheHit || 0) + Number(b.cacheWrite || 0) + Number(b.output || 0)
 }
 
 function fmtNum(n) {
@@ -1531,26 +1543,17 @@ function renderCostChart(d) {
     return el('div', { class: 'card pad muted', style: { marginBottom: '14px' }, text: '时间统计需要新版后端；重启 DSH 后显示。' })
   }
   const s = payload.series
+  if (!s.featureAccountingVersion) return el('div', {class:'card pad note',text:'当前桥接尚未支持完整时段的功能分项，请更新运行时并重启后查看。累计总额仍按现有账本显示。'})
   const buckets = Array.isArray(s.buckets) ? s.buckets : []
   const bucketMs = Number(s.bucketMs) || 3600000
-  const turns = Array.isArray(payload.pluginTurns) ? payload.pluginTurns : []
-  const byBucket = new Map()
-  for (const t of turns) {
-    const at = Number(t.startedAt || t.endedAt) || 0
-    if (!at) continue
-    const key = Math.floor(at / bucketMs) * bucketMs
-    const cur = byBucket.get(key) || { cost: 0, tokens: 0 }
-    cur.cost += Number(t.cost) || 0
-    const b = t.buckets || {}
-    cur.tokens += (Number(b.cacheMiss) || 0) + (Number(b.cacheHit) || 0) + (Number(b.cacheWrite) || 0) + (Number(b.output) || 0)
-    byBucket.set(key, cur)
-  }
-  const shown = buckets.slice(-Math.min(buckets.length, 28))
+  const byBucket = new Map(buckets.map(b => [Number(b.t), {cost:Number(b.pluginCost)||0, tokens:Number(b.pluginTokens)||0}]))
+  const shown = buckets
   const maxCost = Math.max(0.000001, ...shown.map((b) => Number(b.cost) || 0))
   const total = shown.reduce((n, b) => n + (Number(b.cost) || 0), 0)
   const pluginTotal = shown.reduce((n, b) => n + (byBucket.get(Number(b.t))?.cost || 0), 0)
   const label = (t) => {
     const dt = new Date(Number(t) || 0)
+    if (S.cost.hours > 24) return `${dt.getMonth() + 1}/${dt.getDate()} ${String(dt.getHours()).padStart(2, '0')}:00`
     if (bucketMs >= 86400000) return `${dt.getMonth() + 1}/${dt.getDate()}`
     if (bucketMs >= 3600000) return `${String(dt.getHours()).padStart(2, '0')}:00`
     return `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`
@@ -1584,9 +1587,15 @@ function renderCostChart(d) {
       }),
     ),
     el('div', { class: 'muted small', style: { display: 'flex', gap: '14px', marginTop: '8px' } },
-      el('span', { text: '总花费' }), el('span', { text: '青色 = 可塑性记忆' }),
-      el('span', { style: { marginLeft: 'auto' }, text: shown.length ? label(shown[0].t) + ' → ' + label(shown[shown.length - 1].t) : '' }),
+      el('span', { text: '所选时段 · 已留存的逐次用量' }), el('span', { text: '青色 = 可塑性记忆' }),
+      el('span', { style: { marginLeft: 'auto' }, text: `${new Date(s.from).toLocaleString()} → ${new Date(s.to).toLocaleString()}` }),
     ),
+    s.detailLimited ? el('p', {class:'note', text:s.detailNote || '部分历史只有累计值，无法按时间拆分；累计总额仍保留。'}) : null,
+    el('h3', {text:'所选时段 · 功能花费'}),
+    (s.features || []).length ? el('div', {class:'mini-list'}, (s.features || []).map(f => el('div', {class:'mini'},
+      el('span', {class:'t', text:f.label}),
+      el('span', {class:'r', text:`${cur0(f.cost)} · ${fmtNum(f.tokens)} tokens · ${f.steps} 次计费用量记录`}),
+    ))) : el('p', {class:'note', text:'所选时段暂无插件用量明细。升级前未标记的调用保留为“历史未分项”。'}),
   )
 }
 
@@ -1602,8 +1611,8 @@ function renderCost() {
   const cur = t.symbol || '¥'
   const mem = d.memory || {}
   const list = Array.isArray(t.conversations) ? t.conversations : []
-  const pluginRows = list.filter((c) => String(c.key || '').startsWith('internal:可塑性记忆'))
-  const legacyRows = list.filter((c) => String(c.key || '') === 'internal:黑话学习')
+  const pluginRows = t.features || list.filter((c) => String(c.key || '').startsWith('internal:可塑性记忆'))
+  const legacyRows = t.legacy ? [t.legacy] : list.filter((c) => String(c.key || '') === 'internal:黑话学习')
   const pluginCost = pluginRows.reduce((n, c) => n + (Number(c.cost) || 0), 0)
   const pluginTokens = pluginRows.reduce((n, c) => n + bucketTotal(c.buckets), 0)
   const legacyCost = legacyRows.reduce((n, c) => n + (Number(c.cost) || 0), 0)
@@ -1611,7 +1620,7 @@ function renderCost() {
   const totalCost = Number(totals.cost) || 0
   const totalTokens = Number(totals.totalTokens) || 0
   const unattrCost = Number(totals.unattributedCost) || 0
-  const roleCost = Math.max(0, totalCost - pluginCost - legacyCost - unattrCost)
+  const roleCost = Math.max(0, totalCost - pluginCost - legacyCost)
   const roleTokens = Math.max(0, totalTokens - pluginTokens - legacyTokens)
   const pct = totalCost > 0 ? Math.round((pluginCost / totalCost) * 100) : 0
   const colors = { plugin: '#7fd6e6', role: '#6aa9ff', legacy: '#f0c987', unattr: '#5a6a72' }
@@ -1619,7 +1628,6 @@ function renderCost() {
     ['可塑性记忆', pluginCost, colors.plugin],
     ['角色对话', roleCost, colors.role],
     ['历史内部', legacyCost, colors.legacy],
-    ['未归属', unattrCost, colors.unattr],
   ].filter(([, v]) => Number(v) > 0)
   let acc = 0
   const stops = []
@@ -1649,7 +1657,7 @@ function renderCost() {
   return el('section', { class: 'stack' },
     el('div', { class: 'section-head' },
       el('h2', { class: 'h2', text: 'Token 与花费' }),
-      el('span', { class: 'muted small', text: '只统计可塑性记忆自身，并与角色对话、历史内部做对比；价格按模型价目表折算。' }),
+      el('span', { class: 'muted small', text: '累计总额与所选时段分别显示；功能按调用入口分项，价格按模型价目表估算。推理 token 为输出细分，不重复相加。' }),
     ),
     el('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' } },
       card('可塑性记忆', cur + pluginCost.toFixed(2), '占 ' + pct + '% · ' + fmtNum(pluginTokens) + ' tokens', colors.plugin),
@@ -1671,10 +1679,15 @@ function renderCost() {
       el('div', { class: 'muted small', style: { lineHeight: '1.9', flex: '1', minWidth: '220px' } },
         el('div', { style: { color: 'var(--ink)', fontSize: '14px' }, text: '花费构成' }),
         legend('可塑性记忆', pluginCost, colors.plugin),
-        legend('角色对话/其他', roleCost, colors.role),
+        legend('角色对话/其他（含未归属会话）', roleCost, colors.role),
         legacyCost > 0 ? legend('历史内部（未计入）', legacyCost, colors.legacy) : null,
-        unattrCost > 0 ? legend('未归属', unattrCost, colors.unattr) : null,
+        unattrCost > 0 ? el('p',{class:'note',text:`其中 ${cur0(unattrCost)} 只有累计值，已包含在上述分类中，无法逐轮展开。`}) : null,
       ),
+    ),
+    el('section', {class:'card pad'},
+      el('h2', {class:'h2',text:'累计 · 功能花费'}),
+      el('p', {class:'note',text:'旧记录没有功能标签的保留为“历史未分项”，不猜测、不重新分摊。计费用量记录含重试；已压缩历史可能只剩累计 token 和金额。'}),
+      pluginRows.map(f=>el('div',{class:'mini'},el('span',{class:'t',text:f.label||'历史未分项'}),el('span',{class:'r',text:`${cur0(f.cost)} · ${fmtNum(bucketTotal(f.buckets))} tokens · ${f.steps||0} 条留存计费用量记录`}))),
     ),
     renderCostChart(d),
     el('div', { class: 'card pad', style: { marginBottom: '14px' } },
@@ -3181,7 +3194,7 @@ function renderEmotion() {
   if (!data.emotion) {
     return el('section', { class: 'card pad' },
       el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '情绪层还没开始' })),
-      el('p', { class: 'muted', text: '桥接启动后会创建 emotion.json；之后每来一条消息，情绪会按规则更新。不调用模型，不花 token。' }),
+      el('p', { class: 'muted', text: '桥接启动后会创建情绪状态；基础规则更新不调用模型。开启复杂情境复核或空闲联想后，对应调用会计入花费。' }),
     )
   }
   const e = data.emotion
@@ -3492,7 +3505,14 @@ function renderEmotion() {
   )
 
   requestAnimationFrame(() => drawEmotionPad(e))
-  return frag(hero, stats, padCard, el('div', { class: 'panel-stack' }, contactCard, bedtimeCard, climateCard, episodeCard, weightsCard, optionsCard, triggersCard, metricsCard))
+  const subjectiveCard = el('section', {class:'card pad'},
+    el('h2', {class:'h2',text:'联想带来的主观感受'}),
+    el('p', {text:e.subjective ? `${e.subjective.text}（未确认）` : '当前没有生效的主观印象。'}),
+    e.subjective ? el('p', {class:'note',text:`轻微偏移 V ${Number(e.subjective.valence).toFixed(3)} / A ${Number(e.subjective.arousal).toFixed(3)}；${new Date(e.subjective.expiresAt).toLocaleString()} 到期。`}) : null,
+    el('p', {class:'note',text:'这是临时感受；事实事件情绪、长期气候和人格不会因此被改写。新的主人私聊消息会清除它。'}),
+    el('button', {class:'btn sm',on:{click:()=>showIdleAssociation()}}, '查看联想去向'),
+  )
+  return frag(hero, stats, padCard, el('div', { class: 'panel-stack' }, subjectiveCard, contactCard, bedtimeCard, climateCard, episodeCard, weightsCard, optionsCard, triggersCard, metricsCard))
 }
 
 async function saveOwnerContact() {
