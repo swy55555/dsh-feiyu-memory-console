@@ -37,7 +37,7 @@ test('actual console route denies agent access and preserves unrelated settings 
     let result;
     const ctx=vm.createContext({url:{pathname:'/api/continuity'},req:{method,headers},cfg,ROOT:'test',path,
       readBody:async()=>body,readConfigObject:()=>structuredClone(file),atomicWriteJson:(_p,v)=>{file=v},
-      continuity:{snapshot:()=>({enabled:cfg.socialV2.continuity?.enabled}),invalidate:()=>invalidated++,edit:()=>{throw Error('invalid')}},
+      mindWorkspaces:{invalidate:()=>{}},continuity:{snapshot:()=>({enabled:cfg.socialV2.continuity?.enabled}),invalidate:()=>invalidated++,edit:()=>{throw Error('invalid')}},
       sendJson:(data,status=200)=>result={data,status}});
     await vm.runInContext('(async()=>{'+route+'})()',ctx);return result;
   }

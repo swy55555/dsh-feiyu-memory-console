@@ -22,6 +22,8 @@ test("bundle requires known hashes, updates dependencies, is idempotent and reve
     );
     assert.equal(installRuntime(dir, "apply").status, "already-installed");
     for (const f of [
+      "mind-workspace.mjs",
+      "response-patterns.mjs",
       "emotion.js",
       "emotion-appraisal.mjs",
       "emotion-context.mjs",

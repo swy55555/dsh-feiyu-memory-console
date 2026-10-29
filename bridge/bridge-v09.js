@@ -1,3 +1,5 @@
+import {MindWorkspace} from './mind-workspace.mjs';
+import {ResponsePatterns} from './response-patterns.mjs';
 import {Continuity} from './continuity.mjs';
 import {featureKey} from './usage-features.mjs';
 import {appraisalContext, expectedAbsence} from './emotion-context.mjs';
@@ -87,7 +89,7 @@ const PRIVATE_SECRET_FILE = path.join(STATE_DIR, 'private-diary.secret.json');
 const BRIDGE_CAPABILITIES = [
   'diary-vault', 'diary-password', 'diary-auto-import',
   'persona-chat', 'persona-draft', 'emotion', 'emotion-drift',
-  'episodes', 'queue-limit', 'owner-contact', 'continuity',
+  'episodes', 'queue-limit', 'owner-contact', 'continuity', 'mind-workspace',
 ];
 const LEGACY_PERSONA_FILE = path.join(STATE_DIR, 'persona.json');
 const DIARY_STATE_FILE = path.join(STATE_DIR, 'diary-state.json');
@@ -3418,7 +3420,11 @@ async function main() {
 
   async function withMemoryContext(key, promptText, context = {}) {
     context.traceId = crypto.randomUUID();
-    if (context.allowIdleAssociation === true && typeof continuity !== 'undefined') promptText = continuity.prompt(key, context) + promptText;
+    const workspaceOn = context.allowIdleAssociation === true && typeof mindWorkspaceEnabled === 'function' && mindWorkspaceEnabled(key);
+    if(workspaceOn && !context.continuityMessageId)context.continuityMessageId=mindWorkspaces.current.get(key)||'';
+    const continuityBlock = context.allowIdleAssociation === true && typeof continuity !== 'undefined' ? continuity.prompt(key, context) : '';
+    let idleBlock = '';
+    context.deferIdleConsumption=workspaceOn;
     const recordTrace = (data) => recordRetrievalTrace({traceId: context.traceId, ...data});
     const traceStart = Date.now();
     // 每次投递记一轮；够轮数且安静下来后，由 scheduleRotationCheck 触发摘要+轮换。
@@ -3433,9 +3439,32 @@ async function main() {
     const prefix = subjectId ? subjectId + ' ' : '';
     const currentMessage = prefix && latestQuery.startsWith(prefix) ? latestQuery.slice(prefix.length) : '';
     const traceSelected = [];
+    const finish = (memoryBlock = '', memoryRows = []) => {
+      if(!workspaceOn)return summaryBlock + sessionBlock + memoryBlock + continuityBlock + idleBlock + promptText;
+      const emotionLine=cfg.socialV2?.emotion?.enabled===false?'':[
+        emotionPromptLine(withSubjectiveFeeling(emotionState,idleAssociations.feeling(key)),{isOwner:true}),
+        typeof episodeRecallBlock==='function'?episodeRecallBlock(key):''
+      ].filter(Boolean).join('\n');
+      const candidates=[...(context.continuityItems||[]),
+        ...memoryRows.map(r=>({id:String(r.id),type:r.associated?'association':'memory',text:JSON.stringify({text:String(r.text||''),scope:r.scope||'unknown',who:r.who||r.subject_id||'unknown',at:r.at||null,timeBasis:r.timeBasis||'unknown',kind:r.associated?'association-not-fact':r.tier==='task'?'plan-not-known-complete':'past-statement'}),score:r.associated?.35:r.kind==='priority'?.94:.8+Math.min(.08,Math.max(0,Number(r.score)||0)*.08),reason:r.associated?'一跳关联，仅作线索':r.shared?'经权限过滤的跨聊天历史':'经现有记忆检索与上下文筛选',evidenceIds:[String(r.id)]})),
+        ...(emotionLine?[{id:'emotion',type:'emotion',text:emotionLine,score:.72,reason:'当前情绪与联想感受，只影响表达，不改事实'}]:[]),
+        ...responsePatterns.candidates(key,context.continuityKind),
+        ...(idleBlock?[{id:'idle:'+context.idleAssociation.ideaId,type:'association',text:idleBlock,score:.4,reason:'与本轮召回事实相关，原始来源已复核'}]:[])];
+      let work=mindWorkspaces.compose(key,candidates,context);
+      if(context.idleAssociation&&work.selected.some(r=>r.id==='idle:'+context.idleAssociation.ideaId)&&!idleAssociations.commit(context.idleAssociation)){
+        work=mindWorkspaces.compose(key,candidates.filter(r=>r.id!=='idle:'+context.idleAssociation.ideaId),context);
+      }
+      if(context.continuity)context.continuity.used=work.selected.some(r=>['concern','belief','relation'].includes(r.type));
+      if(context.idleAssociation){
+        if(!work.selected.some(r=>r.id==='idle:'+context.idleAssociation.ideaId))delete context.idleAssociation;
+      }
+      context.mindWorkspace={key,messageId:context.continuityMessageId,ids:work.selected.map(r=>r.id)};
+      return summaryBlock + sessionBlock + work.text + promptText;
+    };
     const compose = (priorityRows = [], searchRows = []) => {
       traceSelected.length = 0;
-      return buildHumanContext({ key, subjectId, currentMessage, priorityRows, searchRows, options: { ...humanOptions, onSelect: (r) => traceSelected.push(r) } }) + promptText;
+      const block=buildHumanContext({ key, subjectId, currentMessage, priorityRows, searchRows, options: { ...humanOptions, onSelect: (r) => traceSelected.push(r) } });
+      return finish(block,traceSelected);
     };
     // 摘要层 + 原文层：都从 memvec 取。原文只补窗口之前，摘要补整段大意。
     let summaryBlock = '';
@@ -3456,14 +3485,14 @@ async function main() {
       sessionBlock = buildSessionBlock(bundle.messages, { maxChars: budgetChars });
       if (sessionBlock || summaryBlock) log(`session context injected: ${bundle.messages.length} 条原文，${bundle.summaries.length} 条摘要`);
     }
-    if (human && !shouldRecallMemory(currentMessage)) { recordTrace({key, query: currentMessage, reason:'not-needed', candidates:[], injected:[]}); return summaryBlock + sessionBlock + compose(); }
-    if (cfg.socialV2?.memoryRecall?.enabled === false) { recordTrace({key, query: currentMessage, reason:'disabled', candidates:[], injected:[]}); return human ? summaryBlock + sessionBlock + compose() : summaryBlock + sessionBlock + promptText; }
+    if (human && !shouldRecallMemory(currentMessage)) { recordTrace({key, query: currentMessage, reason:'not-needed', candidates:[], injected:[]}); return compose(); }
+    if (cfg.socialV2?.memoryRecall?.enabled === false) { recordTrace({key, query: currentMessage, reason:'disabled', candidates:[], injected:[]}); return human ? compose() : finish(); }
     try {
       const st = getSocialV2State(key);
       const query = dailyRecallQueries.get(key) || recallQuery(st.recentMessages || []) || '';
       if (!query) {
         recordTrace({ key, query: '', mode: human ? 'human' : 'classic', reason: 'no-query', durationMs: Date.now() - traceStart, candidates: [], injected: [] });
-        return human ? summaryBlock + sessionBlock + compose() : summaryBlock + sessionBlock + promptText;
+        return human ? compose() : finish();
       }
       const priority = await memoryRequest('/priority', { scope: memoryScope(key), subject_id: subjectId }, 1200).catch(() => ({ results: [] }));
       const res = await fetch(`http://127.0.0.1:${cfg.socialV2?.memoryRecall?.port ?? 9881}/search`, {
@@ -3475,7 +3504,7 @@ async function main() {
       if (!res.ok) throw new Error(`memory HTTP ${res.status}`);
       const j = await res.json();
       // 跨聊天共享：只取非当前聊天、且管理员私聊隐私已过滤的记忆。
-      if (context.allowIdleAssociation === true) promptText = await idleAssociations.take(key, j.results || [], context) + promptText;
+      if (context.allowIdleAssociation === true) idleBlock = await idleAssociations.take(key, j.results || [], context);
       const shareCfg = cfg.socialV2?.memoryShare || {};
       let sharedRows = [];
       if (shareCfg.enabled === true) {
@@ -3511,9 +3540,9 @@ async function main() {
           key, query, mode: 'human', reason: merged.length ? 'ok' : 'no-memory',
           durationMs: Date.now() - traceStart,
           candidates: [...(priority.results || []).map((r) => traceRow(r, 'priority')), ...merged.map((r) => traceRow(r, r.shared ? 'shared' : r.associated ? 'associated' : 'search'))],
-          injected: traceSelected.map((r) => traceRow(r, r.kind || 'search')),
+          injected: traceSelected.filter(r=>!workspaceOn||context.mindWorkspace?.ids.includes(String(r.id))).map((r) => traceRow(r, r.kind || 'search')),
         });
-        return summaryBlock + sessionBlock + composed;
+        return composed;
       }
       const unique = new Map();
       for (const r of [...(priority.results || []), ...(j.results || [])]) if (!unique.has(r.id)) unique.set(r.id, r);
@@ -3533,14 +3562,16 @@ async function main() {
         candidates: [...(priority.results || []).map((r) => traceRow(r, 'priority')), ...(j.results || []).map((r) => traceRow(r, 'search')), ...sharedRows.map((r) => traceRow(r, 'shared')), ...associatedRows.map((r) => traceRow(r, 'associated'))],
         injected: [...rows.map(r=>traceRow(r,'search')), ...shared.map(r=>traceRow(r,'shared')), ...associatedRows.map(r=>traceRow(r,'associated'))],
       };
-      recordTrace(trace);
-      if (!rows.length && !shared.length && !associatedRows.length) return summaryBlock + sessionBlock + promptText;
+      if (!workspaceOn) recordTrace(trace);
+      if (!rows.length && !shared.length && !associatedRows.length) { if(workspaceOn)recordTrace(trace);return finish(); }
       log(`memory recall injected: ${rows.length} 条` + (shared.length ? ` + 共享 ${shared.length} 条` : ''));
-      return summaryBlock + sessionBlock + sharedBlock + assocBlock + recallBlock(rows) + promptText;
+      const result=finish(sharedBlock + assocBlock + recallBlock(rows), [...rows,...shared.map(r=>({...r,shared:true})),...associatedRows]);
+      if(workspaceOn)recordTrace({...trace,injected:trace.injected.filter(r=>context.mindWorkspace?.ids.includes(String(r.id)))});
+      return result;
     } catch (error) {
       recordTrace({ key, query: '', mode: human ? 'human' : 'classic', reason: 'error', error: String(error?.message || error).slice(0, 200), durationMs: Date.now() - traceStart, candidates: [], injected: [] });
       log(`memory recall unavailable: ${error?.message || error}`);
-      return summaryBlock + sessionBlock + (human ? buildHumanContext({ key, subjectId, currentMessage, options: humanOptions }) : '') + promptText;
+      return human ? compose() : finish();
     }
   }
 
@@ -3610,7 +3641,18 @@ async function main() {
     verify: (prompt) => runHeadlessPrompt(prompt, 60000, [], 'coverage_check')
   });
 
+  const mindAllowed = key => Boolean(cfg.ownerQQ) && key === `private:${String(cfg.ownerQQ)}` && isSessionAllowedInCurrentMode(key);
+  function mindWorkspaceEnabled(key) { return mindAllowed(key) && cfg.socialV2?.mind?.enabled !== false; }
+  const responsePatterns = new ResponsePatterns({
+    allowed: mindAllowed,
+    enabled: () => cfg.socialV2?.mind?.learningEnabled === true && cfg.socialV2?.continuity?.enabled === true,
+    load: () => readJsonSafe(path.join(STATE_DIR, 'response-patterns.json'), null),
+    save: data => atomicWriteJson(path.join(STATE_DIR, 'response-patterns.json'), data),
+  });
+  const mindWorkspaces = new MindWorkspace({allowed:mindAllowed,enabled:()=>cfg.socialV2?.mind?.enabled!==false});
   const continuity = new Continuity({
+    learningContext: key => responsePatterns.context(key),
+    onLearning: (key,ops,source) => responsePatterns.observe(key,ops,source),
     enabled: () => cfg.socialV2?.continuity?.enabled === true,
     allowed: key => Boolean(cfg.ownerQQ) && key === `private:${String(cfg.ownerQQ)}` && isSessionAllowedInCurrentMode(key),
     load: () => readJsonSafe(path.join(STATE_DIR, 'continuity.json'), null),
@@ -3721,10 +3763,10 @@ async function main() {
     return `【情绪影响·${strong ? '明显' : '轻微'}】现在心情偏低，可以不顺着对方：挑一个你不同意的点、先质疑再听解释，少用附和。对方认真解释或示弱时收一点。${scope}${strong ? '但不能人身攻击、不能诅咒、不能编造事实。' : ''}`;
   }
 
-  function personaBlockFor(key) {
+  function personaBlockFor(key, useWorkspace = false) {
     if (!personaEnabled()) return '';
     const base = renderPersonaBlock(personaStateForChat(key), { isOwner: personaIsOwnerKey(key), ownerTitle: cfg.socialV2?.ownerTitle || '老大' });
-    if (cfg.socialV2?.emotion?.enabled === false) return base;
+    if (cfg.socialV2?.emotion?.enabled === false || (useWorkspace && mindWorkspaceEnabled(key))) return base;
     const line = emotionPromptLine(withSubjectiveFeeling(emotionState, idleAssociations.feeling(key)), { isOwner: personaIsOwnerKey(key) });
     const epLine = episodeRecallBlock(key);
     return [base, line, epLine, contrarianPrompt(key)].filter(Boolean).join('\n');
@@ -5129,6 +5171,20 @@ async function main() {
           sendJson({ ok: true, review });
           return;
         }
+        if (url.pathname === '/api/mind') {
+          if(req.headers['x-agent-call']!==undefined||req.headers['x-agent-token']!==undefined){sendJson({ok:false,error:'仅管理端可访问心绪中枢'},403);return;}
+          const key=`private:${String(cfg.ownerQQ||'')}`;
+          if(req.method==='POST'){
+            const body=await readBody();
+            if(typeof body.enabled==='boolean'||typeof body.learningEnabled==='boolean'){
+              const configFile=path.join(ROOT,'config.json'),file=readConfigObject(configFile);
+              const mind={...(file.socialV2?.mind||{}),...(typeof body.enabled==='boolean'?{enabled:body.enabled}:{}),...(typeof body.learningEnabled==='boolean'?{learningEnabled:body.learningEnabled}:{})};
+              file.socialV2={...(file.socialV2||{}),mind};atomicWriteJson(configFile,file);cfg.socialV2={...(cfg.socialV2||{}),mind};
+              mindWorkspaces.invalidate();continuity.invalidate();
+            }else{try{responsePatterns.edit(key,body);mindWorkspaces.invalidate();continuity.invalidate();}catch{sendJson({ok:false,error:'无效的反馈修正'},400);return;}}
+          }else if(req.method!=='GET'){sendJson({ok:false,error:'method not allowed'},405);return;}
+          sendJson({ok:true,workspace:mindWorkspaces.snapshot(key),patterns:responsePatterns.view(key),learningConfigured:cfg.socialV2?.mind?.learningEnabled===true,continuityEnabled:cfg.socialV2?.continuity?.enabled===true});return;
+        }
         if (url.pathname === '/api/continuity') {
           if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) { sendJson({ok:false,error:'仅管理端可访问连续状态'},403); return; }
           const key = `private:${String(cfg.ownerQQ || '')}`;
@@ -5146,6 +5202,7 @@ async function main() {
             } else {
               try { continuity.edit(key,body); } catch { sendJson({ok:false,error:'无效的状态修正'},400);return; }
             }
+            mindWorkspaces.invalidate();
             sendJson({ok:true,...continuity.snapshot(key)});return;
           }
           sendJson({ok:false,error:'method not allowed'},405);return;
@@ -12398,12 +12455,12 @@ ${roleText.slice(0, 9000)}`;
     const tokenLine = `【会话令牌】${st.agentToken}（调用二代状态工具时请在参数中带上此令牌）\n\n`;
     const memoryText = formatMemoryV2(st);
     const memoryLine = memoryText ? `${memoryText}\n\n` : '';
-    const personaLine = personaBlockFor(key);
+    const personaLine = personaBlockFor(key, (st.unread || []).length > 0);
     // 注意：黑话表不在这里注入，deliverPromptNow 的 withSlangContext 会统一注入，
     // 避免唤醒 prompt 出现两份黑话表。
     const participationText = formatParticipationV2(st);
     const participationLine = participationText ? `${participationText}\n\n` : '';
-    const antiAiLine = '【反AI味】你不是客服：不用有求必应，可以装傻、已读乱回、拒绝推荐；少用“一绝/真管用/保证/绝对”这类词。\n\n';
+    const antiAiLine = '【自然表达】沿用角色口吻，少用“一绝/真管用/保证/绝对”等套话。先处理明确的问题和请求，不为表现性格而故意答非所问或无故拒绝；情绪与联想只在相关时自然体现。\n\n';
     const stickerCfg = cfg.socialV2?.sticker ?? {};
     const stickerLine = stickerCfg.enabled !== false && stickerCfg.includeInPrompt !== false
       ? `${buildStickerStrategyHint()}\n${buildStickerContext(stickerEntries, stickerCfg.promptMaxStickers ?? 8)}\n\n`
@@ -13266,6 +13323,7 @@ ${roleText.slice(0, 9000)}`;
     const isOwner = String(event.user_id) === String(cfg.ownerQQ ?? '');
     const continuityTicket = kind === 'private' && isOwner
       ? continuity.begin(key, String(event.message_id ?? event.msg_id ?? crypto.randomUUID()), !SENSITIVE_RE.test(plainContent) && !plainContent.startsWith('/')) : null;
+    if (kind === 'private' && isOwner) mindWorkspaces.begin(key,continuityTicket?.messageId||String(event.message_id??event.msg_id??''));
     if (kind === 'private' && isOwner) idleAssociations.note(key, plainContent, !SENSITIVE_RE.test(plainContent) && !plainContent.startsWith('/'));
     const roleState = readRoleState();
 

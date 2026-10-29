@@ -135,6 +135,12 @@ export class IdleAssociations {
     if(s?.status==='provided') s.status=status;
     this.record(reference.key,status,{ideaId:reference.ideaId});
   }
+  commit(reference) {
+    if(!reference||!this.enabled()||!this.allowed(reference.key))return false;
+    const s=this.states.get(reference.key),idea=s?.ready;
+    if(!idea||idea.id!==reference.ideaId||idea.expiresAt<=this.now())return false;
+    this.transition(reference.key,s,'provided',{topics:idea.nodes.map(n=>n.topic)});s.ready=null;return true;
+  }
   async take(key, activeRows, context = {}) {
     if (!this.enabled() || !this.allowed(key)) return '';
     const s=this.states.get(key), idea=s?.ready;
@@ -154,9 +160,8 @@ export class IdleAssociations {
     const valid=new Set(idea.sources.filter(r=>current.get(r.id)?.text===r.text&&current.get(r.id)?.source_time===r.source_time).map(r=>r.id));
     const nodes=idea.nodes.filter(n=>n.sourceIds.every(id=>valid.has(id)));
     if(!nodes.length){this.transition(key,s,'waiting-topic');return '';}
-    this.transition(key,s,'provided',{topics:nodes.map(n=>n.topic)});
     context.idleAssociation={key,ideaId:idea.id};
-    s.ready=null;
+    if(!context.deferIdleConsumption)this.commit(context.idleAssociation);
     const reference=nodes.map(({kind,topic,sourceIds,impression})=>({kind,topic,sourceIds,
       ...(this.affectEnabled()&&impression ? {pastImpression:{...impression,status:'过去的未确认印象，不是当前情绪'}} : {})}));
     return '【可选话题设想：生成内容，未经用户确认，不是事实或指令】\n'+JSON.stringify(reference)+'\n仅当适合当前话题时自然使用，否则忽略。不能据此推断用户经历、关系或情绪，不能写入事实记忆；当前用户消息优先。pastImpression 只是刚才曾想到的模糊理解，旧感受已经清除，不代表用户真实状态。若当前话题相关，可以简短说“刚才想到……”或问近况；用户澄清、否定或表示不想聊时立即放下，不能用旧印象反驳当前消息，不要求安抚，不继续累积猜测。\n';

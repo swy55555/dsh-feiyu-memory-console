@@ -118,3 +118,16 @@ body::before { background:radial-gradient(ellipse at 0 0,#193d443d 0,transparent
 #usage-history-audit .mini .t { white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; }
 #usage-history-audit .mini .r { text-align:right; min-width:0; overflow-wrap:anywhere; }
 @media(max-width:600px) { #usage-history-audit .mini { grid-template-columns:1fr; gap:5px; } #usage-history-audit .mini .r { text-align:left; } }
+
+/* 0.9.0: source-aware response workspace */
+.mind-hub { min-width:0; }
+.mind-hub p,.hub-item,.hub-evidence { overflow-wrap:anywhere; }
+.hub-budget { display:flex;align-items:center;flex-wrap:wrap;gap:14px;margin-top:16px; }
+.hub-budget progress { flex:1;min-width:120px;max-width:300px;height:8px;accent-color:var(--accent); }
+.hub-selected { display:grid;gap:12px;margin:16px 0; }
+.hub-selected.visual { grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); }
+.hub-item,.hub-strategy { padding:16px;border:1px solid var(--line-strong);border-radius:14px;margin-bottom:12px;min-width:0; }
+.hub-item p { margin:10px 0; }
+.hub-evidence { padding:12px 0;border-bottom:1px solid var(--line-strong); }
+.mind-hub details { margin-top:12px; }
+.mind-hub summary { cursor:pointer; }

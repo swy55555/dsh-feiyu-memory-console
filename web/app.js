@@ -1,3 +1,4 @@
+import { mindWorkspacePanel } from './mind-workspace.js'
 import { mindAssociations } from './mind-associations.js'
 import { continuityVisual } from './continuity-view.js'
 // 可塑性记忆 · 控制台前端
@@ -4645,8 +4646,10 @@ async function loadContinuity(force=false) {
   if (S.continuity.loading) return
   S.continuity.loading = true
   try {
-    const results=await Promise.allSettled([api('/continuity'),api('/association/idle'),api('/emotion')]);
-    const [state,idle,emotion]=results;
+    const results=await Promise.allSettled([api('/continuity'),api('/association/idle'),api('/emotion'),api('/mind')]);
+    const [state,idle,emotion,mind]=results;
+    S.continuity.mind=mind.status==='fulfilled'&&mind.value.workspace?mind.value:null;
+    S.continuity.mindError=S.continuity.mind?'':'心绪中枢暂不可用，请确认桥接已更新到 0.9.0。';
     S.continuity.idle=idle.status==='fulfilled'?idle.value:null;
     S.continuity.idleError=idle.status==='rejected'?'空闲联想暂不可用，请检查桥接。':'';
     S.continuity.emotion=emotion.status==='fulfilled'?emotion.value.emotion:null;
@@ -4660,7 +4663,9 @@ async function loadContinuity(force=false) {
 async function changeContinuity(body) {
   if (S.continuity.loading) return
   S.continuity.loading = true
-  try { S.continuity.data = await api('/continuity', {method:'POST',body}); S.continuity.error=''; toast('当前心绪已更新','ok') }
+  try { S.continuity.data = await api('/continuity', {method:'POST',body}); S.continuity.error='';
+    const mind=await api('/mind').catch(()=>null);S.continuity.mind=mind?.workspace?mind:null;
+    toast('当前心绪已更新','ok') }
   catch(e) { toast(e.message,'error') }
   finally { S.continuity.loading=false; if(S.tab==='continuity')paintCurrent() }
 }
@@ -4674,6 +4679,13 @@ async function changeMindAssociation(body) {
   }catch(e){toast(e.message,'error');paintCurrent();}
   finally{S.continuity.changing=false;}
 }
+async function changeMindWorkspace(body){
+  if(S.continuity.loading||S.continuity.changing)return;
+  S.continuity.changing=true;
+  try{await api('/mind',{method:'POST',body});await loadContinuity(true);toast('心绪中枢已更新','ok');}
+  catch(e){toast(e.message,'error');}
+  finally{S.continuity.changing=false;if(S.tab==='continuity')paintCurrent();}
+}
 function renderContinuity() {
   const d=S.continuity.data, wrap=el('div',{class:'mind-page stack',style:{display:'grid',gap:'20px'}})
   const switchView=view=>{S.continuity.view=view;localStorage.setItem('feiyu-mind-view',view);paintCurrent()}
@@ -4684,6 +4696,7 @@ function renderContinuity() {
       el('button',{class:S.continuity.view==='text'?'active':'','aria-pressed':String(S.continuity.view==='text'),on:{click:()=>switchView('text')},text:'文字列表'})),
       el('button',{class:'btn',disabled:S.continuity.loading,on:{click:()=>loadContinuity(true)}},icon('refresh'),'刷新当前心绪')),
     S.continuity.error ? el('p',{role:'alert',text:S.continuity.error}) : null))
+  wrap.appendChild(mindWorkspacePanel(el,{data:S.continuity.mind,error:S.continuity.mindError,loading:S.continuity.loading||S.continuity.changing,visual:S.continuity.view==='visual',change:changeMindWorkspace}));
   wrap.appendChild(mindAssociations(el,{idle:S.continuity.idle,error:S.continuity.idleError,emotion:S.continuity.emotion,emotionError:S.continuity.emotionError,overview:S.overview||{},visual:S.continuity.view==='visual',loading:S.continuity.loading,when:fmtWhen,details:showIdleAssociation,change:changeMindAssociation}));
   if(!d)return wrap
   wrap.appendChild(el('section',{class:'card pad'},

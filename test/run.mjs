@@ -13,7 +13,7 @@ function run(command, args) {
   if (result.status !== 0) { failures++; console.error('FAILED:', args.join(' '), result.error?.message || '') }
 }
 try {
-  for (const name of ['host', 'diary', 'audit', 'features', 'integration', 'human-context', 'runtime-extras', 'emotion-v2', 'turn-traces', 'runtime-bundle', 'runtime-integration', 'emotion-context', 'daily-memory', 'idle-association', 'usage-features', 'continuity', 'continuity-wiring', 'candidate-auto', 'emotion-feelings', 'headless-snapshot']) run(process.execPath, [`test/${name}.test.mjs`])
+  for (const name of ['host', 'diary', 'audit', 'features', 'integration', 'human-context', 'runtime-extras', 'emotion-v2', 'turn-traces', 'runtime-bundle', 'runtime-integration', 'emotion-context', 'daily-memory', 'idle-association', 'usage-features', 'continuity', 'continuity-wiring', 'candidate-auto', 'emotion-feelings', 'headless-snapshot', 'mind-workspace', 'response-patterns', 'mind-wiring']) run(process.execPath, [`test/${name}.test.mjs`])
   const python = findPython()
   if (python) run(python.command, [...python.args, 'test/memvec_test.py'])
   else { failures++; console.error('Python 3.10+ with numpy is required for memory regression tests.') }
@@ -21,5 +21,5 @@ try {
   const relative = path.relative(tempParent, path.resolve(temp))
   if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) fs.rmSync(temp, { recursive: true, force: true })
 }
-console.log(`Regression suites: ${21 - failures}/21 passed`)
+console.log(`Regression suites: ${24 - failures}/24 passed`)
 process.exitCode = failures ? 1 : 0
