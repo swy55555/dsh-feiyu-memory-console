@@ -1,3 +1,4 @@
+import {validateRelations,validEvidenceVerdict} from './confirmation-review.mjs';
 // Read-only semantic review. The storage service validates evidence and revisions.
 export async function reviewMemoryFacts(context, run) {
   if (!context || !/^(private|group):\d+$/.test(context.scope) ||
@@ -15,8 +16,7 @@ quote 是完整原话；复制时不能去掉否定或条件。每条 related �
 数据：${JSON.stringify(context)}`;
   const raw = String(await run(prompt, 12000)).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   const result = JSON.parse(raw);
-  if (!result || result.revision !== context.revision || !Array.isArray(result.relations)) throw Error('语义复核返回无效');
-  return result;
+  return validateRelations(result,context);
 }
 
 export async function reviewCandidateEvidence(context, run) {
@@ -27,5 +27,7 @@ export async function reviewCandidateEvidence(context, run) {
 只输出 JSON：{"id":"candidate.id","revision":"原样复制","supported":true或false,"speakerMatches":true或false,"literal":true或false,"current":true或false,"confidence":0到1,"evidence":"candidate.quote 完整原样复制","reason":"最多100字的简短判定依据，不输出思维过程"}。
 数据：${JSON.stringify(context)}`;
   const raw=String(await run(prompt,12000)).trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'');
-  return JSON.parse(raw);
+  const result=JSON.parse(raw);
+  if(!validEvidenceVerdict(result,context))throw Error('原话核对回执无效');
+  return result;
 }

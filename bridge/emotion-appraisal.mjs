@@ -234,5 +234,5 @@ export function appraisalScores(value, weight = 1) {
 export function temperamentContext(persona) {
   return (Array.isArray(persona?.spec?.dimensions)?persona.spec.dimensions:[]).slice(0,8)
     .filter(d=>d&&typeof d.key==='string'&&Number.isFinite(persona.baseline?.[d.key]))
-    .map(d=>({trait:String(d.label||d.key).slice(0,40),description:String(d.desc||'').slice(0,80),baseline:Math.max(0,Math.min(100,persona.baseline[d.key]))}));
+    .map(d=>({trait:String(d.label||d.key).slice(0,40),description:String(d.desc||'').slice(0,80),baseline:Math.max(0,Math.min(100,persona.baseline[d.key])),...(persona.growthMode==='evidence'?{tendency:Math.max(0,Math.min(100,persona.current[d.key]))}:{})}));
 }

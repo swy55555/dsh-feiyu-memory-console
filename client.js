@@ -66,7 +66,7 @@ window.__ModuleLoader__.load({
         h('div', {
           style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '2px 0 10px' },
         },
-          h('span', { style: { fontSize: 14, fontWeight: 600, letterSpacing: '.04em' } }, '可塑性记忆'),
+          h('span', { style: { fontSize: 14, fontWeight: 600, letterSpacing: '.04em' } }, '心迹 · 可塑性记忆'),
           h('span', { style: { fontSize: 12, color: note ? 'var(--dsw-alias-label-error, #d97777)' : 'var(--dsw-alias-label-tertiary, #8a8a8a)' } }, summary),
           h('span', { style: { flex: 1 } }),
           h('a', {
@@ -78,7 +78,7 @@ window.__ModuleLoader__.load({
         ),
         h('iframe', {
           src: `/dsh-feiyu-memory/?embed=1&theme=${theme}`,
-          title: '可塑性记忆控制台',
+          title: '心迹控制台',
           loading: 'lazy',
           style: {
             display: 'block',
@@ -102,7 +102,7 @@ window.__ModuleLoader__.load({
             name: 'settings.section',
             id: 'feiyu-memory',
             order: 52,
-            label: () => '可塑性记忆',
+            label: () => '心迹 · 可塑性记忆',
           },
           Panel,
         ),

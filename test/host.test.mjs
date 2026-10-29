@@ -11,6 +11,10 @@ import http from 'node:http'
 
 const registered = []
 const fakeCtx = {
+  inject(dependencies, callback) {
+    assert.deepEqual(dependencies, ['sessionController', 'llm'])
+    // Simulate those services still pending: console routes must mount anyway.
+  },
   effect(fn) { return fn() },
   webServer: {
     register(route) {
@@ -20,7 +24,8 @@ const fakeCtx = {
   },
 }
 
-const { apply } = await import('../lib/index.js')
+const { apply, inject } = await import('../lib/index.js')
+assert.deepEqual(inject, ['webServer'])
 const { createApiHandler, isLoopbackAddress } = await import('../lib/api.js')
 
 assert.equal(isLoopbackAddress('127.0.0.1'), true)
@@ -66,7 +71,7 @@ assert.ok(typeof overviewJson.active === 'number')
 const page = await fetch(`${base}/dsh-feiyu-memory/`)
 assert.equal(page.status, 200)
 assert.match(page.headers.get('content-type') || '', /text\/html/)
-assert.match(await page.text(), /<title>可塑性记忆<\/title>/)
+assert.match(await page.text(), /<title>心迹 · 可塑性记忆<\/title>/)
 
 const css = await fetch(`${base}/dsh-feiyu-memory/app.css`)
 assert.equal(css.status, 200)

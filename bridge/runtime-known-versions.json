@@ -225,5 +225,27 @@
       "emotion-context.mjs": "ed0a846e6e5be8b326ffceda32e5512cbbc5aee4dc723f8d67e66eb6eb0e8c7c",
       "appraisal-budget.mjs": "bb271e1b372570d5a679e75f096aed33be8e6de873aff16fe104241dcb090256"
     }
+  },
+  {
+    "version": "0.9.1",
+    "files": {
+      "mind-workspace.mjs": "adbeca8ed11e711f987cd51b669017c673203c574968665f13c8e1ad18f672a8",
+      "response-patterns.mjs": "952f02754c02321b6c3329dc9dd5dfd1effe8f6c70db3772bce417b10aea7876",
+      "continuity.mjs": "e065c9f6ec2b450a8156273f3651b9fd9c1274b22df5a0c4bda22d8517b0305e",
+      "feature-token-ledger.mjs": "d6f7b8b81f017d177680ee4624b1d9b8d68eec72ee1e8cd17b90e00dc1126b8e",
+      "feature-model-prices.mjs": "06d717cff7967f54b93077d3e631d656466c5df72fce083212fab44ab7e6e91b",
+      "usage-features.mjs": "c9ba9f98f6b24cffc0bcd8e3dd5e6d0e6950445d9b11c98978d4ac4b5c5383c3",
+      "memory-coverage.mjs": "db2ae2874cffa49366970a07798d959a44cb4401987c3a7c2a762b24f8e70635",
+      "idle-association.mjs": "f94b068607f06ad832125bd7bdc31c98933ada6a58f4cd9121c6acc002a69fc9",
+      "daily-memory.js": "7ae7e4aabe39b547ca93dd7eaeee975a595dcdd37faabe6866a15fe0c706bb92",
+      "fact-review.mjs": "9e75d89184cb526adf2f5310c2027269d971ec95e047fc6f58ced3c09cb7d5fc",
+      "bridge.js": "52cfc66a895ad01d2bf55c7b503739513fddd028c4ebe02d4a1fc59c80e5ba11",
+      "human-context.mjs": "5a0de4c1ba9bb2b80a07c737499d1a76d0156b93562b1a7ebd6667fc4ffcc349",
+      "emotion.js": "da5a3e53e1902942b687d1852ebed5a78e7825cfa9622161bd6a8324d15e12c8",
+      "emotion-appraisal.mjs": "8c088943d400f21e955e599c00a8518724438de9a5586e9d6c1947fd71d8f0f8",
+      "turn-traces.mjs": "5a048fd589d168fdf02c4c08282bf4c5a7b672f6b60e8b42d5b46759d8af365c",
+      "emotion-context.mjs": "ed0a846e6e5be8b326ffceda32e5512cbbc5aee4dc723f8d67e66eb6eb0e8c7c",
+      "appraisal-budget.mjs": "bb271e1b372570d5a679e75f096aed33be8e6de873aff16fe104241dcb090256"
+    }
   }
 ]

@@ -130,6 +130,9 @@ try {
   assert.equal((await json(`${realService}/confirm`,{scope:'private:40004',id:autoId,autoRevision:'stale'})).status,409)
   const automaticArgs={scope:'private:40004',id:autoId,automatic:true,autoRevision:autoContext.data.context.revision}
   await assert.rejects(core.memoryAction('confirm',{...automaticArgs,isStillAllowed:()=>false}),e=>e.status===409)
+  await assert.rejects(core.memoryAction('confirm',{...automaticArgs,isStillAllowed:()=>true}),e=>e.status===409)
+  const proof={id:autoId,revision:autoContext.data.context.revision,evidence:autoContext.data.evidence.quote,supported:true,speakerMatches:true,literal:true,current:true,confidence:.99,reason:'测试原话完整支持'}
+  assert.equal((await json(`${realService}/confirm/review`,{scope:'private:40004',id:autoId,operation:'confirm',offset:0,evidenceOnly:true,review:{revision:proof.revision,candidateEvidence:autoContext.data.context.candidate.quote,relations:[],evidenceVerdict:proof}})).status,200)
   const autoResult=await core.memoryAction('confirm',{...automaticArgs,isStillAllowed:()=>true})
   assert.equal(autoResult.changed,1);assert.ok(autoResult.auditId)
   assert.equal((await json(`${api}/api/undo`,{id:autoResult.auditId})).status,200)

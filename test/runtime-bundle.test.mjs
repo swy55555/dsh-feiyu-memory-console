@@ -22,6 +22,9 @@ test("bundle requires known hashes, updates dependencies, is idempotent and reve
     );
     assert.equal(installRuntime(dir, "apply").status, "already-installed");
     for (const f of [
+      "bridge-v09.js",
+      "xinji-policy.mjs",
+      "xinji-identity.mjs",
       "mind-workspace.mjs",
       "response-patterns.mjs",
       "emotion.js",

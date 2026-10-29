@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
 import {createRequire} from 'node:module';
+import {reasoningView} from '../bridge/background-reasoning.mjs';
 import {emptyEmotion} from '../bridge/emotion.js';
 const require=createRequire(import.meta.url);
 const {chromium}=require(process.env.FEIYU_PLAYWRIGHT_PATH || 'playwright');
@@ -18,13 +19,14 @@ try {
   const url=`http://127.0.0.1:${server.address().port}`;
   browser=await chromium.launch({headless:true,...(process.env.FEIYU_BROWSER_CHANNEL?{channel:process.env.FEIYU_BROWSER_CHANNEL}:{})});
   const page=await browser.newPage({viewport:{width:1365,height:1000}});
-  const errors=[], posts=[], periods=[];
+  const errors=[], posts=[], periods=[], effortPosts=[];let effortConfig={dsh:{reasoningEffort:"high"}};
   page.on('pageerror',e=>errors.push(e.message));
   const now=Date.now(), feature={key:'internal:可塑性记忆:idle_association',label:'空闲联想',cost:24,tokens:12000,totalTokens:12000,steps:1205,buckets:{cacheMiss:10000,output:2000,reasoning:1000}};
   await page.route('**/api/**',async route=>{
     const u=new URL(route.request().url()), p=u.pathname.replace(/^.*\/api/,'');
     let body={ok:true};
-    if(p==='/overview')body={...body,active:1,total:1,candidate:0,scopes:[],recent:[],fading:[],idleAssociation:true,idleAffect:false,health:{ok:true,capabilities:['emotion'],bridge:{ok:true}}};
+    if(p==='/background/reasoning'){if(route.request().method()==='POST'){const patch=route.request().postDataJSON();effortPosts.push(patch);effortConfig.backgroundReasoning={...effortConfig.backgroundReasoning,...patch.modules};}body={...body,...reasoningView(effortConfig)};}
+    else if(p==='/overview')body={...body,active:1,total:1,candidate:0,scopes:[],recent:[],fading:[],idleAssociation:true,idleAffect:false,health:{ok:true,capabilities:['emotion'],bridge:{ok:true}}};
     else if(p==='/context/keys')body={...body,keys:[]};
     else if(p==='/usage')body={...body,tokens:{symbol:'¥',totals:{cost:48,totalTokens:24000},features:[feature],conversations:[],historyAudit:{excludedCost:3,groups:[{label:'旧黑话提取／研究',excluded:true,cost:3,sessions:2,buckets:{output:300}},{label:'记忆提取',excluded:false,cost:1,sessions:1,buckets:{output:100}}],pending:{sessions:1,cost:.25}}}};
     else if(p==='/usage/series') {
@@ -39,6 +41,22 @@ try {
   });
   await page.goto(url+'/#/cost');
   await page.getByRole('heading',{name:'所选时段 · 功能花费'}).waitFor();
+  const slider=page.getByRole('slider',{name:'空闲联想推理等级'});
+  await slider.waitFor();assert.equal(await slider.getAttribute('aria-valuetext'),'低');
+  assert.equal(await page.getByRole('slider').count(),14);
+  await slider.focus();await page.keyboard.press('ArrowRight');
+  assert.equal(await slider.getAttribute('aria-valuetext'),'高');
+  await page.getByRole('button',{name:'保存后台档位',exact:true}).click();
+  await page.getByText('后台档位已保存，聊天档位不变',{exact:true}).waitFor();
+  assert.deepEqual(effortPosts,[{modules:{idle_association:'high'}}]);
+  await page.reload();await page.getByRole('slider',{name:'空闲联想推理等级'}).waitFor();
+  assert.equal(await page.getByRole('slider',{name:'空闲联想推理等级'}).getAttribute('aria-valuetext'),'高');
+  assert.equal(effortConfig.dsh.reasoningEffort,'high');
+  await page.setViewportSize({width:390,height:844});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.setViewportSize({width:1365,height:1000});
+  if(process.env.FEIYU_REASONING_SCREENSHOT)await page.locator('.reasoning-panel').screenshot({path:process.env.FEIYU_REASONING_SCREENSHOT});
+
   assert.equal(await page.locator('[title*="总 ¥"]').count(),48);
   await page.getByText('总 ¥48.00 · 可塑性记忆 ¥24.00',{exact:true}).waitFor();
   for(const name of ['7 天','30 天']) {
@@ -46,7 +64,7 @@ try {
     await page.getByRole('button',{name,exact:true}).click();await response;
     assert.equal(await page.locator('[title*="总 ¥"]').count(),48);
   }
-  assert.deepEqual(periods,[24,168,720]);
+  assert.deepEqual(periods,[24,24,168,720]);
   await page.getByRole('heading',{name:'历史费用核对',exact:true}).waitFor();
   await page.getByText('旧黑话提取／研究（已剔除）',{exact:true}).waitFor();
   await page.getByText('记忆提取（已归类）',{exact:true}).waitFor();

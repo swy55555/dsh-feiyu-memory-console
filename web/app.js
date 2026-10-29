@@ -383,7 +383,7 @@ function buildTopbar() {
   return el('header', { class: 'topbar' },
     el('div', { class: 'brand' }, mark(),
       el('div', null,
-        el('h1', { text: '可塑性记忆' }),
+        el('h1', { text: '心迹 · 可塑性记忆' }),
         el('p', { text: '她记得的，都在这里。' }),
       ),
     ),
@@ -1509,11 +1509,13 @@ async function loadCost() {
   if (S.cost.loading) return
   S.cost.loading = true
   try {
-    const [usage, keys, series] = await Promise.all([
+    const [usage, keys, series, reasoning] = await Promise.all([
       api('/usage'),
       api('/context/keys').catch(() => ({ keys: [] })),
       api(`/usage/series?hours=${S.cost.hours || 24}`).catch(() => null),
+      api('/background/reasoning').catch(() => null),
     ])
+    S.cost.reasoning = reasoning
     S.cost.data = usage
     S.cost.data.series = series
     S.cost.series = series
@@ -1613,6 +1615,30 @@ function cur0(n) {
   return '¥' + (Number(n) || 0).toFixed(2)
 }
 
+function renderBackgroundReasoning() {
+  const settings=S.cost.reasoning
+  const panel=el('div',{class:'card pad reasoning-panel'},el('h3',{text:'后台思考强度'}))
+  if(!settings?.modules){panel.appendChild(el('p',{class:'note',text:'后台设置暂不可用，请确认心迹引擎和控制台均已升级。'}));return panel}
+  panel.appendChild(el('p',{class:'muted small',text:`聊天保持 ${settings.chatEffort}；以下只调整后台模块。低档通常更快，高档适合复杂判断，最高档可能增加耗时和花费。保存后从下一次调用生效。`}))
+  if(settings.pendingStops)panel.appendChild(el('p',{class:'note',text:'有后台任务尚未确认停止，已暂停新调用，后续调用会先重试取消。'}))
+  const options=settings.options,labels={low:'低',high:'高',max:'最高'}
+  const grid=el('div',{class:'reasoning-grid'})
+  for(const row of settings.modules){
+    const selected=S.cost.reasoningDraft?.[row.id] || row.effort
+    const value=el('output',{text:labels[selected]||selected})
+    const input=el('input',{type:'range',min:'0',max:String(options.length-1),step:'1',value:String(Math.max(0,options.indexOf(selected))),'aria-label':`${row.label}推理等级`,'aria-valuetext':labels[selected]||selected,
+      on:{input:e=>{const effort=options[Number(e.target.value)];S.cost.reasoningDraft||={};S.cost.reasoningDraft[row.id]=effort;value.textContent=labels[effort]||effort;e.target.setAttribute('aria-valuetext',labels[effort]||effort);save.disabled=false}}})
+    grid.appendChild(el('div',{class:'reasoning-item'},el('div',{class:'reasoning-title'},el('label',{text:row.label}),value),input,el('div',{class:'reasoning-scale'},options.map(id=>el('span',{text:labels[id]||id}))),el('p',{class:'muted small',text:row.note})))
+  }
+  const save=el('button',{class:'btn primary',text:S.cost.reasoningSaving?'正在保存…':'保存后台档位',disabled:S.cost.reasoningSaving||!Object.keys(S.cost.reasoningDraft||{}).length,on:{click:async()=>{
+    const patch={...S.cost.reasoningDraft};save.disabled=true;S.cost.reasoningSaving=true
+    try{const result=await api('/background/reasoning',{method:'POST',body:{modules:patch}});S.cost.reasoning=result;for(const [id,value]of Object.entries(patch))if(S.cost.reasoningDraft[id]===value)delete S.cost.reasoningDraft[id];toast('后台档位已保存，聊天档位不变','ok')}
+    catch(error){toast(error.message,'error')}
+    finally{S.cost.reasoningSaving=false;if(S.tab==='cost')paintCurrent()}
+  }}})
+  panel.append(grid,save);return panel
+}
+
 function renderCost() {
   const d = S.cost.data
   if (!d) return el('div', { class: 'empty', text: '正在算账…' })
@@ -1669,6 +1695,7 @@ function renderCost() {
       el('h2', { class: 'h2', text: 'Token 与花费' }),
       el('span', { class: 'muted small', text: '累计总额与所选时段分别显示；功能按调用入口分项，价格按模型价目表估算。推理 token 为输出细分，不重复相加。' }),
     ),
+    renderBackgroundReasoning(),
     el('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' } },
       card('可塑性记忆', cur + pluginCost.toFixed(2), '占 ' + pct + '% · ' + fmtNum(pluginTokens) + ' tokens', colors.plugin),
       card('角色对话／其他', cur + roleCost.toFixed(2), fmtNum(roleTokens) + ' tokens', colors.role),
@@ -2940,10 +2967,58 @@ function personaEntryText(h) {
   return parts.join(' · ') || '只改了自述'
 }
 
+
+async function changeSelfReference(body) {
+  try {await api('/self-reference',{method:'POST',body});await loadPersona();toast('自我参考已更新','ok')}
+  catch(error){toast(error.message,'error')}
+}
+function renderJointTemperament(data) {
+  const p=data.temperament
+  if(!p)return el('p',{class:'muted',text:'六维状态尚未迁入，请检查桥接运行状态。'})
+  const dims=p.spec.dimensions,values=Object.fromEntries(dims.map(d=>[d.key,{key:d.key,current:p.current[d.key],baseline:p.baseline[d.key],band:d.band}]))
+  const reason=el('input',{class:'input',style:{maxWidth:'480px',margin:'12px 8px 12px 0'},placeholder:'说明这次修正的原因',maxlength:160,'aria-label':'六维修正原因'})
+  const editor=el('details',{},el('summary',{text:'修正当前值、参考起点和变化边界'}),
+    el('p',{class:'muted small',text:'修正会记录原因并清空待积累的变化。当前值须在参考起点 ± 边界内；原始值保留用于对照。'}),
+    ...dims.map(d=>el('div',{class:'card pad',style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:'12px',marginTop:'12px'}},el('strong',{text:d.label,style:{gridColumn:'1 / -1'}}),...['current','baseline','band'].map(field=>{
+      const names={current:'当前值',baseline:'参考起点',band:'变化边界'}
+      return el('label',{style:{display:'grid',gap:'6px'}},el('span',{class:'muted small',text:names[field]}),el('input',{class:'input',type:'number',min:0,max:field==='band'?40:100,step:1,value:values[d.key][field],'aria-label':d.label+names[field],on:{input:e=>{values[d.key][field]=e.target.value===''?NaN:Number(e.target.value)}}}))
+    }))),reason,
+    el('button',{class:'btn sm',on:{click:()=>changeSelfReference({action:'temperament',revision:data.revision,dimensions:Object.values(values),reason:reason.value})}},'保存六维修正'))
+  return el('section',{class:'card pad'},el('h2',{class:'h2',text:'六维性格 · 缓慢变化的倾向'}),
+    el('p',{class:'muted',text:'保留原来的六维数值，与下方自我参考共同参与回应和情绪理解。数字是倾向，不是必须表现的台词；“嘴硬”不要求撒谎或挖苦。'}),
+    el('div',{class:'traits'},...dims.map(d=>{
+      const value=p.current[d.key],base=p.baseline[d.key],lo=Math.max(0,base-d.band),hi=Math.min(100,base+d.band)
+      return el('div',{class:'trait'},el('div',{class:'trait-head'},el('span',{text:d.label}),el('span',{class:'muted small',text:`${value} / 参考 ${base} · 边界 ${lo}–${hi}`})),
+        el('div',{class:'trait-track',role:'meter','aria-label':d.label,'aria-valuenow':value,'aria-valuemin':0,'aria-valuemax':100},
+          el('span',{class:'trait-band',style:{left:`${lo}%`,width:`${hi-lo}%`}}),el('div',{class:'trait-fill',style:{width:`${value}%`}}),el('span',{class:'trait-anchor',style:{left:`${base}%`}})))
+    })),
+    el('p',{class:'muted small',text:'与自我参考共用一次模型整理。每维需至少 3 次、跨 3 天的独立经历支持同一方向；每 7 天最多变化一次，每次每维 1 点、最多 2 维。起点和边界由你修正。'}),editor,
+    el('details',{},el('summary',{text:`六维变化记录（${p.history?.length||0}）`}),...(p.history||[]).slice().reverse().map(h=>el('p',{class:'muted small',text:`${new Date(h.at).toLocaleString()} · ${h.source==='manual'?'手动修正':'经历积累'} · ${h.reason||h.changes.map(c=>`${dims.find(d=>d.key===c.key)?.label||c.key} ${c.before} → ${c.after}；${c.evidence?.map(e=>e.reason).join(' / ')||''}`).join('；')}`}))))
+}
+
+function renderSelfReference(data) {
+  const labels={identity:'身份理解',origin:'共同经历',trait:'性格倾向',interest:'兴趣探索'}
+  const statuses={tentative:'正在形成',supported:'多日依据支持',fading:'正在淡化',dormant:'暂不使用',retracted:'已撤回'}
+  return el('div',{class:'self-reference-panel',style:{display:'grid',gap:'16px'}},renderJointTemperament(data),
+    el('section',{class:'card pad'},el('h2',{class:'h2',text:'会成长的自我参考'}),
+      el('p',{class:'muted',text:'由真实交流逐步形成，只作参考。六维表达缓慢变化的倾向，文字参考解释经历；旧角色卡已退出当前回应。私人经历仅用于同一私聊。'}),
+      el('p',{class:'muted',text:`版本 ${data.revision} · 待整理 ${data.queue?.length||0} 条。自动整理每批至少 12 条、两次尝试间隔至少 6 小时；计入“性格整理”。原话重复不续期，30 天无新依据淡化，90 天暂不使用。`}),
+      el('button',{class:'btn sm',disabled:data.busy||!data.queue?.length,on:{click:()=>changeSelfReference({action:'review'})}},'整理已有新经历')),
+    ...(data.claims||[]).map(c=>el('section',{class:'card pad'},
+      el('h3',{text:`${labels[c.category]||c.category} · ${statuses[c.status]||c.status}`}),
+      el('p',{text:c.text}),
+      el('details',{},el('summary',{text:`查看 ${c.evidence.length} 条原话依据`}),...c.evidence.map(e=>el('p',{class:'muted small',text:`${new Date(e.at).toLocaleString()} · ${e.quote}`}))),
+      c.status!=='retracted'?el('button',{class:'btn sm',on:{click:()=>changeSelfReference({action:'retract',id:c.id})}},'撤回这条参考'):null)),
+    el('section',{class:'card pad'},el('h3',{text:'变化记录与恢复'}),
+      el('p',{class:'muted',text:'恢复同版自我参考与六维快照，不改聊天记录、事实记忆或权限。旧版未保存六维的快照只恢复文字。原话使用记录保留，避免恢复后重复涨点。'}),
+      ...(data.history||[]).slice().reverse().map(h=>el('div',{class:'row'},el('span',{text:`版本 ${h.revision} · ${new Date(h.at).toLocaleString()}`}),el('button',{class:'btn sm',on:{click:()=>changeSelfReference({action:'restore',revision:h.revision})}},'恢复此版本')))))
+}
+
 function renderPersona() {
   const data = S.persona
   if (!data) return el('div', { class: 'empty', text: '正在读她的性格…' })
   if (data.error) return el('div', { class: 'empty', text: `读不到性格状态：${data.error}` })
+  if (data.selfReference?.enabled) return renderSelfReference(data.selfReference)
   const p = data.persona
   if (!p) {
     if (S.personaEdit) return renderPersonaEditor()

@@ -1,11 +1,17 @@
+import {hasRetiredTools, retireLexiconTools} from './retire-lexicon.mjs';
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.9.1";
-const files = {
+export const RUNTIME_VERSION = "0.10.0";
+const templates = {
+  "self-temperament.mjs": "self-temperament.mjs",
+  "xinji-console.html": "xinji-console.html",
+  "self-reference.mjs": "self-reference.mjs",
+  "confirmation-review.mjs": "confirmation-review.mjs",
+  "background-reasoning.mjs": "background-reasoning.mjs",
   "mind-workspace.mjs": "mind-workspace.mjs",
   "response-patterns.mjs": "response-patterns.mjs",
   "continuity.mjs": "continuity.mjs",
@@ -16,7 +22,10 @@ const files = {
   "idle-association.mjs": "idle-association.mjs",
   "daily-memory.js": "daily-memory.js",
   "fact-review.mjs": "fact-review.mjs",
-  "bridge.js": "bridge-v09.js",
+  "bridge.js": "xinji-engine.mjs",
+  "bridge-v09.js": "bridge-v09.js",
+  "xinji-policy.mjs": "xinji-policy.mjs",
+  "xinji-identity.mjs": "xinji-identity.mjs",
   "human-context.mjs": "human-context-v09.mjs",
   "emotion.js": "emotion.js",
   "emotion-appraisal.mjs": "emotion-appraisal.mjs",
@@ -70,6 +79,16 @@ export function installRuntime(
   if (!fs.existsSync(path.join(src, "bridge.js")))
     throw Error("找不到目标 src/bridge.js");
   const previous = receipt(root);
+  const files = {...templates};
+  const mcpPath = path.join(src, 'mcp-snowluma-safe.js');
+  const mcpBytes = fs.existsSync(mcpPath) ? fs.readFileSync(mcpPath) : null;
+  const mcpManaged = !!previous?.files?.['mcp-snowluma-safe.js'];
+  if (mcpManaged || (mcpBytes && hasRetiredTools(mcpBytes.toString('utf8')))) files['mcp-snowluma-safe.js'] = '@mcp';
+  if (mcpManaged && (!mcpBytes || digest(mcpBytes) !== previous.files['mcp-snowluma-safe.js'].afterHash)) throw Error('安装后 QQ MCP 有修改，未覆盖');
+  const migratedMcp = mode === 'undo' ? null : (files['mcp-snowluma-safe.js'] ? retireLexiconTools(mcpBytes) : null);
+  const sourceBytes = source => source === '@mcp' ? migratedMcp : fs.readFileSync(path.join(here, source));
+  const normalizedSourceHash = source => digest(sourceBytes(source).toString('utf8').replace(/^\uFEFF/, '').replaceAll('\r\n', '\n'));
+
   const rawHash = (file) =>
     fs.existsSync(file) ? digest(fs.readFileSync(file)) : null;
   const safeBackup = (name) => {
@@ -110,7 +129,7 @@ export function installRuntime(
   const identical = Object.entries(files).every(([name, source]) => {
     try {
       return (
-        sourceHash(path.join(src, name)) === sourceHash(path.join(here, source))
+        sourceHash(path.join(src, name)) === normalizedSourceHash(source)
       );
     } catch {
       return false;
@@ -128,8 +147,8 @@ export function installRuntime(
       if (
         !previous.files[name] &&
         fs.existsSync(path.join(src, name)) &&
-        sourceHash(path.join(src, name)) !== sourceHash(path.join(here, source)) &&
-        !recognizedAuxiliary(name, path.join(src, name))
+        sourceHash(path.join(src, name)) !== normalizedSourceHash(source) &&
+        !recognizedAuxiliary(name, path.join(src, name)) && name !== "mcp-snowluma-safe.js"
       )
         throw Error(`新增模块 ${name} 已存在自定义内容，未覆盖`);
     }
@@ -144,11 +163,12 @@ export function installRuntime(
       throw Error(`辅助模块 ${name} 存在未知修改，未覆盖`);
   }
   for (const source of Object.values(files)) {
+    if (source.endsWith(".html")) continue;
     const check = spawnSync(
       process.execPath,
       ["--input-type=module", "--check"],
       {
-        input: fs.readFileSync(path.join(here, source), "utf8"),
+        input: sourceBytes(source).toString("utf8"),
         encoding: "utf8",
         windowsHide: true,
       },
@@ -178,7 +198,7 @@ export function installRuntime(
     result.files[name] = {
       existed,
       beforeHash: rawHash(file),
-      afterHash: rawHash(path.join(here, source)),
+      afterHash: digest(sourceBytes(source)),
     };
     if (existed) fs.copyFileSync(file, path.join(backup, name));
   }
@@ -186,7 +206,7 @@ export function installRuntime(
     for (const [name, source] of Object.entries(files)) {
       const file = path.join(src, name),
         staged = `${file}.bundle-stage`;
-      fs.copyFileSync(path.join(here, source), staged);
+      fs.writeFileSync(staged, sourceBytes(source));
       fs.renameSync(staged, file);
       if (rawHash(file) !== result.files[name].afterHash)
         throw Error("安装写入校验失败");

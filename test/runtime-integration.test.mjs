@@ -10,6 +10,7 @@ import crypto from "node:crypto";
 import * as emotion from "../bridge/emotion.js";
 import * as human from "../bridge/human-context-v09.mjs";
 import { TurnTraces } from "../bridge/turn-traces.mjs";
+import {backgroundEffort,runBoundedHeadless} from '../bridge/background-reasoning.mjs';
 import {featureKey} from '../bridge/usage-features.mjs';
 import {createTokenLedger} from '../bridge/feature-token-ledger.mjs';
 const source = fs.readFileSync(
@@ -28,7 +29,7 @@ test('actual headless sessions record isolated feature keys before follow and pr
   t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const features=new Map(), learners=new Set();let serial=0;
   const ledger=createTokenLedger({file:path.join(dir,'usage.jsonl'),resolveKey:id=>features.get(id)});
-  const ctx=vm.createContext({path,fs,STATE_DIR:dir,featureKey,learnerFeatures:features,learnerSessions:learners,
+  const ctx=vm.createContext({path,fs,URL,AbortSignal,pendingBackgroundStops:new Map(),backgroundEffort,runBoundedHeadless,cfg:{dsh:{baseUrl:"http://127.0.0.1:1"},consoleToken:"fixture-console-token"},fetch:async()=>({ok:true,json:async()=>({ok:true})}),STATE_DIR:dir,featureKey,learnerFeatures:features,learnerSessions:learners,
     learnerWaiters:new Map(),learnerCollectors:new Map(),clearTimeout,
     unwrap:x=>x,ensureChatModel:async()=> 'applied',waitLearnerTurn:async()=> 'ok',
     dispatchTracedPrompt:async()=>({result:{ok:true}}),

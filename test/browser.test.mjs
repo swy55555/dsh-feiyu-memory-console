@@ -30,6 +30,8 @@ try {
   page.on('pageerror', (error) => errors.push(error.message))
   page.on('dialog', async (dialog) => { dialogs.push(dialog.message()); await dialog.dismiss() })
   await page.goto(url)
+  await page.getByRole('heading', {name:'心迹 · 可塑性记忆',exact:true}).waitFor()
+  await page.locator('button[data-tab="memes"]').waitFor()
   const packageVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
   await page.locator('.app-version').filter({ hasText: `v${packageVersion}` }).waitFor()
   await page.getByText('记忆库还没有就绪，先完成下面的启动检查。').waitFor()

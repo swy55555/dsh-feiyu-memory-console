@@ -46,6 +46,19 @@ class MemoryLifecycleTests(unittest.TestCase):
         new = self.add('new fact', fact_key='preference', source_time=m.now(), **kwargs)
         return old, new
 
+    def evidence_review(self, mid, accepted=True, scope='private:10001'):
+        prepared = m.confirmation_context(scope, mid)
+        c = prepared['context']
+        verdict = {'id':mid, 'revision':c['revision'], 'evidence':prepared['evidence']['quote'],
+                   'supported':accepted, 'speakerMatches':True, 'literal':True, 'current':True,
+                   'confidence':.99, 'reason':'完整原话支持' if accepted else '原话不支持'}
+        return {'revision':c['revision'], 'candidateEvidence':c['candidate']['quote'], 'relations':[], 'evidenceVerdict':verdict}
+
+    def store_evidence(self, mid, accepted=True, scope='private:10001'):
+        review = self.evidence_review(mid, accepted, scope)
+        m.save_review_page(scope, mid, 'confirm', 0, review, True)
+        return review
+
     def test_batch_only_confirms_sender(self):
         a = self.add('A', scope='group:1', subject='111')
         b = self.add('B', scope='group:1', subject='222')
@@ -63,6 +76,7 @@ class MemoryLifecycleTests(unittest.TestCase):
         self.assertEqual(prepared['evidence']['quote'], '我喜欢小笼包')
         self.assertNotEqual(prepared['evidence']['quote'], prepared['context']['candidate']['text'])
         ctx = prepared['context']
+        self.store_evidence(mid)
         result = m.confirm_memory('private:10001', mid, auto_revision=ctx['revision'])
         self.assertEqual(self.row(mid)['status'], 'active')
         m.undo_confirm('private:10001', result['undo']['operationId'])
@@ -93,6 +107,8 @@ class MemoryLifecycleTests(unittest.TestCase):
             m.confirm_memory('private:10001', new, auto_revision=ctx['revision'])
         self.assertEqual([self.row(old), self.row(new)], before)
         review = self.review(new, 'coexist')
+        self.store_evidence(new)
+        m.save_review_page('private:10001', new, 'confirm', 0, review)
         m.confirm_memory('private:10001', new, review=review, auto_revision=ctx['revision'])
         self.assertEqual(self.row(old)['status'], 'active')
         self.assertEqual(self.row(new)['status'], 'active')
@@ -375,8 +391,14 @@ class MemoryLifecycleTests(unittest.TestCase):
         m.save_review_page('private:10001', candidate, 'confirm', 0, review)
         self.add('changed history', confirmed=True)
         reset = m.confirmation_context('private:10001', candidate)
-        self.assertEqual(reset['reviewed'], 0)
-        self.assertEqual(reset['context']['offset'], 0)
+        # Unchanged pairs can survive a new set version; an old whole-page reply cannot.
+        # UUID ordering may place the new row on either page.
+        self.assertTrue(reset['needed'])
+        self.assertLessEqual(reset['reviewed'], 8)
+        old_ids={r['id'] for r in ctx['related']}
+        self.assertTrue(any(r['id'] not in old_ids for r in reset['context']['related']))
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', candidate)
         with self.assertRaises(m.MemoryConflict):
             m.save_review_page('private:10001', candidate, 'confirm', 0, review)
 
@@ -629,6 +651,163 @@ class MemoryLifecycleTests(unittest.TestCase):
         with m.db() as c:
             c.execute('UPDATE memories SET expires_at=? WHERE id=?', (m.now()-1, seed))
         self.assertEqual(m.associate_memory(seed, 'group:1'), [])
+
+    def test_combined_review_persists_both_parts_and_requires_all_pages(self):
+        for i in range(9):
+            self.add('旧事实'+str(i), confirmed=True, source_text='原话'+str(i), source_id='old'+str(i))
+        mid = self.add('喜欢茶', source_text='我喜欢茶', source_id='new')
+        prepared = m.confirmation_context('private:10001', mid)
+        review = self.evidence_review(mid)
+        review['relations'] = [{'id':r['id'], 'relation':'coexist', 'confidence':.99, 'evidence':r['quote']} for r in prepared['context']['related']]
+        progress = m.save_review_page('private:10001', mid, 'confirm', 0, review)
+        self.assertTrue(progress['pending'])
+        cached = m.confirmation_context('private:10001', mid)
+        self.assertEqual(cached['evidenceVerdict'], review['evidenceVerdict'])
+        self.assertEqual(cached['context']['offset'], 8)
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', mid, auto_revision=review['revision'])
+        last = {'revision':cached['context']['revision'], 'candidateEvidence':cached['context']['candidate']['quote'],
+                'relations':[{'id':r['id'], 'relation':'coexist', 'confidence':.99, 'evidence':r['quote']} for r in cached['context']['related']]}
+        m.save_review_page('private:10001', mid, 'confirm', 8, last)
+        self.assertEqual(m.confirmation_context('private:10001', mid)['evidenceVerdict'], review['evidenceVerdict'])
+        m.confirm_memory('private:10001', mid, auto_revision=review['revision'])
+        self.assertEqual(self.row(mid)['status'], 'active')
+
+    def test_combined_invalid_part_rolls_back_both_receipts(self):
+        self.add('旧事实', confirmed=True)
+        mid = self.add('喜欢茶', source_text='我喜欢茶', source_id='new')
+        prepared = m.confirmation_context('private:10001', mid)
+        review = self.evidence_review(mid)
+        review['relations'] = [{'id':r['id'], 'relation':'coexist', 'confidence':.99, 'evidence':r['quote']} for r in prepared['context']['related']]
+        for bad in [dict(review, relations=[]), dict(review, evidenceVerdict=dict(review['evidenceVerdict'], evidence='喜欢茶')),
+                    dict(review, evidenceVerdict=dict(review['evidenceVerdict'], confidence=True))]:
+            with self.assertRaises(m.MemoryConflict):
+                m.save_review_page('private:10001', mid, 'confirm', 0, bad)
+            current = m.confirmation_context('private:10001', mid)
+            self.assertIsNone(current['evidenceVerdict'])
+            self.assertEqual(current['reviewed'], 0)
+
+    def test_evidence_cache_invalidates_source_candidate_but_reuses_unchanged_source_after_related_changes(self):
+        old = self.add('旧事实', confirmed=True, source_text='旧原话', source_id='old')
+        mid = self.add('喜欢茶', source_text='我喜欢茶', source_id='new')
+        first = self.store_evidence(mid)
+        with m.db() as c:
+            c.execute('UPDATE memories SET access_count=access_count+1,last_access=? WHERE id IN (?,?)',(m.now(),old,mid))
+        self.assertEqual(m.confirmation_context('private:10001', mid)['evidenceVerdict'], first['evidenceVerdict'])
+        self.add('别的聊天', scope='private:20002', subject='20002', confirmed=True)
+        self.assertIsNotNone(m.confirmation_context('private:10001', mid)['evidenceVerdict'])
+        with m.db() as c:
+            c.execute("UPDATE memories SET text='旧事实更正' WHERE id=?",(old,))
+        updated = m.confirmation_context('private:10001', mid)
+        self.assertIsNotNone(updated['evidenceVerdict'])
+        self.assertNotEqual(updated['evidenceVerdict']['revision'], first['revision'])
+        self.assertTrue(updated['needed'])
+        self.store_evidence(mid)
+        with m.db() as c:
+            c.execute("UPDATE memories SET source_text='我不喜欢茶' WHERE id=?",(mid,))
+        self.assertIsNone(m.confirmation_context('private:10001', mid)['evidenceVerdict'])
+        with self.assertRaises(m.MemoryConflict):
+            m.save_review_page('private:10001', mid, 'confirm', 0, first, True)
+        self.assertIsNone(m.confirmation_context('private:20002', mid).get('evidenceVerdict'))
+
+    def test_evidence_only_cannot_skip_history_and_negative_cannot_confirm(self):
+        self.add('旧事实', confirmed=True)
+        mid = self.add('喜欢茶', source_text='我喜欢茶', source_id='new')
+        stored = self.store_evidence(mid)
+        prepared = m.confirmation_context('private:10001', mid)
+        self.assertTrue(prepared['needed'])
+        self.assertEqual(prepared['reviewed'], 0)
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', mid, auto_revision=stored['revision'])
+        negative = self.add('喜欢香菜', scope='private:30003', subject='30003', source_text='我不喜欢香菜', source_id='other')
+        value = self.store_evidence(negative, False, 'private:30003')
+        self.assertFalse(m.confirmation_context('private:30003', negative)['evidenceVerdict']['supported'])
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:30003', negative, auto_revision=value['revision'])
+        self.assertEqual(self.row(negative)['status'], 'candidate')
+
+    def test_auto_requires_durable_evidence_even_without_related_facts(self):
+        mid = self.add('喜欢茶', source_text='我喜欢茶', source_id='new')
+        revision = m.confirmation_context('private:10001', mid)['context']['revision']
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', mid, auto_revision=revision)
+        self.store_evidence(mid)
+        self.assertEqual(m.confirm_memory('private:10001', mid, auto_revision=revision)['confirmed'], 1)
+
+    def test_pair_cache_only_rechecks_changed_dependencies_and_never_skips_new_fact(self):
+        old = [self.add('旧事实'+str(i), confirmed=True, source_text='原话'+str(i), source_id='old'+str(i)) for i in range(16)]
+        mid = self.add('喜欢茶', source_text='我喜欢茶', source_id='new')
+        def save_current():
+            prepared = m.confirmation_context('private:10001', mid)
+            review = self.evidence_review(mid)
+            review['relations'] = [{'id':r['id'], 'relation':'coexist', 'confidence':.99, 'evidence':r['quote']} for r in prepared['context']['related']]
+            return m.save_review_page('private:10001', mid, 'confirm', prepared['context']['offset'], review)
+        self.assertTrue(save_current()['pending'])
+        self.assertFalse(save_current()['pending'])
+        previous = m.confirmation_context('private:10001', mid)
+        added = self.add('新加入的事实', confirmed=True, source_text='一个新事实', source_id='added')
+        changed = m.confirmation_context('private:10001', mid)
+        self.assertTrue(changed['needed'])
+        self.assertIn(added, [r['id'] for r in changed['context']['related']])
+        self.assertGreaterEqual(changed['reviewed'], 9)  # Only the page containing the new pair costs a call.
+        self.assertIsNotNone(changed['evidenceVerdict'])
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', mid, auto_revision=previous['context']['revision'])
+        self.assertFalse(save_current()['pending'])
+        with m.db() as c:
+            c.execute("UPDATE memories SET source_text='更正旧事实的原话' WHERE id=?", (old[0],))
+        changed = m.confirmation_context('private:10001', mid)
+        self.assertTrue(changed['needed'])
+        self.assertIn(old[0], [r['id'] for r in changed['context']['related']])
+        self.assertGreaterEqual(changed['reviewed'], 9)
+        self.assertFalse(save_current()['pending'])
+        with m.db() as c:
+            c.execute("UPDATE memories SET source_text='我不喜欢茶' WHERE id=?", (mid,))
+        invalid = m.confirmation_context('private:10001', mid)
+        self.assertIsNone(invalid['evidenceVerdict'])
+        self.assertEqual(invalid['reviewed'], 0)
+
+    def test_joint_verdict_requires_both_source_and_relations_without_lowering_thresholds(self):
+        cases = [('supported', False, 'coexist', .99), ('speakerMatches', False, 'coexist', .99),
+                 ('literal', False, 'coexist', .99), ('current', False, 'coexist', .99),
+                 ('confidence', .94, 'coexist', .99), ('supported', True, 'conflict', .99),
+                 ('supported', True, 'replace', .99), ('supported', True, 'uncertain', .99),
+                 ('supported', True, 'coexist', .89)]
+        for i, (field, value, relation, confidence) in enumerate(cases):
+            with self.subTest(case=i):
+                scope='private:'+str(40000+i);subject=str(40000+i)
+                peer=self.add('已有记忆',scope=scope,subject=subject,confirmed=True)
+                mid=self.add('候选记忆',scope=scope,subject=subject,source_text='完整原话',source_id='message')
+                p=m.confirmation_context(scope,mid);review=self.evidence_review(mid,scope=scope)
+                review['evidenceVerdict'][field]=value
+                review['relations']=[{'id':peer,'relation':relation,'confidence':confidence,'evidence':p['context']['related'][0]['quote']}]
+                m.save_review_page(scope,mid,'confirm',0,review)
+                with self.assertRaises(m.MemoryConflict):
+                    m.confirm_memory(scope,mid,auto_revision=review['revision'])
+                self.assertEqual(self.row(mid)['status'],'candidate')
+                self.assertEqual(self.row(peer)['status'],'active')
+
+    def test_durable_receipts_do_not_cross_chats_speakers_or_source_versions(self):
+        scope='group:30001'
+        self.add('旧事实',scope=scope,subject='10001',confirmed=True)
+        mid=self.add('喜欢茶',scope=scope,subject='10001',source_text='我喜欢茶',source_id='same-message')
+        p=m.confirmation_context(scope,mid);review=self.evidence_review(mid,scope=scope)
+        review['relations']=[{'id':r['id'],'relation':'coexist','confidence':.99,'evidence':r['quote']} for r in p['context']['related']]
+        m.save_review_page(scope,mid,'confirm',0,review)
+        # Every call reopens SQLite: successful reuse survives connection/process-local cache loss.
+        self.assertFalse(m.confirmation_context(scope,mid)['needed'])
+        self.assertIsNotNone(m.confirmation_context(scope,mid)['evidenceVerdict'])
+        for other_scope,subject in [('group:30002','10001'),(scope,'20002')]:
+            other=self.add('喜欢茶',scope=other_scope,subject=subject,source_text='我喜欢茶',source_id='same-message')
+            self.assertIsNone(m.confirmation_context(other_scope,other)['evidenceVerdict'])
+        with m.db() as c:
+            c.execute("UPDATE memories SET subject_id='20002' WHERE id=?",(mid,))
+        self.assertIsNone(m.confirmation_context(scope,mid)['evidenceVerdict'])
+        with m.db() as c:
+            c.execute("UPDATE memories SET subject_id='10001',source_id='corrected-message' WHERE id=?",(mid,))
+        invalid=m.confirmation_context(scope,mid)
+        self.assertIsNone(invalid['evidenceVerdict']);self.assertEqual(invalid['reviewed'],0)
+
 
 
 if __name__ == '__main__':

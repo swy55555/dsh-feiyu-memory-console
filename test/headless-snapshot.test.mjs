@@ -6,9 +6,9 @@ const source=fs.readFileSync(new URL('../bridge/bridge-v09.js',import.meta.url),
 const start={type:'turn/start',data:{turn:1}},message={type:'assistant/message',data:{turn:1,text:'validated-result'}},end={type:'turn/end',data:{turn:1,reason:{kind:'completed'}}};
 function harness(){
  const resolved=[],rejected=[];
- const ctx=vm.createContext({learnerFeatures:new Map([['fresh','candidate_review']]),learnerSessions:new Set(['fresh','legacy','chat']),learnerWaiters:new Map([['fresh',[{resolve:x=>resolved.push(x),reject:e=>rejected.push(e.message),timer:0}]]]),learnerCollectors:new Map(),reverse:new Map([['chat','private:1']]),slangLearnerSessionId:'legacy',clearTimeout:()=>{},
+ const ctx=vm.createContext({learnerFeatures:new Map([['fresh','candidate_review']]),learnerSessions:new Set(['fresh','legacy','chat']),learnerWaiters:new Map([['fresh',[{resolve:x=>resolved.push(x),reject:e=>rejected.push(e.message),timer:0}]]]),learnerCollectors:new Map(),reverse:new Map([['chat','private:1']]),clearTimeout:()=>{},
  createTurnCollector:()=>{const turns=new Map();return{push(e){const id=e.data?.turn;if(e.type==='turn/start')turns.set(id,'');if(e.type==='assistant/message'&&turns.has(id))turns.set(id,turns.get(id)+e.data.text);if(e.type==='turn/end'&&turns.has(id)){const text=turns.get(id);turns.delete(id);return{text,reason:e.data.reason}}}}}});
- const a=source.indexOf('  function acceptLearnerEvent('),b=source.indexOf('  async function runSlangExtraction(',a);
+ const a=source.indexOf('  function acceptLearnerEvent('),b=source.indexOf('  function withCurrentTime(',a);
  vm.runInContext(source.slice(a,b),ctx);return{ctx,resolved,rejected};
 }
 test('snapshot start plus live completion resolves the active background request',()=>{

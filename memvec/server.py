@@ -177,6 +177,25 @@ def db() -> sqlite3.Connection:
         created_at REAL NOT NULL,
         PRIMARY KEY(scope,memory_id,operation,revision,page_offset)
     )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS memory_evidence_reviews (
+        scope TEXT NOT NULL, memory_id TEXT NOT NULL, operation TEXT NOT NULL,
+        revision TEXT NOT NULL, schema_version INTEGER NOT NULL, verdict TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        PRIMARY KEY(scope,memory_id,operation,revision)
+    )""")
+    # Pair receipts remain valid when unrelated facts are added or reordered.
+    # Full-set revisions still guard final confirmation and concurrent writes.
+    conn.execute("""CREATE TABLE IF NOT EXISTS memory_pair_receipts (
+        scope TEXT NOT NULL, memory_id TEXT NOT NULL, operation TEXT NOT NULL,
+        related_id TEXT NOT NULL, candidate_hash TEXT NOT NULL, related_hash TEXT NOT NULL,
+        verdict TEXT NOT NULL, created_at REAL NOT NULL,
+        PRIMARY KEY(scope,memory_id,operation,related_id)
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS memory_source_receipts (
+        scope TEXT NOT NULL, memory_id TEXT NOT NULL, operation TEXT NOT NULL,
+        candidate_hash TEXT NOT NULL, verdict TEXT NOT NULL, created_at REAL NOT NULL,
+        PRIMARY KEY(scope,memory_id,operation)
+    )""")
     existing = {r[1] for r in conn.execute('PRAGMA table_info(memories)')}
     for col, definition in {
         'status': "TEXT NOT NULL DEFAULT 'active'", 'fact_key': "TEXT NOT NULL DEFAULT ''",
@@ -302,17 +321,75 @@ def _cached_reviews(conn, candidate, operation):
         'SELECT page_offset,review FROM memory_review_pages WHERE scope=? AND memory_id=? AND operation=? AND revision=?',
         (candidate['scope'], candidate['id'], operation, context['revision']))}
     next_offset = None
+    candidate_hash = _review_fingerprint(candidate)
+    pairs = {r['related_id']: r for r in conn.execute(
+        'SELECT * FROM memory_pair_receipts WHERE scope=? AND memory_id=? AND operation=? AND candidate_hash=?',
+        (candidate['scope'], candidate['id'], operation, candidate_hash))}
     for offset in range(0, len(rows), 8):
         page = {**context, 'related': context['related'][offset:offset+8]}
         try:
             verdict = _validated_review(json.loads(cached.get(offset, 'null')), page)
         except (ValueError, TypeError):
             verdict = None
+        if verdict is None:
+            reused = {}
+            for row, public in zip(rows[offset:offset+8], page['related']):
+                receipt = pairs.get(row['id'])
+                if receipt is None or receipt['related_hash'] != _review_fingerprint(row):
+                    continue
+                try:
+                    single = {**page, 'related': [public]}
+                    saved = {'revision': context['revision'], 'candidateEvidence': context['candidate']['quote'],
+                             'relations': [json.loads(receipt['verdict'])]}
+                    validated = _validated_review(saved, single)
+                    if validated is not None:
+                        reused.update(validated)
+                except (ValueError, TypeError):
+                    pass
+            if len(reused) == len(page['related']):
+                verdict = reused
         if verdict is not None:
             relations.update(verdict)
         elif next_offset is None:
             next_offset = offset
     return context, rows, relations, next_offset
+
+
+def _valid_evidence_verdict(verdict, candidate, revision):
+    if not isinstance(verdict, dict) or verdict.get('id') != candidate['id'] or verdict.get('revision') != revision:
+        return False
+    if not candidate['source_id'] or not candidate['subject_id'] or not candidate['source_text'] or len(candidate['source_text']) > 500:
+        return False
+    if verdict.get('evidence') != candidate['source_text'] or any(type(verdict.get(k)) is not bool for k in ('supported','speakerMatches','literal','current')):
+        return False
+    confidence = verdict.get('confidence')
+    return (not isinstance(confidence, bool) and isinstance(confidence, (int, float)) and math.isfinite(confidence)
+            and 0 <= confidence <= 1 and ('reason' not in verdict or isinstance(verdict['reason'], str) and len(verdict['reason']) <= 100))
+
+
+def _cached_evidence(conn, candidate, operation, revision):
+    rebased = False
+    row = conn.execute('SELECT verdict FROM memory_evidence_reviews WHERE scope=? AND memory_id=? AND operation=? AND revision=? AND schema_version=1',
+                       (candidate['scope'], candidate['id'], operation, revision)).fetchone()
+    if row is None:
+        row = conn.execute('SELECT verdict FROM memory_source_receipts WHERE scope=? AND memory_id=? AND operation=? AND candidate_hash=?',
+                           (candidate['scope'], candidate['id'], operation, _review_fingerprint(candidate))).fetchone()
+        if row is None:
+            return None
+        rebased = True
+    try:
+        value = json.loads(row['verdict'])
+        # Only the dependency-matched receipt is rebased onto the latest set revision.
+        # This cannot confirm a candidate until all current related facts pass too.
+        if rebased:
+            value = {**value, 'revision': revision}
+        return value if _valid_evidence_verdict(value, candidate, revision) else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _accepted_evidence(verdict):
+    return bool(verdict and all(verdict.get(k) is True for k in ('supported','speakerMatches','literal','current')) and verdict.get('confidence', 0) >= .95)
 
 
 def confirmation_context(scope, mid, operation='confirm'):
@@ -326,15 +403,16 @@ def confirmation_context(scope, mid, operation='confirm'):
         full, _, relations, offset = _cached_reviews(conn, candidate, operation)
         context, _ = _review_context(conn, candidate, offset or 0)
         return {'needed': offset is not None, 'context': context,
+                'evidenceVerdict': _cached_evidence(conn, candidate, operation, full['revision']),
                 'evidence': {'id': candidate['id'], 'text': candidate['text'], 'quote': candidate['source_text'],
                              'sourceId': candidate['source_id'], 'subjectId': candidate['subject_id']},
                 'reviewed': len(relations), 'total': full['total']}
 
 
-def save_review_page(scope, mid, operation, offset, review):
+def save_review_page(scope, mid, operation, offset, review, evidence_only=False):
     scope = valid_scope(scope)
     statuses = _activation_statuses(operation)
-    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0 or offset % 8:
+    if type(evidence_only) is not bool or isinstance(offset, bool) or not isinstance(offset, int) or offset < 0 or offset % 8 or evidence_only and offset != 0:
         raise ValueError('invalid review offset')
     with _lock, db() as conn:
         conn.execute('BEGIN IMMEDIATE')
@@ -343,12 +421,33 @@ def save_review_page(scope, mid, operation, offset, review):
         if candidate is None:
             raise MemoryConflict('记忆状态已变化，请重新开始复核')
         context, rows = _review_context(conn, candidate, offset)
-        if not rows or _validated_review(review, context) is None:
+        if not isinstance(review, dict) or review.get('revision') != context['revision']:
+            raise MemoryConflict('复核版本已变化，已有事实未改变')
+        evidence = review.get('evidenceVerdict')
+        if 'evidenceVerdict' in review and not _valid_evidence_verdict(evidence, candidate, context['revision']):
+            raise MemoryConflict('原话核对回执无效，已有事实未改变')
+        if evidence_only:
+            if evidence is None or review.get('relations') != [] or review.get('candidateEvidence') != context['candidate']['quote']:
+                raise MemoryConflict('原话核对回执不完整，已有事实未改变')
+        elif not rows or _validated_review(review, context) is None:
             raise MemoryConflict('复核版本已变化或该批证据不完整；已有事实未改变')
-        conn.execute('DELETE FROM memory_review_pages WHERE scope=? AND memory_id=? AND operation=? AND revision<>?',
-                     (scope, mid, operation, context['revision']))
-        conn.execute('INSERT OR REPLACE INTO memory_review_pages VALUES (?,?,?,?,?,?,?)',
-                     (scope, mid, operation, context['revision'], offset, json.dumps(review, ensure_ascii=False), now()))
+        if evidence is not None:
+            conn.execute('DELETE FROM memory_evidence_reviews WHERE scope=? AND memory_id=? AND operation=? AND revision<>?',
+                         (scope, mid, operation, context['revision']))
+            conn.execute('INSERT OR REPLACE INTO memory_evidence_reviews VALUES (?,?,?,?,?,?,?)',
+                         (scope, mid, operation, context['revision'], 1, json.dumps(evidence, ensure_ascii=False), now()))
+            conn.execute('INSERT OR REPLACE INTO memory_source_receipts VALUES (?,?,?,?,?,?)',
+                         (scope, mid, operation, _review_fingerprint(candidate), json.dumps(evidence, ensure_ascii=False), now()))
+        if not evidence_only:
+            conn.execute('DELETE FROM memory_review_pages WHERE scope=? AND memory_id=? AND operation=? AND revision<>?',
+                         (scope, mid, operation, context['revision']))
+            conn.execute('INSERT OR REPLACE INTO memory_review_pages VALUES (?,?,?,?,?,?,?)',
+                         (scope, mid, operation, context['revision'], offset, json.dumps(review, ensure_ascii=False), now()))
+            by_id = {item['id']: item for item in review['relations']}
+            for row in rows:
+                conn.execute('INSERT OR REPLACE INTO memory_pair_receipts VALUES (?,?,?,?,?,?,?,?)',
+                             (scope, mid, operation, row['id'], _review_fingerprint(candidate), _review_fingerprint(row),
+                              json.dumps(by_id[row['id']], ensure_ascii=False), now()))
         full, _, relations, missing = _cached_reviews(conn, candidate, operation)
         return {'pending': missing is not None, 'reviewed': len(relations), 'total': full['total']}
 
@@ -1226,6 +1325,9 @@ def confirm_batch(scope, mid=None, subject_id=None, prefix='', review=None, auto
             candidate, peers, snapshot = _confirmation_snapshot(conn, scope, mid, review, 'confirm')
             if not isinstance(auto_revision, str) or snapshot['revision'] != auto_revision or peers or snapshot['truncated']:
                 raise MemoryConflict('自动核对期间事实变化或仍有不确定关系，未确认', snapshot)
+            _, _, _, missing = _cached_reviews(conn, candidate, 'confirm')
+            if missing is not None or not _accepted_evidence(_cached_evidence(conn, candidate, 'confirm', snapshot['revision'])):
+                raise MemoryConflict('原话或历史审核尚未完整通过，未自动确认')
             if not candidate['source_text'] or len(candidate['source_text']) > 500 or not candidate['source_id'] or (candidate['expires_at'] and candidate['expires_at'] <= now()):
                 raise MemoryConflict('来源不完整或事实已到期，未自动确认')
         # Capture all affected rows, including facts superseded by a confirmation.
@@ -1312,8 +1414,8 @@ def stats() -> dict:
         messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         summaries = conn.execute("SELECT COUNT(*) FROM session_summaries WHERE status='active'").fetchone()[0]
     return {
-        'version': '0.9.1',
-        'capabilities': ['confirmation-relation-groups', 'auto-confirm-guard', 'source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
+        'version': '0.10.0',
+        'capabilities': ['combined-confirm-review', 'confirmation-relation-groups', 'auto-confirm-guard', 'source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
         'embed_threads': EMBED_THREADS,
         'index': 'exact-cache',
         'ann_threshold': ANN_MIN,
@@ -1438,7 +1540,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {'ok': True, **confirmation_context(b.get('scope'), b.get('id'), b.get('operation', 'confirm'))})
             elif self.path == '/confirm/review':
                 b = self._body()
-                self._send(200, {'ok': True, **save_review_page(b.get('scope'), b.get('id'), b.get('operation', 'confirm'), b.get('offset'), b.get('review'))})
+                self._send(200, {'ok': True, **save_review_page(b.get('scope'), b.get('id'), b.get('operation', 'confirm'), b.get('offset'), b.get('review'), b.get('evidenceOnly', False))})
             elif self.path == '/restore':
                 b = self._body()
                 self._send(200, {'ok': True, **restore_memory(b.get('scope'), b.get('id'), b.get('resolution'), b.get('revision'), b.get('review'))})
