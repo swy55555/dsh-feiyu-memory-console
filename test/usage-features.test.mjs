@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {createTokenLedger} from '../bridge/feature-token-ledger.mjs';
 import {featureKey} from '../bridge/usage-features.mjs';
+import {classifyHistory, readSession} from '../scripts/audit-usage-history.mjs';
+import zlib from 'node:zlib';
 
 function fixture(t, options={}) {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'feiyu-usage-'));
@@ -77,4 +79,64 @@ test('snapshot-covered samples and later snapshots never double-count compacted 
   assert.equal(f.ledger.summary().plugin.totalTokens,960);
   f.ledger.compact();
   assert.equal(createTokenLedger({file:f.file}).summary().plugin.totalTokens,960);
+});
+
+test('reviewed history reclassifies mixed old labels and excludes only proven slang everywhere',t=>{
+  const f=fixture(t), old='internal:黑话学习';
+  f.add('slang',old);f.add('memory',old);f.add('unknown',old);f.add('chat','private:1');
+  // Exercise cumulative-only history as well as retained per-turn samples.
+  f.ledger.ingestBaseline({sessionId:'slang',projection:{asOfSeq:1,values:{tokenUsage:{cacheMiss:100,output:20}}},at:f.at});
+  const before=f.ledger.summary(),raw=fs.readFileSync(f.file);
+  const entries={slang:{previousKey:old,key:'excluded:legacy-slang',excluded:true,evidenceHash:'a'.repeat(64)},memory:{previousKey:old,key:featureKey('memory_extract'),excluded:false,evidenceHash:'b'.repeat(64)}};
+  fs.writeFileSync(f.file+'.attribution.json',JSON.stringify({version:1,entries}));
+  const ledger=createTokenLedger({file:f.file,now:()=>f.at}),s=ledger.summary({limit:1}),series=ledger.series();
+  assert.equal(s.totals.totalTokens,360);assert.equal(s.plugin.totalTokens,120);
+  assert.equal(s.historyAudit.excludedTokens,120);assert.equal(s.historyAudit.pending.sessions,1);
+  assert.ok(Math.abs(before.totals.cost-s.totals.cost-s.historyAudit.excludedCost)<1e-12);
+  assert.equal(series.totals.tokens,360);assert.equal(series.offChartTokens,0);
+  assert.equal(series.buckets.reduce((n,b)=>n+b.tokens,0),360);
+  assert.equal(series.features[0].label,'记忆提取');
+  assert.equal(ledger.conversation('excluded:legacy-slang'),null);
+  assert.equal(ledger.conversation(featureKey('memory_extract')).turns[0].key,featureKey('memory_extract'));
+  assert.equal(ledger.recent().some(r=>r.sessionId==='slang'),false);
+  assert.deepEqual(fs.readFileSync(f.file),raw,'review must not rewrite raw journal');
+  ledger.compact();
+  assert.ok(fs.readFileSync(f.file,'utf8').includes(old));
+  assert.equal(createTokenLedger({file:f.file,now:()=>f.at}).summary().totals.totalTokens,360);
+  fs.unlinkSync(f.file+'.attribution.json');
+  assert.equal(createTokenLedger({file:f.file,now:()=>f.at}).summary().totals.totalTokens,before.totals.totalTokens,'removing correction restores all raw totals');
+});
+
+test('exclusions cover compacted totals; invalid or stale corrections never remove unrelated usage',t=>{
+  const f=fixture(t,{maxLines:1}),old='internal:黑话学习';
+  f.add('slang',old, f.at-2,100,1);f.add('slang',old,f.at-1,100,2);
+  const entry={previousKey:old,key:'excluded:legacy-slang',excluded:true,evidenceHash:'a'.repeat(64)};
+  const file=f.file+'.attribution.json';fs.writeFileSync(file,JSON.stringify({version:1,entries:{slang:entry}}));
+  let ledger=createTokenLedger({file:f.file,now:()=>f.at});
+  assert.equal(ledger.summary().historyAudit.excludedTokens,240);
+  assert.equal(ledger.series().offChartTokens,0);assert.equal(ledger.series().totals.tokens,0);
+  ledger=createTokenLedger({file:f.file,resolveKey:()=> 'private:1',now:()=>f.at});
+  assert.equal(ledger.summary().totals.totalTokens,240);
+  fs.writeFileSync(file,JSON.stringify({version:1,entries:{slang:{...entry,evidenceHash:''}}}));
+  ledger=createTokenLedger({file:f.file,now:()=>f.at});
+  assert.equal(ledger.summary().totals.totalTokens,240);assert.ok(ledger.summary().historyAudit.error);
+});
+
+test('historical attribution requires trusted workspace, exact entry templates and a single purpose',()=>{
+  const home=path.resolve('synthetic-home'),meta={type:'session',cwd:path.join(home,'qq-bridge/state/memory-agent'),agentPreset:'qq-memory'};
+  const msg=text=>({type:'user/message',data:{message:{content:[{type:'text',text}]}}});
+  const extract=msg('你是无工具的记忆整理器。下面是合成材料');
+  assert.equal(classifyHistory([meta,extract],home).key,featureKey('memory_extract'));
+  assert.equal(classifyHistory([{...meta,cwd:home},extract],home).key,undefined);
+  assert.equal(classifyHistory([meta,extract,msg('你是角色的短程话题联想器，没有工具。')],home).key,undefined);
+  assert.equal(classifyHistory([meta,extract,msg('未知任务')],home).key,undefined);
+  const slang={...meta,cwd:path.join(home,'qq-bridge/state/slang-agent'),agentPreset:'qq-chat'};
+  assert.equal(classifyHistory([slang,msg('你是一个群聊黑话学习器。合成数据'),msg('你是群聊黑话研究员。合成数据')],home).excluded,true);
+  assert.equal(classifyHistory([slang,extract],home).excluded,undefined);
+});
+
+test('audit reads all concatenated zstd frames rather than just the metadata frame',t=>{
+  const f=fixture(t),file=f.file+'.zstd';
+  fs.writeFileSync(file,Buffer.concat([{type:'session'},{type:'turn/start'},{type:'turn/end'}].map(r=>zlib.zstdCompressSync(Buffer.from(JSON.stringify(r)+'\n')))));
+  assert.deepEqual(readSession(file).map(r=>r.type),['session','turn/start','turn/end']);
 });

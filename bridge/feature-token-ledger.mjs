@@ -1,5 +1,5 @@
 // Based on the installed QQ bridge ledger; preserves its journal format and pricing semantics.
-import {isPluginKey, featureLabel} from './usage-features.mjs';
+import {isPluginKey, featureLabel, FEATURE_LABELS} from './usage-features.mjs';
 // Token 用量账本：把 DSH 会话事件里的 provider usage 落成「按会话 × 按回合」的可查明细，
 // 并在读取时用价目表折算成金额。
 //
@@ -106,6 +106,7 @@ export function createTokenLedger({
   log = () => {},
   priceTable = DEFAULT_PRICE_TABLE,
   resolveKey,
+  attributionFile = `${file}.attribution.json`,
   maxLines = 20000,
   now = () => Date.now()
 } = {}) {
@@ -130,7 +131,30 @@ export function createTokenLedger({
   let lastCompactedAt = 0;
   let droppedLines = 0;
 
-  function keyOf(sessionId) {
+  // Explicit, offline-reviewed corrections; never infer a purpose from live chat text.
+  const historicalKeys = new Set(['internal:黑话学习', 'internal:插件', 'internal:可塑性记忆']);
+  const excludedKey = 'excluded:legacy-slang';
+  let corrections = {}, attributionError = '';
+  try {
+    const value = JSON.parse(fs.readFileSync(attributionFile, 'utf8'));
+    if (value.version !== 1 || !value.entries || typeof value.entries !== 'object' || Array.isArray(value.entries)) throw Error('invalid attribution file');
+    for (const [sid, entry] of Object.entries(value.entries)) {
+      const knownFeature = Object.keys(FEATURE_LABELS).some(f => entry?.key === `internal:可塑性记忆:${f}`);
+      if (!sid || !historicalKeys.has(entry?.previousKey) ||
+          !((entry.excluded === true && entry.key === excludedKey) || (entry.excluded === false && knownFeature)) ||
+          !/^[a-f0-9]{64}$/.test(entry.evidenceHash || '')) throw Error('invalid attribution entry');
+    }
+    corrections = value.entries;
+  } catch (error) {
+    if (error.code !== 'ENOENT') { attributionError = '历史核对文件无法读取，已保留原统计'; log(attributionError); }
+  }
+  function correctionOf(sessionId) {
+    const entry = corrections[sessionId];
+    return entry && entry.previousKey === rawKeyOf(sessionId) ? entry : null;
+  }
+  function keyOf(sessionId) { return correctionOf(sessionId)?.key ?? rawKeyOf(sessionId); }
+  function excluded(sessionId) { return correctionOf(sessionId)?.excluded === true; }
+  function rawKeyOf(sessionId) {
     let key;
     try {
       key = resolveKey?.(sessionId);
@@ -410,7 +434,7 @@ export function createTokenLedger({
     const buckets = normalizeUsage(raw);
     if (totalTokensOf(buckets) === 0) return false;
 
-    const key = keyOf(sessionId);
+    const key = rawKeyOf(sessionId);
     const sk = sampleKeyOf(sessionId, turn, step, retry);
     const prev = samples.get(sk);
     if (prev && seq >= 0 && prev.seq >= seq) return false;
@@ -450,7 +474,7 @@ export function createTokenLedger({
     const gone = evicted.get(sessionId);
     if (Number.isFinite(gone?.maxSeq) && seq < gone.maxSeq) return false;
     if (Number.isFinite(gone?.maxSeq) && seq >= gone.maxSeq) {evicted.delete(sessionId);evictedDirty=true;}
-    const key = keyOf(sessionId);
+    const key = rawKeyOf(sessionId);
     const same = prev && prev.seq === seq
       && prev.buckets.cacheMiss === buckets.cacheMiss
       && prev.buckets.cacheHit === buckets.cacheHit
@@ -530,7 +554,7 @@ export function createTokenLedger({
       if (!row) {
         row = {
           sessionId: s.sessionId,
-          key: s.key,
+          key: keyOf(s.sessionId) ?? s.key,
           turn: s.turn,
           steps: 0,
           attempts: 0,
@@ -647,7 +671,29 @@ export function createTokenLedger({
       byKey.get(bucketKey).push(sid);
     }
     const conversations = [];
-    for (const [key, sids] of byKey) conversations.push(sessionView(key, sids, index));
+    const removed = [];
+    for (const [key, sids] of byKey) {
+      const view = sessionView(key, sids, index);
+      (key === excludedKey ? removed : conversations).push(view);
+    }
+    const auditGroups = new Map();
+    const pending = [];
+    for (const sid of allSessionIds()) {
+      const correction = correctionOf(sid);
+      if (correction) {
+        const key = correction.key;
+        if (!auditGroups.has(key)) auditGroups.set(key, []);
+        auditGroups.get(key).push(sid);
+      } else if (historicalKeys.has(rawKeyOf(sid))) pending.push(sid);
+    }
+    const historyAudit = {
+      error: attributionError,
+      groups: [...auditGroups].map(([key, sids]) => ({...sessionView(key, sids, index),
+        label: key === excludedKey ? '旧黑话提取／研究' : featureLabel(key), excluded: key === excludedKey})),
+      pending: sessionView('pending', pending, index),
+      excludedCost: removed.reduce((n, row) => n + row.cost, 0),
+      excludedTokens: removed.reduce((n, row) => n + totalTokensOf(row.buckets), 0),
+    };
     conversations.sort((a, b) => b.cost - a.cost || totalTokensOf(b.buckets) - totalTokensOf(a.buckets));
 
     const totals = {
@@ -708,6 +754,7 @@ export function createTokenLedger({
         avgCostPerStep: totals.steps > 0 ? totals.cost / totals.steps : 0
       },
       featureAccountingVersion: 1,
+      historyAudit,
       features, plugin, legacy: legacy ? {...legacy, totalTokens: totalTokensOf(legacy.buckets)} : null,
       conversations: conversations.slice(0, Math.max(1, Math.min(500, Number(limit) || 200)))
     };
@@ -718,7 +765,7 @@ export function createTokenLedger({
     if (typeof key !== 'string' || !key) return null;
     const sids = [];
     for (const sid of allSessionIds()) {
-      if (keyOf(sid) === key) sids.push(sid);
+      if (!excluded(sid) && keyOf(sid) === key) sids.push(sid);
     }
     if (!sids.length) return null;
     const index = buildIndex();
@@ -794,15 +841,18 @@ export function createTokenLedger({
     let ledgerCost = 0;
     let ledgerBuckets = { ...ZERO_BUCKETS };
     for (const e of evicted.values()) {
+      if (excluded(e.sessionId)) continue;
       ledgerCost += Number(e.cost) || 0;
       ledgerBuckets = addBuckets(ledgerBuckets, e.buckets);
     }
     for (const base of baselines.values()) {
+      if (excluded(base.sessionId)) continue;
       // 与 sessionView() 同口径：基线没有逐时明细，按快照时刻（缺失时取当前）整体计价。
       ledgerCost += priceUsage(base.buckets, { model: base.model, at: base.t || now(), table: priceTable }).cost.total;
       ledgerBuckets = addBuckets(ledgerBuckets, base.buckets);
     }
     for (const s of samples.values()) {
+      if (excluded(s.sessionId)) continue;
       // 这条采样的计价只算一次：窗口内的桶与窗口外的"总额"共用同一个 p。
       const p = priceUsage(s.buckets, { model: s.model, at: s.t || endAt, table: priceTable });
       const tokens = totalTokensOf(s.buckets);
@@ -894,7 +944,7 @@ export function createTokenLedger({
   /** 最近采样流水（实时观察用，按时间倒序）。 */
   function recent(limit = 50) {
     const n = Math.max(1, Math.min(500, Number(limit) || 50));
-    const all = [...samples.values()].sort((a, b) => b.t - a.t);
+    const all = [...samples.values()].filter(s => !excluded(s.sessionId)).sort((a, b) => b.t - a.t);
     const out = [];
     for (const s of all.slice(0, n)) {
       const p = priceUsage(s.buckets, { model: s.model, at: s.t || now(), table: priceTable });

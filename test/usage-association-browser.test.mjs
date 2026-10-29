@@ -26,7 +26,7 @@ try {
     let body={ok:true};
     if(p==='/overview')body={...body,active:1,total:1,candidate:0,scopes:[],recent:[],fading:[],idleAssociation:true,idleAffect:false,health:{ok:true,capabilities:['emotion'],bridge:{ok:true}}};
     else if(p==='/context/keys')body={...body,keys:[]};
-    else if(p==='/usage')body={...body,tokens:{symbol:'¥',totals:{cost:48,totalTokens:24000},features:[feature],conversations:[]}};
+    else if(p==='/usage')body={...body,tokens:{symbol:'¥',totals:{cost:48,totalTokens:24000},features:[feature],conversations:[],historyAudit:{excludedCost:3,groups:[{label:'旧黑话提取／研究',excluded:true,cost:3,sessions:2,buckets:{output:300}},{label:'记忆提取',excluded:false,cost:1,sessions:1,buckets:{output:100}}],pending:{sessions:1,cost:.25}}}};
     else if(p==='/usage/series') {
       const hours=Number(u.searchParams.get('hours'));periods.push(hours);const span=hours*3600000, bucketMs=span/48;
       body={...body,series:{featureAccountingVersion:1,from:now-span,to:now,bucketMs,features:[feature],buckets:Array.from({length:48},(_,i)=>({t:now-span+i*bucketMs,cost:1,pluginCost:.5,pluginTokens:250}))}};
@@ -47,6 +47,11 @@ try {
     assert.equal(await page.locator('[title*="总 ¥"]').count(),48);
   }
   assert.deepEqual(periods,[24,168,720]);
+  await page.getByRole('heading',{name:'历史费用核对',exact:true}).waitFor();
+  await page.getByText('旧黑话提取／研究（已剔除）',{exact:true}).waitFor();
+  await page.getByText('记忆提取（已归类）',{exact:true}).waitFor();
+  assert.ok(await page.getByText(/仍有 1 个历史会话待核实/).count());
+  assert.ok(await page.getByText(/模型服务商已收费用不会退回/).count());
   await page.goto(url+'/#/overview');
   await page.getByRole('heading',{name:'补充关联记忆'}).waitFor();
   await page.getByRole('link',{name:'查看当前心绪',exact:true}).click();

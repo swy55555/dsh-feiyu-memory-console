@@ -1636,7 +1636,7 @@ function renderCost() {
   const segs = [
     ['可塑性记忆', pluginCost, colors.plugin],
     ['角色对话', roleCost, colors.role],
-    ['历史内部', legacyCost, colors.legacy],
+    ['历史来源待核实', legacyCost, colors.legacy],
   ].filter(([, v]) => Number(v) > 0)
   let acc = 0
   const stops = []
@@ -1670,9 +1670,9 @@ function renderCost() {
     ),
     el('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' } },
       card('可塑性记忆', cur + pluginCost.toFixed(2), '占 ' + pct + '% · ' + fmtNum(pluginTokens) + ' tokens', colors.plugin),
-      card('角色对话', cur + roleCost.toFixed(2), fmtNum(roleTokens) + ' tokens', colors.role),
-      card('历史内部', cur + legacyCost.toFixed(2), '旧标签，未计入插件', colors.legacy),
-      card('总花费', cur + totalCost.toFixed(2), (t.currency || '') + ' · ' + (totals.turns || 0) + ' 轮', '#8fb0ba'),
+      card('角色对话／其他', cur + roleCost.toFixed(2), fmtNum(roleTokens) + ' tokens', colors.role),
+      legacyCost > 0 ? card('历史来源待核实', cur + legacyCost.toFixed(2), '旧黑话标签可能混有其他调用', colors.legacy) : null,
+      card('统计总花费', cur + totalCost.toFixed(2), (t.currency || '') + ' · ' + (totals.turns || 0) + ' 轮' + (t.historyAudit?.excludedCost > 0 ? ' · 已剔除旧黑话' : ''), '#8fb0ba'),
     ),
     el('div', { class: 'card pad', style: { display: 'flex', gap: '20px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' } },
       el('div', {
@@ -1689,15 +1689,27 @@ function renderCost() {
         el('div', { style: { color: 'var(--ink)', fontSize: '14px' }, text: '花费构成' }),
         legend('可塑性记忆', pluginCost, colors.plugin),
         legend('角色对话/其他（含未归属会话）', roleCost, colors.role),
-        legacyCost > 0 ? legend('历史内部（未计入）', legacyCost, colors.legacy) : null,
+        legacyCost > 0 ? legend('历史来源待核实（未计入插件）', legacyCost, colors.legacy) : null,
         unattrCost > 0 ? el('p',{class:'note',text:`其中 ${cur0(unattrCost)} 只有累计值，已包含在上述分类中，无法逐轮展开。`}) : null,
       ),
     ),
     el('section', {class:'card pad'},
       el('h2', {class:'h2',text:'累计 · 功能花费'}),
-      el('p', {class:'note',text:'旧记录没有功能标签的保留为“历史未分项”，不猜测、不重新分摊。计费用量记录含重试；已压缩历史可能只剩累计 token 和金额。'}),
+      el('p', {class:'note',text:'“历史未分项”指旧版未记录具体功能的内部调用，不是新增收费。能核实原始调用模板的历史已重新归类；证据不足的继续保留，不凭词语猜测。计费用量记录含重试；已压缩历史可能只剩累计 token 和金额。'}),
       pluginRows.map(f=>el('div',{class:'mini'},el('span',{class:'t',text:f.label||'历史未分项'}),el('span',{class:'r',text:`${cur0(f.cost)} · ${fmtNum(bucketTotal(f.buckets))} tokens · ${f.steps||0} 条留存计费用量记录`}))),
     ),
+    t.historyAudit ? el('section', {class:'card pad', id:'usage-history-audit'},
+      el('h2', {class:'h2', text:'历史费用核对'}),
+      el('p', {class:'note', text:'下列是历史记录的核对结果，是上方功能费用的历史子集，不能再相加。已剔除项不计入统计总额、比例、趋势图或聊天明细；原始账本保留，模型服务商已收费用不会退回。'}),
+      t.historyAudit.error ? el('p', {class:'note', text:t.historyAudit.error}) : null,
+      (t.historyAudit.groups || []).map(f => el('div', {class:'mini'},
+        el('span', {class:'t', text:f.label + (f.excluded ? '（已剔除）' : '（已归类）')}),
+        el('span', {class:'r', text:`${cur}${Number(f.cost || 0).toFixed(4)} · ${fmtNum(bucketTotal(f.buckets))} tokens · ${f.sessions || 0} 个会话`})
+      )),
+      el('p', {class:'note', text: t.historyAudit.pending?.sessions > 0
+        ? `仍有 ${t.historyAudit.pending.sessions} 个历史会话待核实，约 ${cur}${Number(t.historyAudit.pending.cost || 0).toFixed(4)}；保留原统计，未自动删除。`
+        : '本次可识别的历史内部记录已全部核对，无待核实的旧标签。'})
+    ) : null,
     renderCostChart(d),
     el('div', { class: 'card pad', style: { marginBottom: '14px' } },
       el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '记忆库占用' })),
