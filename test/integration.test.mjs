@@ -95,6 +95,20 @@ try {
   const undoPair = await Promise.all([1, 2].map(() => json(`${realService}/confirm/undo`, op)))
   assert.deepEqual(undoPair.map((r) => r.status).sort(), [200, 409], 'concurrent undo applies only once')
 
+  // Relevance feedback must resolve an actual trace, never trust a supplied query.
+  const mockBridge = await serve((req, res) => {
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ok:true,traces:[{traceId:'trace-real',key:'private:10001',query:'actual query',candidates:[{id:info.new,scope:'private:10001'}],injected:[]}]}))
+  })
+  fs.mkdirSync(path.dirname(core.paths().bridgeConfig), {recursive:true})
+  fs.writeFileSync(core.paths().bridgeConfig, JSON.stringify({consolePort:Number(new URL(mockBridge).port),consoleToken:"isolated-test-token"}))
+  const feedbackBefore=row(info.new)
+  await core.memoryAction('irrelevant', {id:info.new,scope:'private:10001',key:'private:10001',traceId:'trace-real',query:'forged query'})
+  const feedback=JSON.parse(fs.readFileSync(path.join(tmp,'feiyu-memory-console','relevance-feedback.jsonl'),'utf8').trim())
+  assert.equal(feedback.query,'actual query');assert.equal(feedback.traceId,'trace-real');assert.equal(feedback.injected,false)
+  assert.deepEqual(row(info.new),feedbackBefore)
+  await assert.rejects(core.memoryAction('irrelevant', {id:info.new,scope:'private:10001',key:'private:10001',traceId:'forged'}), e=>e.status===409)
+
   // Expiry is stored in seconds; editing must not divide it a second time.
   const expires = Date.now() / 1000 + 86400
   const added = await json(`${realService}/add`, { text: 'temporary plan', scope: 'private:10001', subject_id: '10001', confirmed: true, expires_at: expires })

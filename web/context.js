@@ -1,4 +1,4 @@
-﻿const $ = (sel) => document.querySelector(sel)
+const $ = (sel) => document.querySelector(sel)
 const KEY_RE = /^(private|group):\d+$/
 // 挂在 DSH 下时页面在 /dsh-feiyu-memory/ 前缀里，裸 /api 会打到根路径。
 const BASE = location.pathname.replace(/\/[^/]*$/, '')
@@ -54,10 +54,11 @@ function el(tag, props = {}, ...children) {
   for (const [k, v] of Object.entries(props)) {
     if (k === 'class') node.className = v
     else if (k === 'text') node.textContent = v
+    else if (k === 'style' && v && typeof v === 'object') Object.assign(node.style, v)
     else if (k === 'on') for (const [e, fn] of Object.entries(v)) node.addEventListener(e, fn)
     else if (v !== undefined && v !== null) node.setAttribute(k, v)
   }
-  for (const child of children) if (child) node.append(child)
+  for (const child of children.flat(Infinity)) if (child !== null && child !== undefined && child !== false) node.append(child)
   return node
 }
 
@@ -140,7 +141,8 @@ function renderTraces() {
     box.replaceChildren(el('div', { class: 'muted small', text: '还没有记录。聊一轮后，这里会显示这轮检索到了什么、哪些真的进了提示词。' }))
     return
   }
-  const reasonText = { ok: '正常', 'no-query': '本轮没有检索查询', 'no-memory': '没有召回记忆', error: '检索失败' }
+  const replyText = {partial:'部分发送',queued:'等待模型',running:'处理中',sent:'已发送', 'send-failed':'发送失败',failed:'失败',error:'模型出错',aborted:'已中止','no-reply':'本轮未发送',unknown:'绑定不确定',command:'命令结束'}
+  const reasonText = {'not-needed':'本轮无需记忆',disabled:'召回已关闭', ok: '正常', 'no-query': '本轮没有检索查询', 'no-memory': '没有召回记忆', error: '检索失败' }
   box.replaceChildren(...traces.slice().reverse().map((t) => {
     const injected = new Set((t.injected || []).map((r) => r.id))
     const candidates = Array.isArray(t.candidates) ? t.candidates : []
@@ -151,7 +153,12 @@ function renderTraces() {
     el('b', { text: injected.has(r.id) ? '注入' : '候选' }),
     ' ',
     el('span', { text: `[${r.scope || '?'}] ${String(r.text || '').slice(0, 100)}` }),
-    el('span', { text: ` · ${Number(r.score || 0).toFixed(2)}${r.shared ? ' · 共享' : ''}` }),
+    el('span', { text: ` · ${r.kind || 'search'} · 主体 ${r.subjectId || '未知'} · ${(r.reasons || []).join(' / ')}` }),
+    t.traceId ? el('button', {class:'btn ghost', text:'本轮不相关', on:{click:async(event)=>{
+      const button=event.currentTarget;button.disabled=true
+      try { await api('/api/action',{method:'POST',body:JSON.stringify({op:'irrelevant',id:r.id,scope:r.scope,key:t.key,traceId:t.traceId})});toast('已记录本轮反馈，记忆保持原样') }
+      catch(error) {toast(error.message)} finally {button.disabled=false}
+    }}}) : null,
     ))
     return el('details', { style: { padding: '6px 0', borderTop: '1px solid var(--line)' } },
       el('summary', { style: { cursor: 'pointer' } },
@@ -159,6 +166,7 @@ function renderTraces() {
         el('span', { text: ` · ${reasonText[t.reason] || t.reason || '记录'} · 注入 ${(t.injected || []).length} / 候选 ${candidates.length} · ${Number(t.durationMs || 0)}ms` }),
       ),
       el('div', { style: { marginTop: '6px' } },
+        el('div', { class: 'muted small', text: `回复：${replyText[t.reply?.status] || (t.reply?.ok ? '已发送' : '暂无绑定记录')} · ${Number(t.reply?.sent || 0)} 条 · 回合 ${t.reply?.turnId || '—'}` }),
         el('div', { class: 'muted small', text: '查询：' + String(t.query || '（空）') }),
         rows.length ? el('div', { style: { marginTop: '6px' } }, rows) : el('div', { class: 'muted small', text: '没有候选记录' }),
       ),

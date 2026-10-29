@@ -1,15 +1,16 @@
-﻿# 可塑性记忆
+# 可塑性记忆
 
 > 本地优先的 QQ 角色记忆控制台，DSH 插件形态。
+> v0.8.10 新增情绪系统 v2 和复杂情境按需复核，详见 [升级说明](UPGRADE.md) 与 [复杂情境和用量](docs/complex-emotion.md)。
 
-![version](https://img.shields.io/badge/version-0.8.9-0e5a68)
+![version](https://img.shields.io/badge/version-0.8.10-0e5a68)
 ![license](https://img.shields.io/badge/license-MIT-2e8696)
 ![node](https://img.shields.io/badge/node-24%2B-339933)
 ![platform](https://img.shields.io/badge/platform-Windows-0078d4)
 
-把长期记忆、原文与摘要、日记、性格和情绪放进同一个本地页面：能看、能改、能撤回。所有数据都在本机，不经过外部服务器。
+把长期记忆、原文与摘要、日记、性格和情绪放进同一个本地页面：能看、能改、能撤回。记忆数据库保存在本机；开启聊天、摘要或情绪模型复核时，相应文本会发送给你配置的模型服务。
 
-[使用手册](manual/可塑性记忆-使用手册-0.8.9.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
+[0.8.9 基础手册](manual/可塑性记忆-使用手册-0.8.9.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
 
 ---
 
@@ -141,8 +142,8 @@ node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --check
 node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
 ```
 
-- 一条命令按顺序装齐全部桥接补丁（含记忆共享、群目录、花费归属）；`--check` 只检查，`--apply` 安装，`--undo` 按相反顺序撤销。
-- 单项安装器仍保留在 `bridge/install-*.mjs`，排查时可单独跑。
+- 统一安装七个桥接运行时模块并校验哈希；`--check` 只检查，`--apply` 安装，`--undo` 恢复本次安装前的文件。
+- 升级和回退请使用 `bridge/install-all.mjs`，详见 [升级说明](UPGRADE.md)。
 - `--check` 报 `incompatible` 就不要 `--apply`：说明 `bridge.js` 与补丁版本不匹配，先看 [UPGRADE.md](UPGRADE.md)。
 - 补丁会备份原文件并写回执；撤销用 `--undo`。
 - 如果桥接本身已内置对应逻辑，`--check` 会报 `already-inline`，不会重复插入。
@@ -190,7 +191,7 @@ node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
 | `bedtime.time` | `24:00` | 催睡时间 |
 | `bedtime.sulkCooldownHours` | `20` | 催睡闹脾气的冷却 |
 
-完整字段和默认值见 [使用手册](manual/可塑性记忆-使用手册-0.8.9.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
+完整字段和默认值见 [0.8.9 基础手册](manual/可塑性记忆-使用手册-0.8.9.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
 
 ### 玩梗
 
@@ -334,11 +335,11 @@ node test/browser.test.mjs
 
 ## 文档
 
-- [使用手册（PDF）](manual/可塑性记忆-使用手册-0.8.9.pdf)：逐页功能说明、配置和排查
+- [0.8.9 基础手册（PDF）](manual/可塑性记忆-使用手册-0.8.9.pdf)：逐页功能说明、配置和排查
 - [memvec 技术说明](docs/memvec.md)：技术选型、数据模型、检索与遗忘公式、参考文献
 - [梗库说明](docs/memes.md)：表结构、来源说明、替换与过滤规则
 - [上下文层说明](bridge/P0-CONTEXT.md)：原文、摘要、轮换和预算
-- [更新日志](CHANGELOG.md) · [升级说明](UPGRADE.md)
+- [更新日志](CHANGELOG.md) · [升级说明](UPGRADE.md) 与 [复杂情境和用量](docs/complex-emotion.md)
 
 ## 致谢
 

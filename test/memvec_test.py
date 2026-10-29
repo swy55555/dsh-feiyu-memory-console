@@ -1,4 +1,4 @@
-﻿"""No model downloads: deterministic vectors isolate memory lifecycle behavior."""
+"""No model downloads: deterministic vectors isolate memory lifecycle behavior."""
 import importlib.util
 import json
 import os
@@ -165,6 +165,36 @@ class MemoryLifecycleTests(unittest.TestCase):
         low_row = next(r for r in result if r['id'] == low)
         self.assertAlmostEqual(high_row['retrieval']['importanceFactor'], 1.25)
         self.assertAlmostEqual(low_row['retrieval']['importanceFactor'], 0.85)
+
+    def test_association_fact_source_both_and_expiry(self):
+        for fact, source in [('preference', ''), ('', 'message-1'), ('preference', 'message-1')]:
+            with self.subTest(fact=fact, source=source):
+                with m.db() as c:
+                    c.execute('DELETE FROM memories')
+                seed = self.add('seed', confirmed=True)
+                peer = self.add('peer', confirmed=True)
+                expired = self.add('expired', confirmed=True)
+                with m.db() as c:
+                    c.execute('UPDATE memories SET fact_key=?, source_id=?', (fact, source))
+                    c.execute('UPDATE memories SET expires_at=? WHERE id=?', (m.now()-1, expired))
+                rows = m.associate_memory(seed, 'private:10001')
+                self.assertEqual([r['id'] for r in rows], [peer])
+
+    def test_association_seed_scope_global_toggle_and_limit(self):
+        seed = self.add('seed', scope='group:1', confirmed=True)
+        local = self.add('local', scope='group:1', confirmed=True)
+        shared = self.add('public shared', scope='group:1', confirmed=True)
+        foreign = self.add('foreign', scope='group:2', confirmed=True)
+        with m.db() as c:
+            c.execute("UPDATE memories SET source_id='same'")
+            c.execute("UPDATE memories SET scope='global' WHERE id=?", (shared,))
+        self.assertEqual([r['id'] for r in m.associate_memory(seed, 'group:1')], [local])
+        self.assertEqual(set(r['id'] for r in m.associate_memory(seed, 'group:1', 99, True)), {local, shared})
+        self.assertEqual(m.associate_memory(foreign, 'group:1'), [])
+        self.assertEqual(m.associate_memory(shared, 'group:1'), [])
+        with m.db() as c:
+            c.execute('UPDATE memories SET expires_at=? WHERE id=?', (m.now()-1, seed))
+        self.assertEqual(m.associate_memory(seed, 'group:1'), [])
 
 
 if __name__ == '__main__':

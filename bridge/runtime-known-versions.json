@@ -1,0 +1,52 @@
+[
+  {
+    "version": "0.8.8",
+    "files": {
+      "bridge.js": "6be263814d7643813ef14dd93d5019c6cd6e56ab1560105edf2a8c15aac71ee4",
+      "human-context.mjs": "5ab43f529f6eaaaadca86983de2f0bcd0614d030639bac2c7ee5061cb3802a7c",
+      "emotion.js": "eae86885a333e4636fe21409def5471a663e2d7c272071b3af0e925b09a34397"
+    }
+  },
+  {
+    "version": "0.8.9",
+    "files": {
+      "bridge.js": "63fd3b1ac830dc22be5e27ac4bcb0bd40f70a56278b96c01e6d88c68e137fd37",
+      "human-context.mjs": "a9b9d3f544d76fce04ec86ceac08ae32154bc22fafca89aeff65e43844eb4f6b",
+      "emotion.js": "eae86885a333e4636fe21409def5471a663e2d7c272071b3af0e925b09a34397"
+    }
+  },
+  {
+    "version": "0.8.10-preview.1",
+    "files": {
+      "bridge.js": "2c5a2ca3d08b57fc539026213810866d0166f32a211a60bdd9f45c82ac75b017",
+      "human-context.mjs": "5a0de4c1ba9bb2b80a07c737499d1a76d0156b93562b1a7ebd6667fc4ffcc349",
+      "emotion.js": "388a739ea825459699ec23cd7529a78e96d5c607faf4a29ab34e63a155016baa",
+      "emotion-appraisal.mjs": "2957fed39a0303e9d48cba96a2ccc4f0a88e8b290f5e6a52f0f5ed7ac5a36f88",
+      "turn-traces.mjs": "5a048fd589d168fdf02c4c08282bf4c5a7b672f6b60e8b42d5b46759d8af365c"
+    }
+  },
+  {
+    "version": "0.8.10-preview.2",
+    "files": {
+      "bridge.js": "aa6e11e58f312d5349c970b228ff6c3a7b46c937aa1d9606b95b8b8116e6ab74",
+      "human-context.mjs": "5a0de4c1ba9bb2b80a07c737499d1a76d0156b93562b1a7ebd6667fc4ffcc349",
+      "emotion.js": "151073520367f3983e42f1a298b1e6781bb25b9645f24347a65b98a77228c147",
+      "emotion-appraisal.mjs": "2957fed39a0303e9d48cba96a2ccc4f0a88e8b290f5e6a52f0f5ed7ac5a36f88",
+      "turn-traces.mjs": "5a048fd589d168fdf02c4c08282bf4c5a7b672f6b60e8b42d5b46759d8af365c",
+      "emotion-context.mjs": "ed0a846e6e5be8b326ffceda32e5512cbbc5aee4dc723f8d67e66eb6eb0e8c7c",
+      "appraisal-budget.mjs": "00b551306e3483fb0a1c31d01f183327a03627d11589d184eac92dee703b94c6"
+    }
+  },
+  {
+    "version": "0.8.10-preview.3",
+    "files": {
+      "bridge.js": "9a26c5c95986c6dc7cbbd7e8ecbdd3e77c84cc063f35e77b9fbf59754e221fbc",
+      "human-context.mjs": "5a0de4c1ba9bb2b80a07c737499d1a76d0156b93562b1a7ebd6667fc4ffcc349",
+      "emotion.js": "151073520367f3983e42f1a298b1e6781bb25b9645f24347a65b98a77228c147",
+      "emotion-appraisal.mjs": "2957fed39a0303e9d48cba96a2ccc4f0a88e8b290f5e6a52f0f5ed7ac5a36f88",
+      "turn-traces.mjs": "5a048fd589d168fdf02c4c08282bf4c5a7b672f6b60e8b42d5b46759d8af365c",
+      "emotion-context.mjs": "ed0a846e6e5be8b326ffceda32e5512cbbc5aee4dc723f8d67e66eb6eb0e8c7c",
+      "appraisal-budget.mjs": "bb271e1b372570d5a679e75f096aed33be8e6de873aff16fe104241dcb090256"
+    }
+  }
+]

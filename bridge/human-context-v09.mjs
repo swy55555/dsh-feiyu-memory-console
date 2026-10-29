@@ -1,4 +1,4 @@
-﻿// Research-informed prompt context, not a validated model of human cognition.
+// Research-informed prompt context, not a validated model of human cognition.
 // buildHumanContext is pure and bounded: no model calls, network, timers, writes, or inferred emotions.
 // fetchSessionContext is the one network exception (local memvec only); it never throws and returns [] on failure.
 export const RESPONSE_GUIDANCE = '【回复约束】沿用既有人设、口吻和边界。最新问题或请求优先：先给答案或完成要求，遵守指定数量和格式；不要用闲聊或反问替代能直接给出的答案。只输出对话，不宣告回应策略。分享喜悦时可以一起开心，受挫时可以先有一句贴合事情的短反应，再陪聊或按要求帮忙；用日常说话方式，不固定加感叹词、安慰或追问。情绪不明确时不武断下结论。旧记忆没有直接帮助就不提，不把历史待办硬接到新话题。语音和表情按语境选择。\n';
@@ -71,7 +71,7 @@ export function buildHumanContext({ key, subjectId = '', currentMessage = '', pr
       }
       const hasSource = Boolean(r.evidence?.sourceId || r.source_id);
       const sourceAt = hasSource ? time(r.evidence?.sourceTime, true) || time(r.source_time) : null;
-      byId.set(r.id, { id: r.id, scope, who, text, tier, score, related: !isPriority, associated: r.associated === true, kind: r.associated ? 'associated' : isPriority ? 'priority' : r.shared ? 'shared' : 'search',
+      byId.set(r.id, { id: r.id, scope, who, subject_id: who, tags: r.tags || '', shared: r.shared === true, text, tier, score, related: !isPriority, associated: r.associated === true, kind: r.associated ? 'associated' : isPriority ? 'priority' : r.shared ? 'shared' : 'search',
         at: sourceAt || time(r.created_at), timeBasis: sourceAt ? 'source' : 'stored' });
     }
   }

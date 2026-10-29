@@ -1,4 +1,4 @@
-﻿"""本地记忆向量库 + 遗忘曲线服务（给 QQ 里的鱼用）。
+"""本地记忆向量库 + 遗忘曲线服务（给 QQ 里的鱼用）。
 
 设计：
   - 向量：BAAI/bge-small-zh-v1.5（fastembed，ONNX，CPU 即可）
@@ -706,21 +706,23 @@ def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2, i
     mid = str(memory_id or '').strip()
     if not mid:
         return []
-    limit = max(1, min(3, int(limit)))
+    limit = max(1, min(2, int(limit)))
     with _lock, db() as conn:
         row = conn.execute(
             "SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at,fact_key,status FROM memories WHERE id=? AND status='active'",
             (mid,),
         ).fetchone()
-        if not row:
+        if not row or (row[16] and row[16] <= time.time()):
+            return []
+        if row[3] != scope and not (include_global and row[3] == 'global' and _shareable(row, row[3])):
             return []
         fact_key = str(row[17] or '')
         source_id = str(row[11] or '')
         clauses = []
         params = [mid, scope]
         if fact_key:
-            clauses.append("(fact_key <> '' AND fact_key = ?)")
-            params.append(fact_key)
+            clauses.append("(fact_key <> '' AND fact_key = ? AND subject_id = ?)")
+            params.extend([fact_key, str(row[14] or '')])
         if source_id:
             clauses.append("(source_id <> '' AND source_id = ?)")
             params.append(source_id)
@@ -729,7 +731,7 @@ def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2, i
         scope_sql = "(scope=? OR scope='global')" if include_global else "scope=?"
         sql = ("SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at,fact_key FROM memories "
                "WHERE status='active' AND id <> ? AND " + scope_sql + " AND (expires_at=0 OR expires_at > ?) AND (" + " OR ".join(clauses) + ") LIMIT 12")
-        rows = conn.execute(sql, [*params, time.time()]).fetchall()
+        rows = conn.execute(sql, [*params[:2], time.time(), *params[2:]]).fetchall()
         out = []
         for r in rows:
             if not _shareable(r, r[3]):

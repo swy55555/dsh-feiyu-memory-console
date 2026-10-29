@@ -1,4 +1,4 @@
-﻿// 可塑性记忆 · 控制台前端
+// 可塑性记忆 · 控制台前端
 //
 // 没有框架，没有构建。一个文件，读三个本地数据源。
 // 所有来自记忆正文的文本一律走 textContent / createTextNode，不拼 innerHTML。
@@ -3079,11 +3079,14 @@ function renderEmotion() {
   const weights = S.emotion?.weights || { owner: 1.1, group: 1, private: 0.8 }
   const spanDays = climate.since ? Math.max(0, (Date.now() - Number(climate.since)) / 86400000) : 0
   const sourceName = { owner: '老大', group: '群聊', private: '私聊', world: '外界' }
+  const reviewNames = {reviewed:'模型已复核',pending:'模型复核中',disabled:'本地判断（复核关闭）','not-needed':'本地判断（无需复核）','daily-limit':'本日复核额度已用完','budget-unavailable':'复核额度记录不可用','input-too-long':'消息过长，保守处理','invalid-result':'模型结果无效，保守处理',unavailable:'模型未完成，保守处理','stale-result':'情境已变化，忽略旧结果'}
 
   const hero = el('section', { class: 'hero' },
     el('div', { class: 'kicker', text: 'emotion state' }),
+    el('p', {class:'muted small',text:`判断来源：${reviewNames[e.lastEvent?.review?.status] || '本地判断'}${e.lastEvent?.review?.count ? ` · 今日复核 ${e.lastEvent.review.count} 次（每日无上限）` : ''} · 近期修正 ${(e.corrections || []).length} 次`}),
     el('h2', null, frag('她现在：', el('em', { text: label }), `，强度 ${intensity.toFixed(2)}。`)),
-    el('p', { text: `快变量是“现在”，心情是“今天”，底色是“长期”。情绪不会直接改人格。` }),
+    el('p', { text: `回应态度：${e.stance || '正常交流'}。快变量是“现在”，心情是“今天”，底色是“长期”。` }),
+    el('p', { class:'muted small', text: e.lastCause ? `最近影响情绪的事件：${e.lastCause.kind} · ${(e.lastCause.evidence || []).join(' / ')}（${fmtWhen(e.lastCause.at)}）` : '尚无明确的情绪触发事件' }),
   )
   const stats = el('section', { class: 'stats' },
     statCard(label, '现在', `强度 ${intensity.toFixed(2)}`, intensity > 0.55 ? 'amber' : ''),
@@ -3110,7 +3113,7 @@ function renderEmotion() {
     triggers.length
       ? el('div', { class: 'mini-list' }, triggers.map((t) => el('div', { class: 'mini' },
           el('span', { class: 'd', text: fmtWhen(t.at) }),
-          el('span', { class: 't', text: `${sourceName[t.source] || t.source || '—'}：${t.summary || '—'}` }),
+          el('span', { class: 't', text: `${sourceName[t.source] || t.source || '—'}：${t.summary || '—'} · ${t.kind || '旧事件'} / ${t.target || '未知对象'} · 判断分 ${Number(t.confidence || 0).toFixed(2)}` }),
           el('span', { class: 'r', text: `${t.label || '—'}  V${Number(t.deltaV || 0) >= 0 ? '+' : ''}${Number(t.deltaV || 0).toFixed(2)} / A${Number(t.deltaA || 0) >= 0 ? '+' : ''}${Number(t.deltaA || 0).toFixed(2)}` }),
         )))
       : el('div', { class: 'empty', text: '还没有触发。等她收到第一条有情绪的话。' }),
@@ -3177,9 +3180,9 @@ function renderEmotion() {
         type: 'checkbox', checked: S.emotion?.appraisalModelEnabled === true, disabled: !hasCap('emotion'),
         on: { change: (event) => toggleAppraisalModel(event) },
       }),
-      el('span', { class: 'muted small', text: '模型复核高情绪消息（默认关，只对老大私聊，每天最多 3 次）' }),
+      el('span', { class: 'muted small', text: '按需复核复杂情境（只对老大私聊，每日无上限，按需调用）' }),
     ),
-    el('p', { class: 'note', style: { margin: '4px 0 0' } }, '开：长期情绪会改人格底色，影响之后所有聊天；关：只记录情绪，不改人格。模式「直接应用」会自动改；「只建议」只写建议，需要你点采纳。模型复核开：高情绪消息多一次模型调用（花 token）；关：全程规则，0 token。'),
+    el('p', { class: 'note', style: { margin: '4px 0 0' } }, '开：长期情绪会改人格底色，影响之后所有聊天；关：只记录情绪，不改人格。模式「直接应用」会自动改；「只建议」只写建议，需要你点采纳。模型复核开：复杂情境按需增加一次模型调用（花 token）；关：全程规则，0 token。'),
     drifts.length
       ? el('div', { class: 'mini-list', style: { marginTop: '10px' } }, drifts.map((d) => el('div', { class: 'mini' },
           el('span', { class: 'd', text: fmtWhen(d.at) }),

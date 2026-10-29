@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {canManageRuntime, installRuntime} from './install-runtime-bundle.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +39,7 @@ export function patchSource(input) {
 
 export function install(target, mode = 'check') {
   if (!['check', 'apply', 'undo'].includes(mode)) throw Error('invalid mode');
+  if (canManageRuntime(target)) return installRuntime(target, mode);
   const root = path.resolve(target), sourcePath = path.join(root, 'src', 'bridge.js');
   const modulePath = path.join(root, 'src', 'human-context.mjs');
   const receiptPath = path.join(root, 'human-context-install.json');
