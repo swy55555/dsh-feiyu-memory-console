@@ -123,6 +123,18 @@ try {
   assert.equal(row(current.data.memory.id).status, 'active')
 
   // Relevance feedback must resolve an actual trace, never trust a supplied query.
+  const automatic = await json(`${realService}/add`, {text:'喜欢散步',scope:'private:40004',subject_id:'40004',source_text:'我喜欢散步',source_id:'original-auto'})
+  const autoId=automatic.data.memory.id
+  const autoContext=await json(`${realService}/confirm/context`,{scope:'private:40004',id:autoId})
+  assert.equal(autoContext.data.evidence.quote,'我喜欢散步')
+  assert.equal((await json(`${realService}/confirm`,{scope:'private:40004',id:autoId,autoRevision:'stale'})).status,409)
+  const automaticArgs={scope:'private:40004',id:autoId,automatic:true,autoRevision:autoContext.data.context.revision}
+  await assert.rejects(core.memoryAction('confirm',{...automaticArgs,isStillAllowed:()=>false}),e=>e.status===409)
+  const autoResult=await core.memoryAction('confirm',{...automaticArgs,isStillAllowed:()=>true})
+  assert.equal(autoResult.changed,1);assert.ok(autoResult.auditId)
+  assert.equal((await json(`${api}/api/undo`,{id:autoResult.auditId})).status,200)
+  assert.equal(row(autoId).status,'candidate')
+
   const mockBridge = await serve((req, res) => {
     res.setHeader('content-type', 'application/json')
     res.end(JSON.stringify({ok:true,traces:[{traceId:'trace-real',key:'private:10001',query:'actual query',candidates:[{id:info.new,scope:'private:10001'}],injected:[]}]}))

@@ -32,7 +32,7 @@ try {
       body={...body,series:{featureAccountingVersion:1,from:now-span,to:now,bucketMs,features:[feature],buckets:Array.from({length:48},(_,i)=>({t:now-span+i*bucketMs,cost:1,pluginCost:.5,pluginTokens:250}))}};
     } else if(p==='/association/idle') {
       if(route.request().method()==='POST')posts.push(route.request().postDataJSON());
-      body={...body,status:'waiting-topic',expiresAt:now+600000,nodes:[{kind:'question',topic:'<img src=x onerror=alert(1)> 雨天看什么书？'}],sources:[{text:'喜欢雨声'}],events:[{at:now,status:'waiting-topic'},{at:now-500,status:'injected',topics:['雨天读书']}]};
+      body={...body,enabled:true,affectEnabled:posts.some(p=>p.affectEnabled),status:'waiting-topic',expiresAt:now+600000,nodes:[{kind:'question',topic:'<img src=x onerror=alert(1)> 雨天看什么书？'}],sources:[{text:'喜欢雨声'}],events:[{at:now,status:'waiting-topic'},{at:now-500,status:'injected',topics:['雨天读书']}]};
     } else if(p==='/emotion')body={...body,emotion:{...emptyEmotion(now),subjective:{text:'也许最近忙，我有一点担心',valence:-.02,arousal:.01,expiresAt:now+600000}}};
     else if(p==='/episodes')body={...body,items:[]};
     await route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
@@ -48,11 +48,14 @@ try {
   }
   assert.deepEqual(periods,[24,168,720]);
   await page.goto(url+'/#/overview');
+  await page.getByRole('heading',{name:'补充关联记忆'}).waitFor();
+  await page.getByRole('link',{name:'查看当前心绪',exact:true}).click();
+  await page.getByRole('heading',{name:'空闲联想与主观感受'}).waitFor();
   await page.getByLabel('允许联想产生轻微主观感受（试验）').check();
-  await page.getByText('已开启轻微主观感受',{exact:true}).waitFor();
+  await page.getByText('联想设置已更新',{exact:true}).waitFor();
   assert.deepEqual(posts,[{affectEnabled:true}]);
   await page.getByRole('button',{name:'查看联想去向',exact:true}).click();
-  await page.getByText('本轮不相关，继续暂存',{exact:true}).waitFor();
+  await page.locator('.modal').getByText('本轮不相关，继续暂存',{exact:true}).waitFor();
   assert.ok(await page.getByText(/不代表实际表达/).count());
   assert.equal(await page.locator('.modal img').count(),0);
   await page.getByRole('button',{name:'知道了',exact:true}).click();

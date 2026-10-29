@@ -38,6 +38,7 @@ try{
     await route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
   });
   await page.goto(`http://127.0.0.1:${server.address().port}/#/continuity`);
+  await page.getByRole('button',{name:'文字列表',exact:true}).click();
   await page.getByRole('heading',{name:'当前挂念',exact:true}).waitFor();
   assert.equal(await page.locator('main img').count(),0);
   assert.ok(await page.getByRole('button',{name:/^性格/}).isVisible());

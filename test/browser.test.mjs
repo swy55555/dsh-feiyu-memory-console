@@ -51,6 +51,21 @@ try {
   process.env.FEIYU_MEMVEC_URL = `http://127.0.0.1:${info.port}`
   await health(true)
   await page.goto(`${url}/#/library?scope=private:10001&status=candidate`)
+  let progressCalls=0,releaseProgress;
+  const progressRoute=async route=>{progressCalls++;if(progressCalls===1)await route.fulfill({contentType:'application/json',body:JSON.stringify({ok:true,pending:true,reviewed:8,total:16})});else{await new Promise(r=>releaseProgress=r);await route.fulfill({contentType:'application/json',body:JSON.stringify({ok:true})})}};
+  await page.route('**/api/action',progressRoute);
+  await page.getByRole('button', { name: '确认这条是真的', exact: true }).click();
+  await page.getByText('历史已复核 8/16 条；进度已保存',{exact:true}).waitFor();
+  const contrast=async()=>page.locator('.review-progress').evaluate(node=>{
+    const rgb=s=>s.match(/[\d.]+/g).slice(0,3).map(Number);const l=c=>c.map(x=>{x/=255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4}).reduce((a,x,i)=>a+x*[.2126,.7152,.0722][i],0);
+    const style=getComputedStyle(node),a=l(rgb(getComputedStyle(node.querySelector('.review-progress-text')).color)),b=l(rgb(style.backgroundColor));return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+  });
+  assert.ok(await contrast()>=4.5,'dark progress text contrast');
+  await page.evaluate(()=>document.documentElement.dataset.theme='light');assert.ok(await contrast()>=4.5,'light progress text contrast');
+  await page.evaluate(()=>document.documentElement.dataset.theme='dark');
+  await page.getByRole('button',{name:'停止后续检查',exact:true}).click();
+  while(!releaseProgress)await new Promise(r=>setTimeout(r,20));releaseProgress();
+  await page.locator('.review-progress').waitFor({state:'hidden'});await page.unroute('**/api/action',progressRoute);
   await page.getByRole('button', { name: '确认这条是真的', exact: true }).click()
   await page.locator('select[name="resolution"]').selectOption('use-candidate')
   await page.getByRole('button', { name: '应用选择', exact: true }).click()
@@ -135,15 +150,17 @@ try {
     if(route.request().method()==='POST') idleEnabled=route.request().postDataJSON().enabled
     await route.fulfill({contentType:'application/json',body:JSON.stringify({ok:true,enabled:idleEnabled,status:'ready',nodes:[{kind:'question',topic:'雨声配阅读？<img src=x onerror=alert(1)>'}],sources:[{text:'喜欢雨声'}]})})
   })
-  await page.getByRole('button',{name:'开启空闲联想',exact:true}).click()
-  await page.getByRole('button',{name:'关闭空闲联想',exact:true}).waitFor()
+  await page.getByRole('link',{name:'查看当前心绪',exact:true}).click()
+  await page.getByLabel('启用空闲联想（试验）',{exact:true}).check()
+  await page.getByText('联想设置已更新',{exact:true}).waitFor()
   assert.equal(idleEnabled,true)
   await page.getByRole('button',{name:'查看联想去向',exact:true}).click()
   await page.getByRole('heading',{name:'联想去向',exact:true}).waitFor()
   assert.ok((await page.locator('.modal').innerText()).includes('雨声配阅读'))
   assert.equal(await page.locator('.modal img').count(),0)
   await page.getByRole('button',{name:'知道了',exact:true}).click()
-  await page.getByRole('button',{name:'关闭空闲联想',exact:true}).click()
+  await page.getByLabel('启用空闲联想（试验）',{exact:true}).uncheck()
+  await page.waitForResponse(r=>r.url().includes('/api/association/idle')&&r.request().method()==='GET')
   assert.equal(idleEnabled,false)
   if (process.env.FEIYU_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.FEIYU_SCREENSHOT_DIR, 'startup-checks.png'), fullPage: true })
   // Processing receipts are visible even when the queue is empty, with safe source rendering.

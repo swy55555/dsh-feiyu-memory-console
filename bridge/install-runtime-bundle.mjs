@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.8.13";
+export const RUNTIME_VERSION = "0.8.14";
 const files = {
   "continuity.mjs": "continuity.mjs",
   "feature-token-ledger.mjs": "feature-token-ledger.mjs",

@@ -1,6 +1,6 @@
 {
   "name": "dsh-feiyu-memory-console",
-  "version": "0.8.13",
+  "version": "0.8.14",
   "private": false,
   "description": "可塑性记忆：查看和维护 QQ 角色的长期记忆、日记、性格与情绪；本地优先，支持审计和撤销。",
   "license": "MIT",
@@ -22,7 +22,8 @@
     "simulate:emotion": "node scripts/simulate-emotion.mjs",
     "test:browser:usage": "node test/usage-association-browser.test.mjs",
     "test:browser:continuity": "node test/continuity-browser.test.mjs",
-    "simulate:continuity": "node scripts/simulate-continuity.mjs"
+    "simulate:continuity": "node scripts/simulate-continuity.mjs",
+    "test:browser:ui": "node test/ui-upgrade-browser.test.mjs"
   },
   "type": "module",
   "main": "./lib/index.js",
@@ -52,8 +53,8 @@
     "LICENSE",
     "test",
     "UPGRADE.md",
-    "manual/USER_GUIDE-0.8.13.md",
-    "manual/USER_GUIDE-0.8.13.pdf"
+    "manual/USER_GUIDE-0.8.14.md",
+    "manual/USER_GUIDE-0.8.14.pdf"
   ],
   "dsh": {
     "bundle": {

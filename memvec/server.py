@@ -326,6 +326,8 @@ def confirmation_context(scope, mid, operation='confirm'):
         full, _, relations, offset = _cached_reviews(conn, candidate, operation)
         context, _ = _review_context(conn, candidate, offset or 0)
         return {'needed': offset is not None, 'context': context,
+                'evidence': {'id': candidate['id'], 'text': candidate['text'], 'quote': candidate['source_text'],
+                             'sourceId': candidate['source_id'], 'subjectId': candidate['subject_id']},
                 'reviewed': len(relations), 'total': full['total']}
 
 
@@ -1207,7 +1209,7 @@ def _confirm_one(conn, scope, mid, before, review=None):
     return 1
 
 
-def confirm_batch(scope, mid=None, subject_id=None, prefix='', review=None):
+def confirm_batch(scope, mid=None, subject_id=None, prefix='', review=None, auto_revision=None):
     scope = valid_scope(scope)
     with _lock, db() as conn:
         conn.execute('BEGIN IMMEDIATE')
@@ -1218,6 +1220,14 @@ def confirm_batch(scope, mid=None, subject_id=None, prefix='', review=None):
             (scope, mid, mid, subject_id, subject_id, prefix, prefix)).fetchall()
         if not candidates:
             return {'changed': 0, 'confirmed': 0}
+        if auto_revision is not None:
+            if not mid or len(candidates) != 1:
+                raise MemoryConflict('自动核对只允许单条候选')
+            candidate, peers, snapshot = _confirmation_snapshot(conn, scope, mid, review, 'confirm')
+            if not isinstance(auto_revision, str) or snapshot['revision'] != auto_revision or peers or snapshot['truncated']:
+                raise MemoryConflict('自动核对期间事实变化或仍有不确定关系，未确认', snapshot)
+            if not candidate['source_text'] or len(candidate['source_text']) > 500 or not candidate['source_id'] or (candidate['expires_at'] and candidate['expires_at'] <= now()):
+                raise MemoryConflict('来源不完整或事实已到期，未自动确认')
         # Capture all affected rows, including facts superseded by a confirmation.
         before = {}
         for candidate in candidates:
@@ -1227,12 +1237,12 @@ def confirm_batch(scope, mid=None, subject_id=None, prefix='', review=None):
                 'undo': undo}
 
 
-def confirm_memory(scope, mid, resolution=None, revision=None, review=None):
+def confirm_memory(scope, mid, resolution=None, revision=None, review=None, auto_revision=None):
     if not isinstance(mid, str) or not mid:
         raise ValueError('id is required')
     if resolution is not None:
         return resolve_confirmation(scope, mid, resolution, revision, review)
-    return confirm_batch(scope, mid=mid, review=review)
+    return confirm_batch(scope, mid=mid, review=review, auto_revision=auto_revision)
 
 
 def undo_confirm(scope, operation_id):
@@ -1302,8 +1312,8 @@ def stats() -> dict:
         messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         summaries = conn.execute("SELECT COUNT(*) FROM session_summaries WHERE status='active'").fetchone()[0]
     return {
-        'version': '0.8.13',
-        'capabilities': ['confirmation-relation-groups', 'source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
+        'version': '0.8.14',
+        'capabilities': ['confirmation-relation-groups', 'auto-confirm-guard', 'source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
         'embed_threads': EMBED_THREADS,
         'index': 'exact-cache',
         'ann_threshold': ANN_MIN,
@@ -1434,7 +1444,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {'ok': True, **restore_memory(b.get('scope'), b.get('id'), b.get('resolution'), b.get('revision'), b.get('review'))})
             elif self.path == '/confirm':
                 b = self._body()
-                self._send(200, {'ok': True, **confirm_memory(b.get('scope'), b.get('id'), b.get('resolution'), b.get('revision'), b.get('review'))})
+                self._send(200, {'ok': True, **confirm_memory(b.get('scope'), b.get('id'), b.get('resolution'), b.get('revision'), b.get('review'), b.get('autoRevision'))})
             elif self.path == '/confirm/undo':
                 b = self._body()
                 self._send(200, {'ok': True, **undo_confirm(b.get('scope'), b.get('operationId'))})

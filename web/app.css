@@ -1218,4 +1218,4 @@ details.advanced[open] summary { margin-bottom: 6px; }
 .conflict-comparison { display: grid; gap: 10px; margin-bottom: 16px; }
 .conflict-fact { border: 1px solid var(--line); border-radius: 9px; padding: 12px; overflow-wrap: anywhere; }
 .conflict-fact p { white-space: pre-wrap; margin: 8px 0 0; }
-.review-progress { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:1000; display:flex; align-items:center; gap:12px; max-width:calc(100vw - 24px); padding:12px 16px; background:var(--panel, #fff); color:var(--text, #222); border:1px solid var(--border, #ccc); border-radius:12px; box-shadow:0 4px 22px #0002; }
+.review-progress { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:1000; display:flex; align-items:center; gap:12px; max-width:calc(100vw - 24px); padding:12px 16px; background:var(--panel-solid); color:var(--ink); border:1px solid var(--line-strong); border-radius:12px; box-shadow:0 4px 22px #0002; }

@@ -30,6 +30,9 @@ export function continuityPrompt(message, state, recent = []) {
 "focusIds":["本轮确实相关的已有挂念或认识ID，最多2个"],
 "relationship":{"kind":"none|trust|distrust|closeness|conflict|repair","quote":"当前消息的明确关系表达或空字符串"}}
 appraisal 的 kind/target 只能配对 neutral/none、uncertain/unknown、user_distress/user、third_party/third_party、criticism/task、conflict/character、repair/character、affection/character，confidence/intensity 为0..1，evidence为当前消息逐字摘录数组，最多4段。无法确定用uncertain。
+日常事件不必都是uncertain：明确的普通交流可用neutral，只有指代/语义无法判断才用uncertain。主分类判断关系事件，feelings独立描述本轮有原话依据的细微感受，允许无感受或两种混合，不因每轮聊天机械加分。
+在 appraisal 对象内部可另返回 feelings:[{"kind":"warmth|joy|curiosity|relief|concern|disappointment","intensity":0到1,"evidence":"当前消息逐字片段，最多200字"}]，最多2项。亲切分享可温暖、好消息可轻快、新鲜话题可好奇、澄清误会可安心、用户困扰可牵挂、确有挫折可轻微失落；不是用户每说一句话都必须有情绪。不能把转述的感受当作用户对角色的态度。负面日常感受不等于关系冲突。
+不要把模型判断的置信度当强度；intensity决定感受大小，普通日常通常很轻。保留全部否定、条件与语境，不虚构证据。
 最多更新3条挂念和2条认识。已有同一件事必须使用原ID；不重复创建。pause表示暂不想聊，close表示事情完成或明确取消，已经关闭的事项不能重新打开。用户未主动重提时，不恢复paused挂念。rejected认识不能重新提出，也不能换一种说法复活。ttlHours为1..168，不确定日期用72小时；暂停也必须过期，不用沉默延长。
 用户说明原因有误时revise或reject旧认识；revise只使用本次新证据，不能继承旧认识的支持票。一次事件只有一个来源；摘要、日记、联想都不算独立证据。禁止从没回复、忙碌、任务纠错、引用台词推出关系变差。只有明确针对角色的关系表达才更新relationship；不确定用none。关系修复不自动等于信任完全恢复。
 evidenceKind表示是否真的有新的独立经历：new=用户明确提供新的经历/有效纠正；repeat=同一件事再次叙述、换说法、补话或引用旧事；uncertain=无法确定是不是新经历。已有experiences只用于识别旧事，不能再计票。support必须填此字段；只有明确的新经历才能延长保留或增加支持。无法确定时不能默认new。仅仅又谈起这件事不算新证据。

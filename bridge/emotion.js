@@ -22,6 +22,18 @@ export const EMOTION_PROTOTYPES = [
 const clamp = (n, lo, hi) =>
   Math.max(lo, Math.min(hi, Number.isFinite(Number(n)) ? Number(n) : lo));
 const clone = (x) => JSON.parse(JSON.stringify(x));
+const FEELING_NAMES={warmth:'温暖',joy:'轻快',curiosity:'好奇',relief:'安心',concern:'牵挂',disappointment:'有点失落'};
+const FEELING_SHIFTS={warmth:[.1,.02],joy:[.13,.08],curiosity:[.025,.08],relief:[.07,-.035],concern:[-.025,.055],disappointment:[-.07,.025]};
+function dailyTone(s){
+  let v=0,a=0;const active=[];
+  for(const [kind,level] of Object.entries(s.dailyFeelings?.levels||{})){
+    const shift=FEELING_SHIFTS[kind];if(!shift)continue;
+    const guarded=s.dynamics.conflict>.1&&['warmth','joy','curiosity','relief'].includes(kind);if(guarded)continue;
+    v+=level*shift[0];a+=level*shift[1];if(level>=.05)active.push({kind,label:FEELING_NAMES[kind],level});
+  }
+  return {v:clamp(v,-.04,.09),a:clamp(a,-.03,.06),active:active.sort((a,b)=>b.level-a.level).slice(0,2)};
+}
+
 export function emptyEmotion(now = Date.now()) {
   const climate = () => ({
     valence: 0.12,
@@ -46,6 +58,7 @@ export function emptyEmotion(now = Date.now()) {
       holdValence: 0,
     },
     dynamics: { v: 0, a: 0, conflict: 0, longing: 0, updatedAt: now },
+    dailyFeelings: {levels:{},updatedAt:now,evidence:[]},
     stance: "正常交流",
     lastCause: null,
     lastEvent: null,
@@ -75,6 +88,7 @@ export function normalizeEmotion(raw, now = Date.now()) {
   const s = emptyEmotion(now);
   if (!raw || typeof raw !== "object") return s;
   Object.assign(s, clone(raw));
+  s.dailyFeelings={levels:Object.fromEntries(Object.entries(s.dailyFeelings?.levels||{}).filter(([k])=>Object.hasOwn(FEELING_NAMES,k)).map(([k,v])=>[k,clamp(v,0,.7)])),updatedAt:Number(s.dailyFeelings?.updatedAt)||now,evidence:Array.isArray(s.dailyFeelings?.evidence)?s.dailyFeelings.evidence.slice(0,2):[]};
   s.baseline = { ...DEFAULT_BASELINE, ...s.baseline };
   s.mood = { ...s.baseline, ...s.mood };
   s.state = { ...emptyEmotion(now).state, ...s.state };
@@ -182,16 +196,18 @@ export function moodLabel(s) {
 }
 function render(s, now) {
   s.state.valence = clamp(
-    s.baseline.valence + s.dynamics.v - s.dynamics.longing,
+    s.baseline.valence + s.dynamics.v - s.dynamics.longing + dailyTone(s).v,
     -1,
     1,
   );
-  s.state.arousal = clamp(s.baseline.arousal + s.dynamics.a, 0, 1);
+  s.state.arousal = clamp(s.baseline.arousal + s.dynamics.a + dailyTone(s).a, 0, 1);
   Object.assign(s.state, labelFor(s), {
     updatedAt: now,
     holdUntil: 0,
     holdValence: 0,
   });
+  s.state.feelings=dailyTone(s).active;
+  s.state.nuance=s.state.feelings.map(f=>f.label).join(" / ");
   s.updatedAt = now;
   s.stance =
     s.dynamics.conflict > 0.1
@@ -211,6 +227,10 @@ export function tickEmotion(raw, now = Date.now(), recovery = {}) {
   s.dynamics.a *= decay(opts.emotionHalfLifeMinutes);
   s.dynamics.conflict *= decay(opts.conflictHalfLifeMinutes);
   s.dynamics.longing *= decay(60);
+  const feelingMinutes=Math.max(0,at-s.dailyFeelings.updatedAt)/60000;
+  for(const key of Object.keys(s.dailyFeelings.levels))s.dailyFeelings.levels[key]*=2**(-feelingMinutes/20);
+  s.dailyFeelings.updatedAt=at;
+
   for (const k of ["valence", "arousal"])
     s.mood[k] =
       s.baseline[k] +
@@ -290,13 +310,21 @@ function applyEmotionCore(raw, input = {}, now = Date.now(), recovery = {}) {
     if (d.v > -0.05) d.v = Math.max(-0.05, d.v - 0.025);
     changed = true;
   }
+
+  // Mild, evidenced feelings are independent of relationship judgments and personality training.
+  // A model can be uncertain about a relationship while observing a small everyday feeling.
+  if(semantic&&semantic.confidence>=.65&&input.source==='owner'&&!['neglect','bedtime'].includes(input.kind)){
+    const feelings=(semantic.feelings||[]).filter(f=>f.kind!=='disappointment'||['criticism','conflict','user_distress'].includes(semantic.kind));
+    for(const f of feelings){const old=s.dailyFeelings.levels[f.kind]||0;const target=Math.min(.7,f.intensity)*semantic.confidence;s.dailyFeelings.levels[f.kind]=clamp(old*.4+target*.6,0,.7)}
+    if(feelings.length){s.dailyFeelings.updatedAt=now;s.dailyFeelings.evidence=feelings.map(f=>f.evidence);changed=true}
+  }
   render(s, now);
   if (["user_distress", "third_party"].includes(ap.kind)) s.stance = "关切用户";
   if (changed && (ap.kind !== "criticism" || d.conflict < 0.1))
     s.lastCause = {
       eventId,
       kind: ap.kind,
-      evidence: ap.evidence,
+      evidence: ap.evidence?.length ? ap.evidence : (semantic?.feelings||[]).map(f=>f.evidence),
       source: input.source || "owner",
       at: now,
     };
@@ -562,7 +590,7 @@ export function emotionPromptLine(raw, { isOwner = false } = {}) {
       : "";
   const i = isOwner ? s.subjective : null;
   const subjective = i ? `\n【暂时的主观感受，不是事实】${JSON.stringify({text:i.text,feeling:i.feeling,confidence:i.confidence})}。只是轻微的好奇、温暖或担心，可以影响措辞；不要把猜测说成用户的意图，不要求安抚或解释，不责备。当前消息和澄清优先。` : '';
-  return `现在情绪：${s.state.label}（强度 ${s.state.intensity.toFixed(2)}）；回应态度：${s.stance}${reason}。用户诉苦时关切用户；普通请求和纠错正常处理，不要求对方安抚。${subjective}`;
+  return `现在情绪：${s.state.label}（强度 ${s.state.intensity.toFixed(2)}）；细微感受：${s.state.nuance||"无额外感受"}；回应态度：${s.stance}${reason}。用户诉苦时关切用户；普通请求和纠错正常处理，不要求对方安抚。细微感受只可自然影响语气、关注点和提问意愿，不机械报数、不夸大成事实，不要求每轮表演情绪。${subjective}`;
 }
 function updateClimate(c, s, ap, now) {
   const n = Number(c.samples || 0);

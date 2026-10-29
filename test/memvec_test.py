@@ -56,6 +56,47 @@ class MemoryLifecycleTests(unittest.TestCase):
         self.assertEqual(self.row(b)['status'], 'candidate')
         self.assertEqual(self.row(other)['status'], 'candidate')
 
+    def test_auto_confirm_guard_and_undo(self):
+        mid = self.add('喜欢小笼包', source_text='我喜欢小笼包', source_id='message-auto')
+        before = self.row(mid)
+        prepared = m.confirmation_context('private:10001', mid)
+        self.assertEqual(prepared['evidence']['quote'], '我喜欢小笼包')
+        self.assertNotEqual(prepared['evidence']['quote'], prepared['context']['candidate']['text'])
+        ctx = prepared['context']
+        result = m.confirm_memory('private:10001', mid, auto_revision=ctx['revision'])
+        self.assertEqual(self.row(mid)['status'], 'active')
+        m.undo_confirm('private:10001', result['undo']['operationId'])
+        self.assertEqual(self.row(mid), before)
+
+    def test_auto_confirm_refuses_stale_revision_expiry_and_missing_source(self):
+        for extra in [{}, {'source_text':'我喜欢小笼包'}, {'source_text':'我喜欢小笼包','source_id':'m','expires_at':m.now()-1}]:
+            with self.subTest(extra=extra):
+                mid = self.add('喜欢小笼包', **extra)
+                ctx = m.confirmation_context('private:10001', mid)['context']
+                with self.assertRaises(m.MemoryConflict):
+                    m.confirm_memory('private:10001', mid, auto_revision=ctx['revision'])
+                self.assertEqual(self.row(mid)['status'], 'candidate')
+        mid = self.add('喜欢煎饼', source_text='我喜欢煎饼', source_id='message-auto')
+        ctx = m.confirmation_context('private:10001', mid)['context']
+        with m.db() as c:
+            c.execute("UPDATE memories SET text='不喜欢煎饼' WHERE id=?", (mid,))
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', mid, auto_revision=ctx['revision'])
+        self.assertEqual(self.row(mid)['status'], 'candidate')
+
+    def test_auto_confirm_never_replaces_or_assumes_coexistence(self):
+        old = self.add('不喜欢煎饼', confirmed=True, source_text='我不喜欢煎饼', source_id='m1')
+        new = self.add('喜欢小笼包', source_text='我喜欢小笼包', source_id='m2')
+        ctx = m.confirmation_context('private:10001', new)['context']
+        before = [self.row(old), self.row(new)]
+        with self.assertRaises(m.MemoryConflict):
+            m.confirm_memory('private:10001', new, auto_revision=ctx['revision'])
+        self.assertEqual([self.row(old), self.row(new)], before)
+        review = self.review(new, 'coexist')
+        m.confirm_memory('private:10001', new, review=review, auto_revision=ctx['revision'])
+        self.assertEqual(self.row(old)['status'], 'active')
+        self.assertEqual(self.row(new)['status'], 'active')
+
     def test_prefix_is_literal_not_sql_wildcard(self):
         a = self.add('candidate')
         self.assertEqual(m.manage_memory('private:10001', '10001', 'confirm', query='%')['changed'], 0)

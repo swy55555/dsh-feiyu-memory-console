@@ -1,3 +1,5 @@
+import { mindAssociations } from './mind-associations.js'
+import { continuityVisual } from './continuity-view.js'
 // 可塑性记忆 · 控制台前端
 //
 // 没有框架，没有构建。一个文件，读三个本地数据源。
@@ -143,6 +145,7 @@ const S = {
     focusId: '',
     diaryDates: {},
   },
+  candidateAuto: {data:null,loading:false,error:'',timer:0},
   semantic: null,
   semanticQuery: '',
   semanticTrace: null,
@@ -155,7 +158,7 @@ const S = {
   personaLoading: false,
   personaAvailable: null,
   personaEdit: null,
-  continuity: {data:null,loading:false,error:'',timer:0},
+  continuity: {data:null,loading:false,error:'',timer:0,view:localStorage.getItem('feiyu-mind-view')==='text'?'text':'visual',filter:'active',page:0,selected:''},
   emotion: null,
   emotionEpisodes: null,
   emotionLoading: false,
@@ -509,6 +512,7 @@ function route(force = false) {
 function paintCurrent() {
   if (!mainEl) return
   if (S.tab !== 'graph') stopGraphLoop()
+  if (S.tab !== 'library' && S.candidateAuto.timer) {clearInterval(S.candidateAuto.timer);S.candidateAuto.timer=0}
   if (S.tab !== 'continuity' && S.continuity.timer) {clearInterval(S.continuity.timer);S.continuity.timer=0}
   if (S.tab !== 'emotion' && S.emotionTimer) { clearInterval(S.emotionTimer); S.emotionTimer = 0 }
   mainEl.replaceChildren()
@@ -797,31 +801,17 @@ function renderOverview() {
     ),
   )
   const associationCard = el('section', { class: 'card pad' },
-    el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '有边界的关联' })),
-    el('p', { class: 'note', style: { margin: '0 0 8px' } }, '开启后，只沿同一事实或同一来源走一跳，最多补 1 条，并标成「只作联想，不当事实」。'),
+    el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '补充关联记忆' })),
+    el('p', { class: 'note', style: { margin: '0 0 8px' } }, '聊天检索时，沿同一事实或同一来源补找旧记忆，默认最多补 1 条。不额外调用模型做联想，但可能增加回复的输入 token。与空闲时生成话题是两项能力。'),
     el('div', { class: 'row', style: { gap: '10px' } },
       el('span', { class: 'pill', text: o.association ? '已开启' : '已关闭' }),
       el('button', {
         class: 'btn sm ' + (o.association ? '' : 'primary'),
         on: { click: () => toggleAssociation(o.association !== true) },
-      }, o.association ? '关闭关联' : '开启关联'),
+      }, o.association ? '关闭补充' : '开启补充'),
     ),
-    el('hr'),
-    el('h3', { text: '空闲联想 · 试验' }),
-    el('p', { class: 'note' }, '仅用于你的私聊。安静两分钟后，沿真实记忆最多联想两步，保留十分钟；不相关时暂存，有效期内等合适话题；不会因此主动发消息。每轮最多两次模型调用，两轮至少间隔三十分钟。'),
-    el('div', { class: 'row', style: { gap: '10px' } },
-      el('span', { class: 'pill', text: o.idleAssociation ? '已开启' : '已关闭' }),
-      el('button', { class: 'btn sm', on: { click: () => toggleIdleAssociation(!o.idleAssociation) } }, o.idleAssociation ? '关闭空闲联想' : '开启空闲联想'),
-      el('button', { class: 'btn sm', on: { click: () => showIdleAssociation() } }, '查看联想去向'),
-    ),
-    el('label', {class:'row', style:{marginTop:'10px'}},
-      el('input', {type:'checkbox', checked:o.idleAffect===true, on:{change:async event=>{
-        const affectEnabled=event.target.checked;
-        try {await api('/association/idle',{method:'POST',body:{affectEnabled}});S.overview.idleAffect=affectEnabled;toast(affectEnabled?'已开启轻微主观感受':'已关闭并清除主观感受','ok');} catch(error){event.target.checked=!affectEnabled;toast(error.message,'error');}
-      }}}),
-      el('span', {text:'允许联想产生轻微主观感受（试验）'}),
-    ),
-    el('p', {class:'note',text:'主观印象与事实分开：只会轻微好奇、温暖或担心，五分钟减半、十分钟失效；新的私聊消息会清除旧感受。不会积累成关系恶化或人格变化。'}),
+    el('p',{class:'note',text:'空闲时想到的话题与主观感受，已集中到“当前心绪”。'}),
+    el('a',{class:'btn sm',href:'#/continuity',text:'查看当前心绪'}),
   )
   return frag(
     hero,
@@ -838,7 +828,7 @@ async function toggleAssociation(enabled) {
   try {
     await api('/association', { method: 'POST', body: { enabled } })
     if (S.overview) S.overview.association = enabled
-    toast(enabled ? '已开启有边界的关联' : '已关闭关联', 'ok')
+    toast(enabled ? '已开启补充关联记忆' : '已关闭关联', 'ok')
     paintCurrent()
   } catch (error) {
     toast(error.message, 'error')
@@ -984,7 +974,14 @@ function renderLibrary() {
   const addBtn = el('button', { class: 'btn block', style: { marginTop: '8px' }, on: { click: () => openAdd(f.scope) } }, icon('plus'), '往这一格记一条')
   rail.appendChild(addBtn)
 
-  const main = el('div', { class: 'library-main' }, toolbar, semHead, countLine, list)
+  const pendingHelp = f.status === 'candidate' ? el('section',{class:'candidate-guide card pad'},
+    el('div',{},el('span',{class:'eyebrow',text:'待确认 ≠ 已丢失'}),el('h2',{text:'先核对，再决定是否记住'}),
+      el('p',{text:'候选不会仅因久未确认而自动删除，但不会作为已确认事实参与正常检索。带有效期的记录到期后，确认不会自动续期。'})),
+    el('div',{class:'candidate-options'},
+      el('div',{},el('strong',{text:'暂不处理'}),el('span',{text:'留在待确认，稍后再看'})),
+      el('div',{},el('strong',{text:'归档候选'}),el('span',{text:'保留已有事实；候选可在已归档找到'})),
+      el('div',{},el('strong',{text:'确认并保留全部'}),el('span',{text:'采纳这一条，不覆盖其他事实'})))) : null
+  const main = el('div', { class: 'library-main' }, toolbar, pendingHelp, f.status==='candidate'?renderCandidateAuto():null, semHead, countLine, list)
   const wrap = el('div', { class: 'library' }, rail, main)
 
   if (!f.loaded) {
@@ -1242,7 +1239,7 @@ async function act(op, payload, { success } = {}) {
           return
         }
         if (!progressBox) {
-          progressBox = el('div', { class:'review-progress', attrs:{role:'status'} },
+          progressBox = el('div', { class:'review-progress', attrs:{role:'status','aria-live':'polite'} },
             el('span', {class:'review-progress-text'}),
             el('button', {class:'btn sm',on:{click:()=>{stopped=true}}}, '停止后续检查'))
           document.body.appendChild(progressBox)
@@ -1297,7 +1294,7 @@ async function resolveMemoryConflict(conflict, message) {
     content,
     submit: '应用选择', cancel: '暂不处理',
     fields: [{ name: 'resolution', label: '如何处理', type: 'select', value: 'coexist', options: [
-      { value: 'keep-confirmed', label: operation === 'restore' ? '保留现状，暂不恢复' : '保留现状，归档这条候选' },
+      { value: 'keep-confirmed', label: operation === 'restore' ? '暂不恢复，保持已归档/已删状态' : '归档这条候选，保留已有事实' },
       { value: 'coexist', label: '确认这条，并保留全部已有记忆' },
       ...(conflicts.length ? [{ value: 'use-candidate', label: `以这条为准，仅替换 ${conflicts.length} 条明确矛盾的事实` }] : []),
     ] }],
@@ -3229,12 +3226,13 @@ function renderEmotion() {
   const weights = S.emotion?.weights || { owner: 1.1, group: 1, private: 0.8 }
   const spanDays = climate.since ? Math.max(0, (Date.now() - Number(climate.since)) / 86400000) : 0
   const sourceName = { owner: '老大', group: '群聊', private: '私聊', world: '外界' }
-  const reviewNames = {reviewed:'模型已复核',pending:'模型复核中',disabled:'本地判断（复核关闭）','not-needed':'本地判断（无需复核）','daily-limit':'本日复核额度已用完','budget-unavailable':'复核额度记录不可用','input-too-long':'消息过长，保守处理','invalid-result':'模型结果无效，保守处理',unavailable:'模型未完成，保守处理','stale-result':'情境已变化，忽略旧结果'}
+  const reviewNames = {'shared-event':'连续事件理解（复用）',reviewed:'模型已复核',pending:'模型复核中',disabled:'本地判断（复核关闭）','not-needed':'本地判断（无需复核）','daily-limit':'本日复核额度已用完','budget-unavailable':'复核额度记录不可用','input-too-long':'消息过长，保守处理','invalid-result':'模型结果无效，保守处理',unavailable:'模型未完成，保守处理','stale-result':'情境已变化，忽略旧结果'}
 
   const hero = el('section', { class: 'hero' },
     el('div', { class: 'kicker', text: 'emotion state' }),
     el('p', {class:'muted small',text:`判断来源：${reviewNames[e.lastEvent?.review?.status] || '本地判断'}${e.lastEvent?.review?.count ? ` · 今日复核 ${e.lastEvent.review.count} 次（每日无上限）` : ''} · 近期修正 ${(e.corrections || []).length} 次`}),
     el('h2', null, frag('她现在：', el('em', { text: label }), `，强度 ${intensity.toFixed(2)}。`)),
+    st.nuance?el('div',{class:'emotion-nuances'},...(st.feelings||[]).map(f=>el('span',{class:'mind-badge',text:f.label}))):null,
     el('p', { text: `回应态度：${e.stance || '正常交流'}。快变量是“现在”，心情是“今天”，底色是“长期”。` }),
     el('p', { class:'muted small', text: e.lastCause ? `最近影响情绪的事件：${e.lastCause.kind} · ${(e.lastCause.evidence || []).join(' / ')}（${fmtWhen(e.lastCause.at)}）` : '尚无明确的情绪触发事件' }),
   )
@@ -3525,7 +3523,7 @@ function renderEmotion() {
     el('p', {text:e.subjective ? `${e.subjective.text}（未确认）` : '当前没有生效的主观印象。'}),
     e.subjective ? el('p', {class:'note',text:`轻微偏移 V ${Number(e.subjective.valence).toFixed(3)} / A ${Number(e.subjective.arousal).toFixed(3)}；${new Date(e.subjective.expiresAt).toLocaleString()} 到期。`}) : null,
     el('p', {class:'note',text:'这是临时感受；事实事件情绪、长期气候和人格不会因此被改写。新的主人私聊消息会清除它。'}),
-    el('button', {class:'btn sm',on:{click:()=>showIdleAssociation()}}, '查看联想去向'),
+    el('a', {class:'btn sm',href:'#/continuity',text:'在当前心绪查看来源与去向'}),
   )
   return frag(hero, stats, padCard, el('div', { class: 'panel-stack' }, subjectiveCard, contactCard, bedtimeCard, climateCard, episodeCard, weightsCard, optionsCard, triggersCard, metricsCard))
 }
@@ -4631,12 +4629,21 @@ boot()
 
 // ---------------------------------------------------------------- 当前心绪
 const CONTINUITY_STATUS = {open:'进行中',paused:'暂不聊',closed:'已结束',expired:'已过期',tentative:'待验证',observed:'多次经历支持，仍可修正',rejected:'已否定',understood:'已理解事件',unavailable:'本轮使用原有处理',interrupted:'已丢弃过时理解',busy:'繁忙，保持原有处理',injected:'已交给聊天模型',rejected_delivery:'投递未接受','delivery-unknown':'投递结果未知',manual:'手动修正','reply-result':'回复结果'}
-async function loadContinuity() {
+async function loadContinuity(force=false) {
   if (S.continuity.loading) return
   S.continuity.loading = true
-  try { S.continuity.data = await api('/continuity'); S.continuity.error = '' }
+  try {
+    const results=await Promise.allSettled([api('/continuity'),api('/association/idle'),api('/emotion')]);
+    const [state,idle,emotion]=results;
+    S.continuity.idle=idle.status==='fulfilled'?idle.value:null;
+    S.continuity.idleError=idle.status==='rejected'?'空闲联想暂不可用，请检查桥接。':'';
+    S.continuity.emotion=emotion.status==='fulfilled'?emotion.value.emotion:null;
+    S.continuity.emotionError=emotion.status==='rejected'?'情绪状态暂不可用。':'';
+    if(state.status==='rejected')throw state.reason;
+    S.continuity.data=state.value;S.continuity.error='';
+  }
   catch (e) { S.continuity.error = `当前心绪不可用：${e.message}。请确认桥接已更新到配套版本。` }
-  finally { S.continuity.loading = false; if (S.tab === 'continuity') { paintCurrent(); if (!S.continuity.timer) S.continuity.timer=setInterval(()=>{if(S.tab==='continuity')void loadContinuity()},15000) } }
+  finally { S.continuity.loading = false; if (S.tab === 'continuity') { const active=document.activeElement; if(force||!mainEl?.contains(active)||active===document.body) paintCurrent(); if (!S.continuity.timer) S.continuity.timer=setInterval(()=>{if(S.tab==='continuity')void loadContinuity()},15000) } }
 }
 async function changeContinuity(body) {
   if (S.continuity.loading) return
@@ -4645,19 +4652,38 @@ async function changeContinuity(body) {
   catch(e) { toast(e.message,'error') }
   finally { S.continuity.loading=false; if(S.tab==='continuity')paintCurrent() }
 }
+async function changeMindAssociation(body) {
+  if(S.continuity.changing)return;
+  S.continuity.changing=true;
+  try {
+    await api('/association/idle',{method:'POST',body});
+    if(S.overview){if(typeof body.enabled==='boolean')S.overview.idleAssociation=body.enabled;if(typeof body.affectEnabled==='boolean')S.overview.idleAffect=body.affectEnabled;}
+    await loadContinuity(true);toast('联想设置已更新','ok');
+  }catch(e){toast(e.message,'error');paintCurrent();}
+  finally{S.continuity.changing=false;}
+}
 function renderContinuity() {
-  const d=S.continuity.data, wrap=el('div',{class:'stack',style:{display:'grid',gap:'16px'}})
-  wrap.appendChild(el('section',{class:'card pad'},
-    el('h2',{text:'当前心绪 · 试验'}),
-    el('p',{class:'muted',text:'查看她正在挂念什么、暂时怎样理解，以及这些变化来自哪里。这里展示结构化事件结果，不展示模型内部思考。'}),
-    el('button',{class:'btn sm',disabled:S.continuity.loading,on:{click:()=>loadContinuity()}},'刷新当前心绪'),
+  const d=S.continuity.data, wrap=el('div',{class:'mind-page stack',style:{display:'grid',gap:'20px'}})
+  const switchView=view=>{S.continuity.view=view;localStorage.setItem('feiyu-mind-view',view);paintCurrent()}
+  wrap.appendChild(el('section',{class:'mind-hero'},
+    el('div',{},el('span',{class:'eyebrow',text:'此刻 · 有迹可循'}),el('h1',{text:'当前心绪'}),el('p',{text:'正在挂念什么、空闲时想到什么、这些念头怎样影响此刻。'})),
+    el('div',{class:'mind-hero-actions'},el('div',{class:'segmented',role:'group','aria-label':'心绪展示方式'},
+      el('button',{class:S.continuity.view==='visual'?'active':'','aria-pressed':String(S.continuity.view==='visual'),on:{click:()=>switchView('visual')},text:'可视化'}),
+      el('button',{class:S.continuity.view==='text'?'active':'','aria-pressed':String(S.continuity.view==='text'),on:{click:()=>switchView('text')},text:'文字列表'})),
+      el('button',{class:'btn',disabled:S.continuity.loading,on:{click:()=>loadContinuity(true)}},icon('refresh'),'刷新当前心绪')),
     S.continuity.error ? el('p',{role:'alert',text:S.continuity.error}) : null))
+  wrap.appendChild(mindAssociations(el,{idle:S.continuity.idle,error:S.continuity.idleError,emotion:S.continuity.emotion,emotionError:S.continuity.emotionError,overview:S.overview||{},visual:S.continuity.view==='visual',loading:S.continuity.loading,when:fmtWhen,details:showIdleAssociation,change:changeMindAssociation}));
   if(!d)return wrap
   wrap.appendChild(el('section',{class:'card pad'},
     el('label',{},el('input',{type:'checkbox',checked:d.enabled,disabled:S.continuity.loading,on:{change:e=>changeContinuity({enabled:e.target.checked})}}),' 启用连续事件理解（试验）'),
     el('p',{class:'muted',text:'默认关闭，仅主人私聊。开启后每条符合条件的消息最多新增一次事件理解调用，成功时复用情绪判断；花费单列“事件理解”，不设每日硬上限。单次等待最多约 8 秒，失败时保持原有处理。'}),
     !d.enabled?el('p',{text:'当前关闭：保留历史记录，但不会生成或使用挂念、认识及关系参考。'}):null,
     d.storageError?el('p',{role:'alert',text:'状态保存异常，重启后可能丢失最近变化。请检查磁盘和权限。'}):null))
+  if(S.continuity.view==='visual'){
+    wrap.appendChild(continuityVisual(el,d,{...S.continuity,statuses:CONTINUITY_STATUS,when:fmtWhen,change:changeContinuity,
+      set:patch=>{Object.assign(S.continuity,patch);paintCurrent()}}))
+    return wrap
+  }
   const evidence=rows=>el('details',{},el('summary',{text:'查看原话依据'}),...(rows||[]).map(e=>el('p',{text:`${fmtWhen(e.at)} · 消息 ${e.messageId || e.id}：${e.quote}`})))
   const concerns=el('section',{class:'card pad'},el('h2',{text:'当前挂念'}),el('p',{class:'muted',text:'有明确来源的未完事项。不相关时继续保留；暂停、结束和过期后不再进入回复参考。'}))
   if(!d.concerns?.length)concerns.appendChild(el('p',{text:'暂时没有挂念。普通聊天不必产生新挂念。'}))
@@ -4690,5 +4716,24 @@ function renderContinuity() {
     e.eventId?el('p',{class:'muted',text:`关联事件 ${e.eventId}`}):null))
   if(!d.events?.length)events.appendChild(el('p',{text:'开启后，符合条件的新消息会在这里留下记录。'}))
   wrap.appendChild(events)
+  return wrap
+}
+
+async function loadCandidateAuto(body){
+  if(S.candidateAuto.loading)return
+  S.candidateAuto.loading=true
+  try{S.candidateAuto.data=await api('/candidate-auto',body?{method:'POST',body}:{});S.candidateAuto.error=''}
+  catch(e){S.candidateAuto.error=e.message}
+  finally{S.candidateAuto.loading=false;if(S.tab==='library'&&S.library.status==='candidate'){paintCurrent();if(!S.candidateAuto.timer)S.candidateAuto.timer=setInterval(()=>{if(S.tab==='library'&&S.library.status==='candidate')void loadCandidateAuto()},15000)}}
+}
+function renderCandidateAuto(){
+  const d=S.candidateAuto.data,wrap=el('section',{class:'card pad auto-review-card'})
+  wrap.appendChild(el('div',{class:'section-head'},el('h2',{text:'让模型帮你核对'}),el('span',{class:'mind-badge',text:d?.running?'正在核对':d?.enabled?'自动核对已开启':'自动核对关闭'})))
+  wrap.appendChild(el('p',{class:'muted small',text:'仅主人私聊。每分钟最多处理一条候选或一批历史；有明确原话、无矛盾且核对通过才自动确认。不确定继续保留，绝不自动替换已有事实。会产生“候选核对”和“事实复核”用量。'}))
+  if(d)wrap.appendChild(el('div',{class:'row'},el('label',{},el('input',{type:'checkbox',checked:d.enabled,disabled:S.candidateAuto.loading,on:{change:e=>loadCandidateAuto({enabled:e.target.checked})}}),' 自动核对待确认记忆'),el('button',{class:'btn sm',disabled:!d.enabled||d.running||S.candidateAuto.loading,text:'检查下一条',on:{click:()=>loadCandidateAuto({run:true})}})))
+  if(S.candidateAuto.error||d?.error)wrap.appendChild(el('p',{role:'alert',text:S.candidateAuto.error||d.error}))
+  if(d?.records?.length)wrap.appendChild(el('details',{},el('summary',{text:'最近自动核对记录'}),...d.records.slice(0,10).map(r=>el('article',{class:'auto-review-record'},el('strong',{text:({confirmed:'已自动确认',manual:'留待人工',pending:'核对中',error:'稍后重试'})[r.status]||r.status}),el('p',{text:r.text}),el('p',{class:'muted small',text:`${r.reason} · ${fmtWhen(r.at)}`})))))
+  wrap.appendChild(el('p',{class:'small muted',text:'已自动确认的操作可在“整理 → 操作记录”查看和撤销。关闭网页后，DSH 运行且开关开启时仍会核对；关闭开关会停止后续提交。'}))
+  if(!d&&!S.candidateAuto.loading&&!S.candidateAuto.error)void loadCandidateAuto()
   return wrap
 }
