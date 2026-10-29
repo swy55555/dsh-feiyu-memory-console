@@ -33,6 +33,6 @@ await turn('面试完啦，挺顺利',(v,s)=>{
 },{reference:false,concern:'closed'});
 await turn('今天很忙，先不聊了',v=>{v.summary='用户暂时忙碌，不等于关系变差'},{reference:false,concern:'closed'});
 assert.equal(c.snapshot(key).relation.trust,.5);assert.equal(c.snapshot(key).relation.tension,0);
-const result={version:'0.8.14',mode:'固定模型返回的机制模拟，不代表真实模型语义准确率',modelCallsSimulated:calls,passed:true,steps};
+const result={version:'0.8.15',mode:'固定模型返回的机制模拟，不代表真实模型语义准确率',modelCallsSimulated:calls,passed:true,steps};
 const output=JSON.stringify(result,null,2)+'\n';if(process.argv[2])fs.writeFileSync(process.argv[2],output);else process.stdout.write(output);
 console.error('Continuity scenario OK: '+steps.length+' turns; no network or paid calls.');

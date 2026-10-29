@@ -2,14 +2,14 @@
 
 面向 DSH 与 QQ 桥接的本地记忆管理插件。集中查看和维护长期记忆、聊天原文与摘要、日记、性格和情绪，提供来源核对、处理进度和部分操作的撤销能力。
 
-![Version](https://img.shields.io/static/v1?label=version&message=0.8.14&color=0e5a68)
+![Version](https://img.shields.io/static/v1?label=version&message=0.8.15&color=0e5a68)
 ![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078d4)
 ![License](https://img.shields.io/badge/license-MIT-2e8696)
 
-[下载 v0.8.14](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.8.14) · [用户手册](manual/USER_GUIDE-0.8.14.md) · [PDF 手册](manual/USER_GUIDE-0.8.14.pdf) · [升级指南](UPGRADE.md) · [更新日志](CHANGELOG.md)
+[下载 v0.8.15](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.8.15) · [用户手册](manual/USER_GUIDE-0.8.15.md) · [PDF 手册](manual/USER_GUIDE-0.8.15.pdf) · [升级指南](UPGRADE.md) · [更新日志](CHANGELOG.md)
 
-> **v0.8.14** 本版升级深浅色界面，将空闲联想与主观感受整合到“当前心绪”，增加可视化/文字切换、日常细微感受和可选的候选记忆自动核对。连续事件理解、空闲联想及主观感受仍为试验功能；新开关默认关闭，升级保留已有设置。详见[情绪架构](docs/emotion-architecture.md)与[当前心绪说明](docs/continuity.md)。
+> **v0.8.15** 修复后台新会话开场快照丢失导致的假超时；保留 0.8.14 全部界面与情绪升级。本版升级深浅色界面，将空闲联想与主观感受整合到“当前心绪”，增加可视化/文字切换、日常细微感受和可选的候选记忆自动核对。连续事件理解、空闲联想及主观感受仍为试验功能；新开关默认关闭，升级保留已有设置。详见[情绪架构](docs/emotion-architecture.md)与[当前心绪说明](docs/continuity.md)。
 
 ## 项目定位
 
@@ -51,7 +51,7 @@
 
 ## 界面预览
 
-以下为 v0.8.14 的合成数据截图，不展示真实用户对话。可视化和文字列表读取同一状态；查看页面不会调用模型。
+以下为 v0.8.14 界面的合成数据截图（0.8.15 沿用相同布局），不展示真实用户对话。可视化和文字列表读取同一状态；查看页面不会调用模型。
 
 | 深色心绪 | 浅色心绪 |
 | --- | --- |
@@ -106,7 +106,7 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 3. “整理”查看队列和“消息处理状态与遗漏检查”；普通闲聊可能没有新增事实。
 4. “长期记忆 → 待确认”核对原话。先区分明确矛盾与尚不确定；内容都成立时选“确认这条，并保留全部已有记忆”。
 5. “语义找”检查检索结果；控制台预览不证明 QQ 回复已经使用这些记忆。
-6. 按需调整情绪复核、主动联系和试验功能。详细操作见 [用户手册](manual/USER_GUIDE-0.8.14.md)。
+6. 按需调整情绪复核、主动联系和试验功能。详细操作见 [用户手册](manual/USER_GUIDE-0.8.15.md)。
 
 ## 模型调用与配置
 
@@ -146,13 +146,13 @@ npm run test:browser:continuity
 npm run test:browser:ui
 ```
 
-基础回归包含 20 组隔离测试。浏览器测试另需 Playwright 和兼容浏览器；测试使用隔离数据，不向 QQ 发消息。[发布规范](docs/RELEASING.md) 说明版本、标签、测试、附件、校验和草稿发布流程。
+基础回归包含 21 组隔离测试。浏览器测试另需 Playwright 和兼容浏览器；测试使用隔离数据，不向 QQ 发消息。[发布规范](docs/RELEASING.md) 说明版本、标签、测试、附件、校验和草稿发布流程。
 
 反馈问题时请附版本、操作步骤、期望与实际结果，以及去除个人信息后的错误信息。
 
 ## 文档与许可
 
-- [详细用户手册](manual/USER_GUIDE-0.8.14.md) / [PDF](manual/USER_GUIDE-0.8.14.pdf)
+- [详细用户手册](manual/USER_GUIDE-0.8.15.md) / [PDF](manual/USER_GUIDE-0.8.15.pdf)
 - [升级与回退](UPGRADE.md) / [更新日志](CHANGELOG.md)
 - [情绪与复杂情境](docs/complex-emotion.md) / [记忆服务说明](docs/memvec.md)
 - [致谢与来源](ACKNOWLEDGEMENTS.md) / [免责声明](DISCLAIMER.md)

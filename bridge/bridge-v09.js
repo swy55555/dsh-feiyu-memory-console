@@ -2681,6 +2681,42 @@ async function main() {
     });
   }
 
+  // Fresh tool-free sessions have exactly one requested turn. A subscription may
+  // start after turn/start (or even turn/end); restore only these active waiters.
+  function acceptLearnerEvent(sessionId, event) {
+    const learnerCollector = learnerCollectors.get(sessionId) ?? createTurnCollector();
+    learnerCollectors.set(sessionId, learnerCollector);
+    const learnerEnded = learnerCollector.push(event);
+    if (learnerEnded) {
+      learnerCollectors.delete(sessionId);
+      const waiters = learnerWaiters.get(sessionId) ?? [];
+      const waiter = waiters.shift();
+      if (waiters.length === 0) learnerWaiters.delete(sessionId);
+      if (waiter) {
+        clearTimeout(waiter.timer);
+        if (learnerEnded.reason.kind === 'completed' && learnerEnded.text.trim()) {
+          waiter.resolve(learnerEnded.text);
+        } else {
+          waiter.reject(new Error(`学习会话 turn 未正常完成：${learnerEnded.reason.kind}`));
+        }
+      }
+      // 旧学习会话 turn 结束后从集合移除，避免残留
+      if (sessionId !== slangLearnerSessionId) learnerSessions.delete(sessionId);
+    }
+  }
+  function restoreHeadlessSnapshot(sessionId, records) {
+    if (!learnerFeatures.has(sessionId) || !learnerSessions.has(sessionId) ||
+        reverse.has(sessionId) || !learnerWaiters.get(sessionId)?.length || !Array.isArray(records)) return;
+    // Rebuild from the complete snapshot instead of appending duplicated fragments.
+    learnerCollectors.set(sessionId, createTurnCollector());
+    for (const entry of records) {
+      const event = entry?.type === 'event' ? entry.event : entry;
+      if (!['turn/start', 'assistant/message', 'turn/end'].includes(event?.type)) continue;
+      acceptLearnerEvent(sessionId, event);
+      if (!learnerWaiters.get(sessionId)?.length) break;
+    }
+  }
+
   async function runSlangExtraction(key) {
     if (cfg.slang?.enabled === false) return;
     if (!dshReady) return;
@@ -4179,7 +4215,7 @@ async function main() {
         provider: known?.provider ?? cfg.dsh?.provider
       });
       tokenLedger.ingestSnapshotRecords({ sessionId, records: snapshot.records });
-      rebuildInFlightCollector(sessionId, snapshot.records);
+      if (!learnerFeatures.has(sessionId)) rebuildInFlightCollector(sessionId, snapshot.records);
     } catch (error) {
       log('token 账本：处理会话快照失败', error?.message ?? error);
     }
@@ -13807,10 +13843,11 @@ ${roleText.slice(0, 9000)}`;
           const frame = envelope.payload;
           // 记录该会话最后一次有事件的时间：回合看门狗用它判断「这个 turn 是不是死了」。
           if (frame?.sessionId) sessionEventAt.set(frame.sessionId, Date.now());
-          // 会话开场快照：只喂 token 账本。它含**历史** turn/end，绝不能让它们走
+          // 会话快照用于记账和恢复正在等待的新建后台任务。历史 turn/end 不能走
           // session/event 通道 —— 否则桥接会把早已结束的回合当成新回合去发 QQ 回复。
           if (frame.type === 'session/snapshot') {
             recordSessionSnapshot(frame.sessionId, frame.snapshot);
+            restoreHeadlessSnapshot(frame.sessionId, frame.snapshot?.records);
             continue;
           }
           if (frame.type === 'session/event') {
@@ -13821,25 +13858,7 @@ ${roleText.slice(0, 9000)}`;
             if (!key) {
               // 黑话学习会话：只收集 turn，不发送 QQ，并唤醒等待中的学习任务。
               if (learnerSessions.has(frame.sessionId)) {
-                const learnerCollector = learnerCollectors.get(frame.sessionId) ?? createTurnCollector();
-                learnerCollectors.set(frame.sessionId, learnerCollector);
-                const learnerEnded = learnerCollector.push(frame.event);
-                if (learnerEnded) {
-                  learnerCollectors.delete(frame.sessionId);
-                  const waiters = learnerWaiters.get(frame.sessionId) ?? [];
-                  const waiter = waiters.shift();
-                  if (waiters.length === 0) learnerWaiters.delete(frame.sessionId);
-                  if (waiter) {
-                    clearTimeout(waiter.timer);
-                    if (learnerEnded.reason.kind === 'completed' && learnerEnded.text.trim()) {
-                      waiter.resolve(learnerEnded.text);
-                    } else {
-                      waiter.reject(new Error(`学习会话 turn 未正常完成：${learnerEnded.reason.kind}`));
-                    }
-                  }
-                  // 旧学习会话 turn 结束后从集合移除，避免残留
-                  if (frame.sessionId !== slangLearnerSessionId) learnerSessions.delete(frame.sessionId);
-                }
+                acceptLearnerEvent(frame.sessionId, frame.event);
               }
               continue;
             }

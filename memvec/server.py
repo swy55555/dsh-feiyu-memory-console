@@ -1312,7 +1312,7 @@ def stats() -> dict:
         messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         summaries = conn.execute("SELECT COUNT(*) FROM session_summaries WHERE status='active'").fetchone()[0]
     return {
-        'version': '0.8.14',
+        'version': '0.8.15',
         'capabilities': ['confirmation-relation-groups', 'auto-confirm-guard', 'source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
         'embed_threads': EMBED_THREADS,
         'index': 'exact-cache',

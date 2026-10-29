@@ -1,17 +1,17 @@
-# v0.8.14 升级与回退
+# v0.8.15 升级与回退
 
 本版需同时更新插件、QQ 桥接运行时和独立 memvec 服务。保留原数据库及配置；不会自动回填历史漏记、开启跨聊天共享或打开空闲联想试验。
 
 ## 适用范围
 
-用于已有 DSH/QQ 桥接环境，基础 SDK、账号和服务环境需自行准备。安装器按已知源码哈希或有效回执识别版本；未知或自定义桥接会拒绝覆盖。首次安装与通用操作见 `manual/USER_GUIDE-0.8.14.md`；本次功能变化见 `docs/continuity.md` 与 `docs/usage-and-association.md`。
+用于已有 DSH/QQ 桥接环境，基础 SDK、账号和服务环境需自行准备。安装器按已知源码哈希或有效回执识别版本；未知或自定义桥接会拒绝覆盖。首次安装与通用操作见 `manual/USER_GUIDE-0.8.15.md`；本次功能变化见 `docs/continuity.md` 与 `docs/usage-and-association.md`。
 
 ## 1. 下载与核验
 
-从 [v0.8.14 Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.8.14) 下载同版本 `.tgz` 或 `-source.zip`，以及升级指南、手册和 `SHA256SUMS-0.8.14.txt`。核对示例：
+从 [v0.8.15 Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.8.15) 下载同版本 `.tgz` 或 `-source.zip`，以及升级指南、手册和 `SHA256SUMS-0.8.15.txt`。核对示例：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\dsh-feiyu-memory-console-0.8.14.tgz
+Get-FileHash -Algorithm SHA256 .\dsh-feiyu-memory-console-0.8.15.tgz
 ```
 
 将结果与校验文件对应行比较。不要混用预览版安装器和正式版源码；不要覆盖已经公开的旧版本附件。
@@ -48,7 +48,7 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 
 启动 memvec、DSH 和桥接，刷新控制台：
 
-1. 网页后端版本显示 0.8.14，总览的数据库路径与服务检查正常。
+1. 网页后端版本显示 0.8.15，总览的数据库路径与服务检查正常。
 2. `http://127.0.0.1:9881/stats` 返回 ok，capabilities 包含 paged-fact-review、unified-fact-review 与 confirmation-relation-groups。
 3. QQ 连接恢复，原事实、队列和设置仍在；不能用新空库代替旧数据验证。
 4. 整理页出现消息处理状态入口，确认/恢复操作能显示分批进度。
@@ -66,7 +66,7 @@ node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --apply
 
 ## 回退
 
-先停止桥接，再使用**本次安装所用的 v0.8.14 包**执行：
+先停止桥接，再使用**本次安装所用的 v0.8.15 包**执行：
 
 ```powershell
 node bridge/install-all.mjs --target "D:\your-dsh\qq-bridge" --undo
@@ -88,10 +88,14 @@ v0.8.12-preview.1 及本地 preview.2、preview.3 可以直接升级到本版，
 
 确认弹窗默认“确认这条，并保留全部已有记忆”；明确矛盾与不确定分别显示。只有明确矛盾可以被替换，现有记忆不会在安装时自动批量确认或更改。
 
-## v0.8.14 验收
+## v0.8.15 验收
 
-1. 网页右上角、运行时回执与 memvec `/stats` 均应显示 0.8.14；memvec capabilities 应包含 `auto-confirm-guard`。
+1. 网页右上角、运行时回执与 memvec `/stats` 均应显示 0.8.15；memvec capabilities 应包含 `auto-confirm-guard`。
 2. 当前心绪可切换可视化/文字列表，空闲联想及主观感受开关已移到这里，原配置保留。
 3. 长期记忆 → 待确认提供自动核对。新安装默认关闭，启用后 DSH 运行时每分钟处理一条候选或一批历史；关闭网页不会停止，关闭开关才停止后续提交。
 4. 备份 `feiyu-memory-console/candidate-auto.json` 和操作审计；自动确认可在操作记录撤销。回退代码不会自动撤销已经确认的记忆。
 5. 旧情绪状态无需重置，缺少日常感受字段时按空值迁移；不重算旧聊天情绪。
+
+## 从 0.8.14 更新
+
+本版修复后台新会话的事件快照接收。完整更新插件、桥接与 memvec 以保持版本一致；候选自动核对的已有开关、记录与退避时间保留，失败记录会到期重试，不需要删除。升级不重播旧 QQ 回复，也不重置情绪。

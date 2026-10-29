@@ -143,5 +143,25 @@
       "usage-features.mjs": "a79c333e6169f6305c3341211ab1a68bfb17d4b0606498b330c2961ba55c47b7",
       "continuity.mjs": "51a55100884327d3ab73805555f32fabcbbbb942a21c3bc5fc99156153fd1dbd"
     }
+  },
+  {
+    "version": "0.8.14",
+    "files": {
+      "bridge.js": "3f6a2aab8351cd0b76a184737d9c4de06c50d504602c0f5c1ad894e32e66c8f2",
+      "human-context.mjs": "5a0de4c1ba9bb2b80a07c737499d1a76d0156b93562b1a7ebd6667fc4ffcc349",
+      "emotion.js": "2ae6e9bfb194842782bef90dcd20a77f63f57fdf4a5a3e390c5d8d3bfb13dc7d",
+      "emotion-appraisal.mjs": "fc1045ae37dbd796ad952df14b825a650605cca7d71270d42dd3da711d129eb6",
+      "turn-traces.mjs": "5a048fd589d168fdf02c4c08282bf4c5a7b672f6b60e8b42d5b46759d8af365c",
+      "emotion-context.mjs": "ed0a846e6e5be8b326ffceda32e5512cbbc5aee4dc723f8d67e66eb6eb0e8c7c",
+      "appraisal-budget.mjs": "bb271e1b372570d5a679e75f096aed33be8e6de873aff16fe104241dcb090256",
+      "daily-memory.js": "fda3edb5c4d5a11aec3fa0dbbf90c85d48515d30cc2083f9bc4da11c762c12e9",
+      "fact-review.mjs": "9e75d89184cb526adf2f5310c2027269d971ec95e047fc6f58ced3c09cb7d5fc",
+      "idle-association.mjs": "2c827290f2b8b4fe763c5797a9dce8fa7a4789224fac3bdbcf34ea84ef352b6f",
+      "memory-coverage.mjs": "db2ae2874cffa49366970a07798d959a44cb4401987c3a7c2a762b24f8e70635",
+      "feature-token-ledger.mjs": "4b56d4aace538d07ade5c43a9624cfd9a78e89772108bc8ce80ee357e599f5e2",
+      "feature-model-prices.mjs": "06d717cff7967f54b93077d3e631d656466c5df72fce083212fab44ab7e6e91b",
+      "usage-features.mjs": "c9ba9f98f6b24cffc0bcd8e3dd5e6d0e6950445d9b11c98978d4ac4b5c5383c3",
+      "continuity.mjs": "4f1e7151e2a251ef1c7771d8bff27c26040f9b922e3303673222ec8fb4902775"
+    }
   }
 ]
