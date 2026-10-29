@@ -2,14 +2,14 @@
 
 > 本地优先的 QQ 角色记忆控制台，DSH 插件形态。
 
-![version](https://img.shields.io/badge/version-0.8.3-0e5a68)
+![version](https://img.shields.io/badge/version-0.8.4-0e5a68)
 ![license](https://img.shields.io/badge/license-MIT-2e8696)
 ![node](https://img.shields.io/badge/node-24%2B-339933)
 ![platform](https://img.shields.io/badge/platform-Windows-0078d4)
 
 把长期记忆、原文与摘要、日记、性格和情绪放进同一个本地页面：能看、能改、能撤回。所有数据都在本机，不经过外部服务器。
 
-[使用手册](manual/可塑性记忆-使用手册-0.8.3.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
+[使用手册](manual/可塑性记忆-使用手册-0.8.4.pdf) · [memvec 技术说明](docs/memvec.md) · [更新日志](CHANGELOG.md) · [Release](https://github.com/swy55555/dsh-feiyu-memory-console/releases)
 
 ---
 
@@ -190,7 +190,7 @@ node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
 | `bedtime.time` | `24:00` | 催睡时间 |
 | `bedtime.sulkCooldownHours` | `20` | 催睡闹脾气的冷却 |
 
-完整字段和默认值见 [使用手册](manual/可塑性记忆-使用手册-0.8.3.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
+完整字段和默认值见 [使用手册](manual/可塑性记忆-使用手册-0.8.4.pdf) 与 [bridge/P0-CONTEXT.md](bridge/P0-CONTEXT.md)。
 
 ### 玩梗
 
@@ -229,12 +229,12 @@ node bridge/install-all.mjs --target "$env:USERPROFILE\.dsh\qq-bridge" --apply
 
 ### 记忆共享
 
-默认开启：她除了当前聊天，还会检索别的聊天里的 active 记忆，在提示词里标成「别处记住的（已过滤隐私）」。
+默认关闭。在总览页「跨聊天记忆共享」里明确开启后，她才会检索别的聊天里的 active 记忆，并在提示词里标成「别处记住的（已过滤隐私）」。
 
 - 管理员私聊和旧 `global` 里的住址、地址、真名、姓名、身份证、手机号、护照、银行卡、密码、私密/秘密、别到处说、病历、工资、存款等不参与共享；
 - 其他聊天的普通偏好、习惯、计划和共同经历可以共享；
 - 总览页有「跨聊天记忆共享」开关，关掉后跨聊天检索完全停止，只召回当前聊天；
-- 配置：`socialV2.memoryShare.{enabled,topK,minScore}`，默认 `true/2/0.45`；开关会热更新，不用重启桥接。
+- 配置：`socialV2.memoryShare.{enabled,topK,minScore}`，默认 `false/2/0.45`；开关会热更新，不用重启桥接。
 
 隐私过滤是关键词规则，不是语义模型；写得特别隐晦的住址或真名可能漏掉。
 
@@ -334,7 +334,7 @@ node test/browser.test.mjs
 
 ## 文档
 
-- [使用手册（PDF）](manual/可塑性记忆-使用手册-0.8.3.pdf)：逐页功能说明、配置和排查
+- [使用手册（PDF）](manual/可塑性记忆-使用手册-0.8.4.pdf)：逐页功能说明、配置和排查
 - [memvec 技术说明](docs/memvec.md)：技术选型、数据模型、检索与遗忘公式、参考文献
 - [梗库说明](docs/memes.md)：表结构、来源说明、替换与过滤规则
 - [上下文层说明](bridge/P0-CONTEXT.md)：原文、摘要、轮换和预算
