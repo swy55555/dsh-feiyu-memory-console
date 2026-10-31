@@ -12,6 +12,20 @@ function fixture(options={}){
 function concern(quote,more={}){return {id:'',action:'open',title:'明天的面试',detail:'尚不知道结果',quote,ttlHours:72,...more};}
 function belief(quote,more={}){return {id:'',action:'propose',text:'也许在担心面试表现',quote,evidenceKind:'new',...more};}
 
+test('partial event reuses only independently valid emotion, never updates concerns or learns preferences',async()=>{
+  let learned=0;const f=fixture({onLearning:()=>learned++});
+  f.value={...neutral(),appraisal:{kind:'affection',target:'character',confidence:.96,intensity:.4,evidence:['摸摸脑袋']},
+    concerns:[concern('原话不存在')],learning:[{unsafe:'must not apply'}]};
+  const result=await f.say('摸摸脑袋');
+  assert.equal(result.partial,true);assert.equal(result.appraisal.kind,'affection');assert.equal(f.calls,1);
+  assert.equal(f.snap().concerns.length,0);assert.equal(f.snap().beliefs.length,0);assert.equal(learned,0);
+  assert.equal(f.c.prompt(KEY,{}),'');assert.equal(f.snap().relation.trust,.5);
+  f.c.outcome(KEY,result.id,{kind:'affection',deltaV:.1,deltaA:.05});
+  assert.equal(f.snap().events.at(-1).emotion.deltaV,.1);
+  f.value={...neutral(),concerns:[concern('原话不存在')],appraisal:{kind:'conflict',target:'character',confidence:.99,intensity:1,evidence:['伪造攻击']}};
+  assert.equal(await f.say('普通聊天'),null);assert.equal(f.snap().events.at(-1).status,'unavailable');
+});
+
 test('interview → unrelated code → correction → completion retains only relevant, revisable context',async()=>{
   const f=fixture(),n=neutral();n.concerns=[concern('明天面试')];n.beliefs=[belief('有点紧张')];f.value=n;
   await f.say('明天面试，有点紧张');
@@ -29,9 +43,9 @@ test('interview → unrelated code → correction → completion retains only re
 });
 test('only real current quotes and known IDs accepted; invalid batch commits no partial updates',async()=>{
   const f=fixture(),n=neutral();n.concerns=[concern('明天面试')];n.beliefs=[belief('凭空想象')];f.value=n;
-  assert.equal(await f.say('明天面试'),null);assert.equal(f.snap().concerns.length,0);
+  assert.equal((await f.say('明天面试')).partial,true);assert.equal(f.snap().concerns.length,0);
   n.beliefs=[];n.concerns[0].id='foreign';n.concerns[0].action='update';f.value=n;
-  assert.equal(await f.say('明天面试'),null);assert.equal(f.snap().events.at(-1).status,'unavailable');
+  assert.equal((await f.say('明天面试')).partial,true);assert.equal(f.snap().events.at(-1).status,'partial');
 });
 test('three separated days support a revisable recognition, copies and duplicated events do not',async()=>{
   const f=fixture(),n=neutral();n.beliefs=[belief('这次又提前检查了路线')];f.value=n;

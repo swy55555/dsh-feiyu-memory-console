@@ -1,0 +1,51 @@
+{
+  "windowStart": "2026-10-30 21:52:56",
+  "windowEnd": "2026-10-30 22:52:56",
+  "timezone": "Asia/Shanghai",
+  "currency": "CNY",
+  "pricing": "installed local price-table estimates, not vendor invoice",
+  "requests": 258,
+  "features": {
+    "chat": {
+      "requests": 180,
+      "tokens": 75167479,
+      "cost": 2.233923080000001
+    },
+    "event_understanding": {
+      "requests": 8,
+      "tokens": 58897,
+      "cost": 0.06310988
+    },
+    "image_description": {
+      "requests": 7,
+      "tokens": 15589,
+      "cost": 0.01667444
+    },
+    "fact_review": {
+      "requests": 45,
+      "tokens": 136411,
+      "cost": 0.17458544
+    },
+    "coverage_check": {
+      "requests": 6,
+      "tokens": 19326,
+      "cost": 0.041489519999999995
+    },
+    "memory_extract": {
+      "requests": 6,
+      "tokens": 29520,
+      "cost": 0.05629516000000001
+    },
+    "confirmation_review": {
+      "requests": 5,
+      "tokens": 19651,
+      "cost": 0.0341332
+    },
+    "idle_association": {
+      "requests": 1,
+      "tokens": 2877,
+      "cost": 0.00461904
+    }
+  },
+  "modelEvalCallsDuringThisAudit": 0
+}

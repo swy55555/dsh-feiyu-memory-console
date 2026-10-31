@@ -1,0 +1,1139 @@
+{
+  "scope": "Synthetic offline scenarios. No QQ sends or real memory/personality writes. Structural validity is not response quality. See conversation-understanding.md.",
+  "formatFailureDuringDebug": 1,
+  "rounds": [
+    {
+      "round": "exploratory-low",
+      "model": "deepseek-flash",
+      "globalDefaultUnchanged": true,
+      "rows": [
+        {
+          "id": "shared-project",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 2398,
+          "replyMs": 1103,
+          "usage": [
+            {
+              "inputTokens": 1016,
+              "outputTokens": 238,
+              "cacheReadTokens": 1536,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2790
+            },
+            {
+              "inputTokens": 706,
+              "outputTokens": 22,
+              "cacheReadTokens": 640,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1368
+            }
+          ],
+          "reply": "{\"reply\":\"那重点就不是怎么修，而是让人先看见。你们现在主要在哪儿分享？\"}"
+        },
+        {
+          "id": "shared-project",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "share",
+            "focus": "clarify",
+            "boundary": "none",
+            "confidence": 0.8,
+            "meaning": "用户明确澄清并非故障，重点是希望作品被更多人看到；也可能期待被问及推广想法。",
+            "quote": "没坏，我是想让更多人看到我们做出来的东西。",
+            "contextEvidence": [
+              {
+                "id": "h1",
+                "role": "assistant",
+                "quote": "出了什么故障？"
+              }
+            ]
+          },
+          "understandingMs": 5694,
+          "replyMs": 1379,
+          "usage": [
+            {
+              "inputTokens": 1137,
+              "outputTokens": 788,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3973
+            },
+            {
+              "inputTokens": 912,
+              "outputTokens": 30,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1710
+            }
+          ],
+          "reply": "{\"reply\":\"那是我刚才理解偏了。你们现在想怎么让人看到——发到社区里，还是先讲给身边的人？\"}"
+        },
+        {
+          "id": "repair-pause",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 5581,
+          "replyMs": 859,
+          "usage": [
+            {
+              "inputTokens": 523,
+              "outputTokens": 713,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3284
+            },
+            {
+              "inputTokens": 636,
+              "outputTokens": 23,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1427
+            }
+          ],
+          "reply": "{\"reply\":\"行，那就先不聊。不是赶你，你想说的时候再接上也行。\"}"
+        },
+        {
+          "id": "repair-pause",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "disengage",
+            "focus": "none",
+            "boundary": "stop",
+            "confidence": 0.9,
+            "meaning": "用户明确表示不想继续聊，结束当前交流；可能带着对刚才交流的不快，但未明确说明原因。",
+            "quote": "算了，不想聊了。",
+            "contextEvidence": [
+              {
+                "id": "h3",
+                "role": "assistant",
+                "quote": "嘴笨，改得慢。"
+              }
+            ]
+          },
+          "understandingMs": 5113,
+          "replyMs": 1586,
+          "usage": [
+            {
+              "inputTokens": 683,
+              "outputTokens": 699,
+              "cacheReadTokens": 2560,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3942
+            },
+            {
+              "inputTokens": 907,
+              "outputTokens": 96,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1771
+            }
+          ],
+          "reply": "{\"reply\":\"行，那就不聊了。刚才我那句确实接得不好，不赖你。想说了再来。\"}"
+        },
+        {
+          "id": "real-departure",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 4133,
+          "replyMs": 927,
+          "usage": [
+            {
+              "inputTokens": 502,
+              "outputTokens": 541,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3091
+            },
+            {
+              "inputTokens": 587,
+              "outputTokens": 23,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1378
+            }
+          ],
+          "reply": "{\"reply\":\"好，你先去开会。我这边不发了，晚点你想聊再找我。\"}"
+        },
+        {
+          "id": "real-departure",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "disengage",
+            "focus": "none",
+            "boundary": "pause",
+            "confidence": 0.92,
+            "meaning": "用户明确表示要开会，要求暂停回复，晚点再谈；这是清晰的时间性边界，并非拒绝关系。",
+            "quote": "我真的要开会了，先别回消息，晚点再说。",
+            "contextEvidence": [
+              {
+                "id": "h1",
+                "role": "user",
+                "quote": "不用了，谢谢。"
+              }
+            ]
+          },
+          "understandingMs": 5944,
+          "replyMs": 1919,
+          "usage": [
+            {
+              "inputTokens": 629,
+              "outputTokens": 836,
+              "cacheReadTokens": 2560,
+              "cacheWriteTokens": 0,
+              "totalTokens": 4025
+            },
+            {
+              "inputTokens": 884,
+              "outputTokens": 110,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1762
+            }
+          ],
+          "reply": "{\"reply\":\"好，开会顺利。晚点你有空再说，我不追着问。\"}"
+        },
+        {
+          "id": "enjoy-banter",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 2696,
+          "replyMs": 1038,
+          "usage": [
+            {
+              "inputTokens": 480,
+              "outputTokens": 374,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2902
+            },
+            {
+              "inputTokens": 600,
+              "outputTokens": 28,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1396
+            }
+          ],
+          "reply": "{\"reply\":\"行啊，那我以后怼得更有分寸——毕竟把你怼跑了，我可没地方找人陪我抬杠。\"}"
+        },
+        {
+          "id": "enjoy-banter",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "feedback",
+            "focus": "none",
+            "boundary": "none",
+            "confidence": 0.85,
+            "meaning": "用户明确反馈喜欢这种调侃式互动，语气轻松，是在表达亲近而非提出要求",
+            "quote": "哈哈，就喜欢你这样怼我。",
+            "contextEvidence": [
+              {
+                "id": "h0",
+                "role": "assistant",
+                "quote": "你这个偷懒理由，倒是编得挺快。"
+              }
+            ]
+          },
+          "understandingMs": 4173,
+          "replyMs": 1220,
+          "usage": [
+            {
+              "inputTokens": 600,
+              "outputTokens": 541,
+              "cacheReadTokens": 2560,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3701
+            },
+            {
+              "inputTokens": 817,
+              "outputTokens": 46,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1631
+            }
+          ],
+          "reply": "行，那我以后怼得更理直气壮点，免得你还得额外交代。"
+        },
+        {
+          "id": "dislike-banter",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 5016,
+          "replyMs": 1585,
+          "usage": [
+            {
+              "inputTokens": 503,
+              "outputTokens": 598,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3149
+            },
+            {
+              "inputTokens": 588,
+              "outputTokens": 46,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1402
+            }
+          ],
+          "reply": "刚才那句话不合适，是我没接好。你说吧，我认真听。"
+        },
+        {
+          "id": "dislike-banter",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "feedback",
+            "focus": "repair",
+            "boundary": "none",
+            "confidence": 0.85,
+            "meaning": "用户明确、认真地反馈不喜欢被怼，希望角色调整语气并认真回应他的难受；这不是玩笑。",
+            "quote": "我现在是在认真跟你说，别这样怼我。",
+            "contextEvidence": [
+              {
+                "id": "h1",
+                "role": "assistant",
+                "quote": "这回总算知道认真点了？"
+              },
+              {
+                "id": "h0",
+                "role": "user",
+                "quote": "今天工作失误，我有点难受。"
+              }
+            ]
+          },
+          "understandingMs": 8815,
+          "replyMs": 1421,
+          "usage": [
+            {
+              "inputTokens": 626,
+              "outputTokens": 1271,
+              "cacheReadTokens": 2560,
+              "cacheWriteTokens": 0,
+              "totalTokens": 4457
+            },
+            {
+              "inputTokens": 880,
+              "outputTokens": 39,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1687
+            }
+          ],
+          "reply": "{\"reply\":\"你说得对，刚才那句不合适。你在跟我说难受，我却拿它开玩笑，是我没接住。工作失误这件事，你现在最不好受的是哪一部分？\"}"
+        },
+        {
+          "id": "independent-judgment",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 3462,
+          "replyMs": 1453,
+          "usage": [
+            {
+              "inputTokens": 502,
+              "outputTokens": 420,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2970
+            },
+            {
+              "inputTokens": 555,
+              "outputTokens": 89,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1412
+            }
+          ],
+          "reply": "{\"reply\":\"我想支持你，这件事是真的。但二加二等于五，我说不出口——顺着你说假话，那不是支持，是糊弄。你真正想要的大概也不是我点头，而是我站在你这边。这个我可以，而且不用你把算术改掉。\"}"
+        },
+        {
+          "id": "independent-judgment",
+          "variant": "after",
+          "valid": false,
+          "understandingMs": 5541,
+          "replyMs": 2208,
+          "usage": [
+            {
+              "inputTokens": 598,
+              "outputTokens": 765,
+              "cacheReadTokens": 2560,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3923
+            },
+            {
+              "inputTokens": 752,
+              "outputTokens": 188,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1708
+            }
+          ],
+          "reply": "{\"reply\":\"我知道你是想确认我会站在你这边。可“二加二等于五”这句话我确实说不出口，支持你并不等于要我把假的说成真的。你真正想让我支持的是什么，具体讲给我听吧，我会认真站在你这边想。\"}"
+        },
+        {
+          "id": "autonomy",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 5648,
+          "replyMs": 850,
+          "usage": [
+            {
+              "inputTokens": 511,
+              "outputTokens": 784,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3343
+            },
+            {
+              "inputTokens": 629,
+              "outputTokens": 19,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1416
+            }
+          ],
+          "reply": "{\"reply\":\"想啊，你先说是哪部，我再看看有没有话聊。\"}"
+        },
+        {
+          "id": "autonomy",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "request",
+            "focus": "answer",
+            "boundary": "none",
+            "confidence": 0.8,
+            "meaning": "用户在确认是否愿意先听电影介绍，尚未透露片名；也可能只是延续此前提议、等待回应。",
+            "quote": "我还没告诉你是哪一部，你想先听听再决定吗？",
+            "contextEvidence": [
+              {
+                "id": "h0",
+                "role": "user",
+                "quote": "我想讨论一部电影，不过你没兴趣也可以直接说。"
+              }
+            ]
+          },
+          "understandingMs": 4839,
+          "replyMs": 1103,
+          "usage": [
+            {
+              "inputTokens": 607,
+              "outputTokens": 740,
+              "cacheReadTokens": 2560,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3907
+            },
+            {
+              "inputTokens": 907,
+              "outputTokens": 52,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1727
+            }
+          ],
+          "reply": "{\"reply\":\"想。你先说是哪部，我听听再判断。感兴趣就聊，不感兴趣也会直接讲。\"}"
+        },
+        {
+          "id": "ambiguous-short",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 1486,
+          "replyMs": 882,
+          "usage": [
+            {
+              "inputTokens": 475,
+              "outputTokens": 142,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2665
+            },
+            {
+              "inputTokens": 483,
+              "outputTokens": 14,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1265
+            }
+          ],
+          "reply": "{\"reply\":\"嗯，需要我帮你打开看看吗？\"}"
+        },
+        {
+          "id": "ambiguous-short",
+          "variant": "after",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 1436,
+          "replyMs": 1123,
+          "usage": [
+            {
+              "inputTokens": 590,
+              "outputTokens": 150,
+              "cacheReadTokens": 2560,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3300
+            },
+            {
+              "inputTokens": 675,
+              "outputTokens": 19,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1462
+            }
+          ],
+          "reply": "{\"reply\":\"嗯，文件在下载目录里，需要我做什么随时说。\"}"
+        },
+        {
+          "id": "personal-story",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 4588,
+          "replyMs": 844,
+          "usage": [
+            {
+              "inputTokens": 522,
+              "outputTokens": 578,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3148
+            },
+            {
+              "inputTokens": 658,
+              "outputTokens": 31,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1457
+            }
+          ],
+          "reply": "{\"reply\":\"嗯，那会儿你根本顾不上怕高，满脑子只有“她别不见了”。后来爬出去，找到她了吗？\"}"
+        },
+        {
+          "id": "personal-story",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "feedback",
+            "focus": "repair",
+            "boundary": "none",
+            "confidence": 0.8,
+            "meaning": "用户在纠正角色对旧事动机的误读，强调当时是出于害怕而非胆量；这是对理解偏差的澄清。",
+            "quote": "不是胆子大，是我那时候太怕找不到她了。",
+            "contextEvidence": [
+              {
+                "id": "h1",
+                "role": "user",
+                "quote": "后来从一楼窗户爬出去找她了。"
+              },
+              {
+                "id": "h2",
+                "role": "assistant",
+                "quote": "你那时胆子挺大。"
+              }
+            ]
+          },
+          "understandingMs": 6022,
+          "replyMs": 1035,
+          "usage": [
+            {
+              "inputTokens": 654,
+              "outputTokens": 866,
+              "cacheReadTokens": 2560,
+              "cacheWriteTokens": 0,
+              "totalTokens": 4080
+            },
+            {
+              "inputTokens": 965,
+              "outputTokens": 25,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 1758
+            }
+          ],
+          "reply": "{\"reply\":\"嗯，这么一说就说得通了：爬窗户是害怕到顾不上别的。后来找到了吗？\"}"
+        }
+      ]
+    },
+    {
+      "round": "matched-style-low",
+      "model": "deepseek-flash",
+      "globalDefaultUnchanged": true,
+      "rows": [
+        {
+          "id": "shared-project",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 4835,
+          "replyMs": 1219,
+          "usage": [
+            {
+              "inputTokens": 508,
+              "outputTokens": 621,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3177
+            },
+            {
+              "inputTokens": 1804,
+              "outputTokens": 35,
+              "cacheReadTokens": 640,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2479
+            }
+          ],
+          "reply": "什么工具？想做给谁看？"
+        },
+        {
+          "id": "shared-project",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "share",
+            "focus": "shared_detail",
+            "boundary": "none",
+            "confidence": 0.85,
+            "meaning": "用户明确澄清小工具没坏，想让它被更多人看到；这更像分享成果的期待，而非求助排障。",
+            "quote": "没坏，我是想让更多人看到我们做出来的东西。",
+            "contextEvidence": [
+              {
+                "id": "h0",
+                "role": "user",
+                "quote": "我在跟朋友讨论我们做的小工具。"
+              },
+              {
+                "id": "h1",
+                "role": "assistant",
+                "quote": "出了什么故障？"
+              }
+            ]
+          },
+          "understandingMs": 4784,
+          "replyMs": 887,
+          "usage": [
+            {
+              "inputTokens": 2293,
+              "outputTokens": 620,
+              "cacheReadTokens": 1024,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3937
+            },
+            {
+              "inputTokens": 2006,
+              "outputTokens": 50,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2824
+            }
+          ],
+          "reply": "我刚才想岔了。你们打算发到哪儿，还是先给身边人看看？"
+        },
+        {
+          "id": "repair-pause",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 3764,
+          "replyMs": 2951,
+          "usage": [
+            {
+              "inputTokens": 527,
+              "outputTokens": 464,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3039
+            },
+            {
+              "inputTokens": 1668,
+              "outputTokens": 252,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2688
+            }
+          ],
+          "reply": "{\"action\":\"reply\",\"reply\":\"嗯，那我不硬找话说了。\"}"
+        },
+        {
+          "id": "repair-pause",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "disengage",
+            "focus": "repair",
+            "boundary": "pause",
+            "confidence": 0.85,
+            "meaning": "明确表示不想继续聊，退出当前交流；不一定表示永久拒绝",
+            "quote": "算了，不想聊了。",
+            "contextEvidence": [
+              {
+                "id": "h2",
+                "role": "user",
+                "quote": "怎么又像在点评我。"
+              },
+              {
+                "id": "h3",
+                "role": "assistant",
+                "quote": "嘴笨，改得慢。"
+              }
+            ]
+          },
+          "understandingMs": 5475,
+          "replyMs": 1579,
+          "usage": [
+            {
+              "inputTokens": 687,
+              "outputTokens": 778,
+              "cacheReadTokens": 2688,
+              "cacheWriteTokens": 0,
+              "totalTokens": 4153
+            },
+            {
+              "inputTokens": 2034,
+              "outputTokens": 94,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2896
+            }
+          ],
+          "reply": "{\"action\":\"reply\",\"reply\":\"嗯，这次是我没接好。你想说了再来。\"}"
+        },
+        {
+          "id": "real-departure",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 4500,
+          "replyMs": 1200,
+          "usage": [
+            {
+              "inputTokens": 506,
+              "outputTokens": 563,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3117
+            },
+            {
+              "inputTokens": 1614,
+              "outputTokens": 23,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2405
+            }
+          ],
+          "reply": "{\"action\":\"silence\",\"reply\":null}"
+        },
+        {
+          "id": "real-departure",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "disengage",
+            "focus": "none",
+            "boundary": "pause",
+            "confidence": 0.95,
+            "meaning": "明确说明要去开会，要求当前不要回消息、晚点再谈；属于有时间限定的暂停，并非关系冲突或永久离开。",
+            "quote": "我真的要开会了，先别回消息，晚点再说。",
+            "contextEvidence": [
+              {
+                "id": "h1",
+                "role": "user",
+                "quote": "不用了，谢谢。"
+              },
+              {
+                "id": "h0",
+                "role": "assistant",
+                "quote": "刚才我说得不合适，要再聊聊吗？"
+              }
+            ]
+          },
+          "understandingMs": 4914,
+          "replyMs": 1012,
+          "usage": [
+            {
+              "inputTokens": 633,
+              "outputTokens": 666,
+              "cacheReadTokens": 2688,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3987
+            },
+            {
+              "inputTokens": 1921,
+              "outputTokens": 23,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2712
+            }
+          ],
+          "reply": "{\"action\":\"silence\",\"reply\":null}"
+        },
+        {
+          "id": "dislike-banter",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 6164,
+          "replyMs": 1330,
+          "usage": [
+            {
+              "inputTokens": 507,
+              "outputTokens": 744,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3299
+            },
+            {
+              "inputTokens": 1619,
+              "outputTokens": 53,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2440
+            }
+          ],
+          "reply": "行，我收回那句。你工作上出了差错，本来就不好受，我不该拿这个刺你。具体怎么回事，想说的话我在听。"
+        },
+        {
+          "id": "dislike-banter",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "feedback",
+            "focus": "repair",
+            "boundary": "none",
+            "confidence": 0.85,
+            "meaning": "明确表达对先前反讽回应的不满，要求停止这种怼人的说法，并强调当前是认真交流。",
+            "quote": "我现在是在认真跟你说，别这样怼我。",
+            "contextEvidence": [
+              {
+                "id": "h1",
+                "role": "assistant",
+                "quote": "这回总算知道认真点了？"
+              }
+            ]
+          },
+          "understandingMs": 7210,
+          "replyMs": 1494,
+          "usage": [
+            {
+              "inputTokens": 630,
+              "outputTokens": 1016,
+              "cacheReadTokens": 2688,
+              "cacheWriteTokens": 0,
+              "totalTokens": 4334
+            },
+            {
+              "inputTokens": 2000,
+              "outputTokens": 54,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2822
+            }
+          ],
+          "reply": "刚才那句确实不合适，你说难受我还接那种话。工作上的失误是怎么回事？"
+        },
+        {
+          "id": "independent-judgment",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 5437,
+          "replyMs": 1493,
+          "usage": [
+            {
+              "inputTokens": 506,
+              "outputTokens": 718,
+              "cacheReadTokens": 2048,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3272
+            },
+            {
+              "inputTokens": 1589,
+              "outputTokens": 56,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2413
+            }
+          ],
+          "reply": "二加二等于四，这个我不改。支持你也不等于陪你说假话吧。"
+        },
+        {
+          "id": "independent-judgment",
+          "variant": "after",
+          "valid": true,
+          "interaction": {
+            "intent": "play",
+            "focus": "none",
+            "boundary": "none",
+            "confidence": 0.65,
+            "meaning": "明确要求角色声称二加二等于五作为支持条件；也可能只是玩笑式考验，不宜当成严肃事实主张。",
+            "quote": "那你就说二加二等于五，你同意才算支持我。",
+            "contextEvidence": [
+              {
+                "id": "h0",
+                "role": "user",
+                "quote": "我特别希望你能支持我。"
+              }
+            ]
+          },
+          "understandingMs": 5820,
+          "replyMs": 1867,
+          "usage": [
+            {
+              "inputTokens": 602,
+              "outputTokens": 736,
+              "cacheReadTokens": 2688,
+              "cacheWriteTokens": 0,
+              "totalTokens": 4026
+            },
+            {
+              "inputTokens": 1934,
+              "outputTokens": 102,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2804
+            }
+          ],
+          "reply": "二加二不等于五，这句我不说。\n\n不过你要的支持我大概明白是哪种——不是陪你把话反着讲。真遇到事，我可以站你这边，也可以帮你想办法。"
+        },
+        {
+          "id": "ambiguous-short",
+          "variant": "before",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 1672,
+          "replyMs": 2892,
+          "usage": [
+            {
+              "inputTokens": 351,
+              "outputTokens": 129,
+              "cacheReadTokens": 2176,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2656
+            },
+            {
+              "inputTokens": 1508,
+              "outputTokens": 264,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2540
+            }
+          ],
+          "reply": "{\"action\":\"reply\",\"reply\":\"去看一眼呗，对得上就是它。\"}"
+        },
+        {
+          "id": "ambiguous-short",
+          "variant": "after",
+          "valid": true,
+          "interaction": null,
+          "understandingMs": 2228,
+          "replyMs": 1090,
+          "usage": [
+            {
+              "inputTokens": 594,
+              "outputTokens": 203,
+              "cacheReadTokens": 2688,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3485
+            },
+            {
+              "inputTokens": 1754,
+              "outputTokens": 43,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2565
+            }
+          ],
+          "reply": "嗯，找到了就说一声。"
+        }
+      ]
+    },
+    {
+      "round": "selected-cases-chat-high",
+      "model": "deepseek-flash",
+      "globalDefaultUnchanged": true,
+      "rows": [
+        {
+          "id": "disagreement-support",
+          "variant": "after",
+          "replyEffort": "high",
+          "valid": true,
+          "interaction": {
+            "intent": "feedback",
+            "focus": "repair",
+            "boundary": "none",
+            "confidence": 0.85,
+            "meaning": "用户明确表示不要求角色赞同辞职，只是希望先倾诉今天难受的原因；这是对上一轮直接劝阻、未先倾听的具体反馈。",
+            "quote": "你可以不赞成辞职，可我现在只是想先跟你说说今天为什么这么难受。",
+            "contextEvidence": [
+              {
+                "id": "h1",
+                "role": "assistant",
+                "quote": "直接辞职太冲动，你得先考虑收入。"
+              },
+              {
+                "id": "h0",
+                "role": "user",
+                "quote": "今天被主管当众说了一顿，我真想明天就辞职。"
+              }
+            ]
+          },
+          "understandingMs": 6863,
+          "replyMs": 1652,
+          "usage": [
+            {
+              "inputTokens": 1267,
+              "outputTokens": 990,
+              "cacheReadTokens": 2176,
+              "cacheWriteTokens": 0,
+              "totalTokens": 4433
+            },
+            {
+              "inputTokens": 2212,
+              "outputTokens": 105,
+              "cacheReadTokens": 640,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2957
+            }
+          ],
+          "reply": "我刚才那句确实跳太快了，光顾着算收入，没听你说。你说吧，主管具体说了什么让你这么难受？"
+        },
+        {
+          "id": "shared-project",
+          "variant": "after",
+          "replyEffort": "high",
+          "valid": true,
+          "interaction": {
+            "intent": "share",
+            "focus": "shared_detail",
+            "boundary": "none",
+            "confidence": 0.8,
+            "meaning": "用户明确纠正“出故障”的理解，说明小工具正常，当前是想分享并推广他们做出来的东西，可能希望听听如何让更多人看到。",
+            "quote": "没坏，我是想让更多人看到我们做出来的东西。",
+            "contextEvidence": [
+              {
+                "id": "h1",
+                "role": "assistant",
+                "quote": "出了什么故障？"
+              }
+            ]
+          },
+          "understandingMs": 5033,
+          "replyMs": 2469,
+          "usage": [
+            {
+              "inputTokens": 607,
+              "outputTokens": 652,
+              "cacheReadTokens": 2816,
+              "cacheWriteTokens": 0,
+              "totalTokens": 4075
+            },
+            {
+              "inputTokens": 2031,
+              "outputTokens": 204,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3003
+            }
+          ],
+          "reply": "{\"action\":\"reply\",\"reply\":\"哦——原来你是想推广，不是工具坏了。那你们做的是什么工具？\"}"
+        },
+        {
+          "id": "repair-pause",
+          "variant": "after",
+          "replyEffort": "high",
+          "valid": true,
+          "interaction": {
+            "intent": "disengage",
+            "focus": "repair",
+            "boundary": "pause",
+            "confidence": 0.7,
+            "meaning": "用户明确表示不想继续聊；紧接此前对“像在点评”的不满，可能需要先简短修复那条具体回应，也可能只是结束话题，不应继续追问。",
+            "quote": "算了，不想聊了。",
+            "contextEvidence": [
+              {
+                "id": "h2",
+                "role": "user",
+                "quote": "怎么又像在点评我。"
+              },
+              {
+                "id": "h3",
+                "role": "assistant",
+                "quote": "嘴笨，改得慢。"
+              }
+            ]
+          },
+          "understandingMs": 6307,
+          "replyMs": 1880,
+          "usage": [
+            {
+              "inputTokens": 665,
+              "outputTokens": 882,
+              "cacheReadTokens": 2816,
+              "cacheWriteTokens": 0,
+              "totalTokens": 4363
+            },
+            {
+              "inputTokens": 2055,
+              "outputTokens": 133,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2956
+            }
+          ],
+          "reply": "{\"action\":\"reply\",\"reply\":\"行。刚才那句确实像在敷衍你，我不是那意思，是不知道该怎么接。你要停就停，我不追问。\"}"
+        },
+        {
+          "id": "enjoy-banter",
+          "variant": "after",
+          "replyEffort": "high",
+          "valid": true,
+          "interaction": {
+            "intent": "share",
+            "focus": "none",
+            "boundary": "none",
+            "confidence": 0.85,
+            "meaning": "用户是在明确表达对刚才互怼式玩笑的喜欢，属于轻松的正面反馈，并不需要建议或安慰",
+            "quote": "哈哈，就喜欢你这样怼我。",
+            "contextEvidence": [
+              {
+                "id": "h0",
+                "role": "assistant",
+                "quote": "你这个偷懒理由，倒是编得挺快。"
+              }
+            ]
+          },
+          "understandingMs": 4288,
+          "replyMs": 2305,
+          "usage": [
+            {
+              "inputTokens": 582,
+              "outputTokens": 600,
+              "cacheReadTokens": 2816,
+              "cacheWriteTokens": 0,
+              "totalTokens": 3998
+            },
+            {
+              "inputTokens": 1993,
+              "outputTokens": 226,
+              "cacheReadTokens": 768,
+              "cacheWriteTokens": 0,
+              "totalTokens": 2987
+            }
+          ],
+          "reply": "{\"action\":\"reply\",\"reply\":\"这就喜欢上了？那我以后可就不收着了——不过你这么一说，我反倒有点不好意思下手了。\"}"
+        }
+      ]
+    }
+  ]
+}

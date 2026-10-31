@@ -7,9 +7,53 @@ import vm from 'node:vm';
 import crypto from 'node:crypto';
 import http from 'node:http';
 import * as emotion from '../bridge/emotion.js';
+import {EmotionScopes,emotionScope} from '../bridge/emotion-scopes.mjs';
 import {Continuity} from '../bridge/continuity.mjs';
+function scoped(ctx){const lanes=new EmotionScopes({ownerKey:'private:1',legacy:ctx.emotionState});ctx.emotionLanes=lanes;ctx.emotionScope=emotionScope;ctx.emotionViewFor=k=>lanes.view(k);ctx.commitEmotionLane=(k,s)=>{lanes.set(k,s);ctx.emotionState=lanes.owner()};return ctx}
 const source=fs.readFileSync(new URL('../bridge/bridge-v09.js',import.meta.url),'utf8');
 const between=(a,b)=>{const x=source.indexOf(a),y=source.indexOf(b,x);assert.ok(x>=0&&y>x);return source.slice(x,y)};
+
+test('partly invalid continuity response still reaches real emotion handler without a second model request',async()=>{
+  let eventCalls=0,emotionCalls=0;
+  const c=new Continuity({enabled:()=>true,allowed:()=>true,generate:async()=>{eventCalls++;return JSON.stringify({summary:'亲昵互动',
+    appraisal:{kind:'affection',target:'character',confidence:.95,intensity:.4,evidence:['摸摸脑袋']},concerns:'bad',beliefs:[]});}});
+  const understood=await c.observe('private:1',{text:'摸摸脑袋'},c.begin('private:1','partial'));
+  const ctx=vm.createContext({...emotion,crypto,emotionState:emotion.emptyEmotion(),emotionLast:{text:'',at:0},
+    cfg:{socialV2:{emotion:{appraisalModel:{enabled:true}}}},emotionRecoveryCfg:()=>({}),recordEpisodeOutcome:()=>{},
+    saveEmotionState:()=>{},maybeCreateEpisode:()=>null,maybeQueueSpillover:()=>{},log:()=>{},
+    refineEmotionWithModel:async()=>{emotionCalls++;}});
+  scoped(ctx);const note=vm.runInContext(between('  function noteEmotion(','  // On-demand review')+';noteEmotion',ctx);
+  const applied=await note({source:'owner',text:'摸摸脑袋',key:'private:1',speakerId:'1',messageId:'partial',recentMessages:[],semanticAppraisal:understood.appraisal});
+  assert.equal(understood.partial,true);assert.equal(applied.kind,'affection');assert.equal(eventCalls,1);assert.equal(emotionCalls,0);
+});
+
+test('qq_get_prompt retains self reference once while preserving emotion and legacy persona behavior',()=>{
+  let self=true;
+  const ctx=vm.createContext({personaEnabled:()=>!self,selfReferenceEnabled:()=>self,selfReference:{render:()=>'<full self reference>'},
+    renderPersonaBlock:()=>'<legacy dimensions>',personaStateForChat:()=>({}),personaIsOwnerKey:()=>true,
+    cfg:{socialV2:{emotion:{enabled:true}}},mindWorkspaceEnabled:()=>true,emotionState:{},emotionViewFor:()=>({}),idleAssociations:{feeling:()=>null},
+    emotionPromptLine:()=>'<emotion>',emotionRecoveryCfg:()=>({}),withSubjectiveFeeling:x=>x,episodeRecallBlock:()=>'<episodes>',contrarianPrompt:()=>'<legacy mood>'});
+  const fn=vm.runInContext(between('  function personaBlockFor(','  let personaBusy')+';personaBlockFor',ctx);
+  assert.equal(fn('private:1'),'<full self reference>\n<emotion>\n<episodes>');
+  assert.equal(fn('private:1',false,false),'<emotion>\n<episodes>');
+  assert.equal(fn('private:1',true),'<full self reference>');
+  self=false;assert.equal(fn('private:1',false,false),'<legacy dimensions>\n<emotion>\n<episodes>\n<legacy mood>');
+  assert.match(source,/persona: personaBlockFor\(key, false, !selfReferenceEnabled\(\)\)/);
+  // Self reference is already bounded by its own schema; legacy role truncation must not remove its tail.
+  const expression=source.match(/role: \{ name: selfReferenceEnabled\(\)[^\n]+hint: (.+) \},/)[1];
+  const full='完整参考'.repeat(1000);
+  assert.equal(vm.runInNewContext(expression,{selfReferenceEnabled:()=>true,selfReference:{render:()=>full},key:'private:1',currentMode:'reserved2',currentRoleHintV2:()=>'<truncated>'}),full);
+});
+
+test('live emotion handler returns the measured change instead of silently omitting it',async()=>{
+ const ctx=vm.createContext({...emotion,crypto,Date,Promise,cfg:{socialV2:{emotion:{enabled:true}}},emotionState:emotion.emptyEmotion(Date.now()),emotionLast:{text:'',at:0},
+  recordEpisodeOutcome:()=>{},emotionRecoveryCfg:()=>({}),saveEmotionState:()=>{},maybeCreateEpisode:()=>null,maybeQueueSpillover:()=>{},log:()=>{},reconcileEmotionCorrection:()=>{},refineEmotionWithModel:async()=>null});
+ scoped(ctx);const fn=vm.runInContext(between('  function noteEmotion(','  // On-demand review')+';noteEmotion',ctx);
+ const result=await fn({text:'新发现真有意思',key:'private:1',speakerId:'1',messageId:'measured',recentMessages:[],semanticAppraisal:{kind:'neutral',target:'none',confidence:.95,intensity:0,evidence:[],feelings:[{kind:'curiosity',intensity:.5,confidence:.95,evidence:'新发现',reason:'新的话题'}]}});
+ assert.ok(Number.isFinite(result.deltaV));assert.ok(result.deltaA>.05);
+ const c=new Continuity({enabled:()=>true,allowed:()=>true,generate:async()=>''});c.state('private:1').events.push({id:'measured'});c.outcome('private:1','measured',result);
+ assert.equal(c.state('private:1').events[0].emotion.deltaA,result.deltaA);
+});
 
 test('actual emotion entry accepts unified appraisal and does not spend a second model call',async()=>{
   let calls=0;
@@ -17,7 +61,7 @@ test('actual emotion entry accepts unified appraisal and does not spend a second
     cfg:{socialV2:{emotion:{appraisalModel:{enabled:true}}}},emotionRecoveryCfg:()=>({}),recordEpisodeOutcome:()=>{},
     saveEmotionState:()=>{},maybeCreateEpisode:()=>null,maybeQueueSpillover:()=>{},log:()=>{},
     runHeadlessPrompt:()=>{calls++;throw Error('unexpected second call')}});
-  const fn=vm.runInContext(between('  function noteEmotion(','  const emotionTimer =')+';noteEmotion',ctx);
+  scoped(ctx);const fn=vm.runInContext(between('  function noteEmotion(','  const emotionTimer =')+';noteEmotion',ctx);
   const result=await fn({text:'今天有点紧张',key:'private:1',messageId:'m1',recentMessages:[],semanticAppraisal:{kind:'user_distress',target:'user',confidence:.95,intensity:.4,evidence:['有点紧张']}});
   assert.equal(calls,0);assert.equal(result.kind,'user_distress');assert.equal(ctx.emotionState.dynamics.conflict,0);
 });

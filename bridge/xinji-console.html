@@ -1756,38 +1756,185 @@ button:active:not(:disabled) {
 #section-usage .usage-legend i.mixed { background:var(--accent-hover) }
 
 </style>
+<style id="xinji-atmosphere">
+/* Xinji atmosphere: decorative light, factual status, no model requests. */
+:root {
+  --bg:#f4f5ef;--surface:#fffffb;--surface-subtle:#f8faf5;--surface-sunken:#f0f3ed;--surface-hover:#edf3ec;
+  --surface-chip:#edf1e9;--surface-chip-strong:#dfe9df;--surface-open:#f8faf5;--card:#fffffb;
+  --topbar-bg:rgba(244,245,239,.91);--save-bar-bg:#f0f6eff5;--overlay:#183c3455;
+  --card-border:#dce4d9;--border:#d2ddd3;--border-input:#ccd9ce;--border-chip:#dce5d9;--border-strong:#b8c9bd;--border-subtle:#e8ede3;
+  --text:#2c4139;--text-strong:#233e33;--text-input:#2c4139;--text-secondary:#52675c;--label:#52675c;
+  --muted:#627368;--muted-soft:#6d7c70;--eyebrow:#637b6c;--icon:#5a7664;--placeholder:#748174;--pre-fg:#52675c;
+  --accent:#3c735c;--accent-hover:#2e604b;--accent-border:#3c735c;--accent-soft-bg:#e3eee1;--accent-soft-bg-active:#eef5ea;
+  --accent-soft-fg:#345e49;--accent-soft-fg-muted:#567661;--accent-border-soft:#bfd3bf;--accent-border-soft-hover:#9ab79d;
+  --accent-border-active:#6f9a7b;--accent-border-hover:#89ab91;--accent-border-focus:#609074;--focus-ring:#6b947e;
+  --code-fg:#496958;--code-fg-strong:#355b44;--ok:#327359;--pill-blue-bg:#e8eee1;--pill-blue-fg:#466638;
+  --shadow-card:0 5px 25px #32593d05;--shadow-pop:0 18px 50px #284c3520;--radius:20px;
+  --mist-a:#b9d3c4;--mist-b:#eed7b8;--mist-c:#d2d8c2;--hero-bg:#edf1e6;--sidebar-bg:#f8faf3;
+}
+:root[data-theme="dark"] {
+  --bg:#17241f;--surface:#213029;--surface-subtle:#23352d;--surface-sunken:#1a2822;--surface-hover:#2b4034;
+  --surface-chip:#2b3c30;--surface-chip-strong:#344b3c;--surface-open:#26372e;--card:#213029;
+  --topbar-bg:rgba(23,36,31,.94);--save-bar-bg:#263b30f5;--card-border:#35483b;--border:#405447;--border-input:#4b6252;
+  --border-chip:#3b5040;--border-strong:#607d67;--border-subtle:#34483b;--text:#e0e9df;--text-strong:#f0f2e7;--text-input:#e0e9df;
+  --text-secondary:#becdbf;--label:#c5d1c1;--muted:#afc2b1;--muted-soft:#a4b8a5;--eyebrow:#acc0a9;--icon:#b9cdb7;--placeholder:#a4b6a4;--pre-fg:#bccfbc;
+  --accent:#9bc1a3;--accent-hover:#b0cfb1;--accent-border:#719d7c;--accent-soft-bg:#304a39;--accent-soft-bg-active:#2e4234;
+  --accent-soft-fg:#c0ddc1;--accent-soft-fg-muted:#acc6a9;--accent-border-soft:#46654c;--accent-border-soft-hover:#668970;
+  --accent-border-active:#96ba9d;--accent-border-hover:#91b297;--accent-border-focus:#aacdb2;--focus-ring:#a3c2a7;
+  --code-fg:#bcceb1;--code-fg-strong:#d7e6c9;--ok:#9dcfae;--pill-blue-bg:#344832;--pill-blue-fg:#c7dbb8;
+  --mist-a:#729881;--mist-b:#b49b72;--mist-c:#7e9480;--hero-bg:#283a2d;--sidebar-bg:#1c2b23;
+  --shadow-card:0 5px 25px #00000010;--shadow-pop:0 18px 50px #00000040;
+}
+body { background:var(--bg);font-family:"Segoe UI","Microsoft YaHei",sans-serif;line-height:1.7 }
+.bg-decor { display:none }
+.sidebar { width:242px;padding:35px 20px 22px;background:var(--sidebar-bg);border-color:var(--card-border) }
+.workspace { margin-left:242px }
+.brand { padding:0 9px 30px;font-size:25px;letter-spacing:4px;gap:13px }
+.brand small { font-size:10px;letter-spacing:1px;color:var(--muted);margin-top:4px }
+.brand-mark { width:40px;height:44px;background:none;box-shadow:none;border:0;color:var(--accent);flex-shrink:0 }
+.brand-mark svg { width:40px;height:44px }
+.nav-label { padding:21px 13px 9px;font-size:10px;letter-spacing:2px;color:var(--muted) }
+.nav-item { min-height:44px;padding:10px 13px;margin:3px 0;border-radius:12px;font-size:13px;gap:12px;border:1px solid transparent }
+.nav-item.active { background:var(--accent-soft-bg);border-color:var(--accent-border-soft);color:var(--accent-soft-fg) }
+.nav-icon { width:19px;height:19px;display:inline-flex;align-items:center;justify-content:center }
+.nav-icon svg { width:19px;height:19px }
+.sidebar-bottom { padding:20px 0 0;margin:28px 12px 0;font-size:11px;letter-spacing:.5px }
+.sidebar-bottom small { font-size:10px;letter-spacing:0 }
+.sidebar-note { margin:24px 12px 0;padding-top:20px;border-top:1px solid var(--card-border);color:var(--muted);font-size:11px;line-height:2 }
+.sidebar-note b { font-weight:500;color:var(--text-secondary) }
+.topbar { height:74px;padding:0 40px;background:var(--topbar-bg);border-bottom:1px solid var(--card-border) }
+.breadcrumb { letter-spacing:.5px;font-size:12px;align-items:center }
+.runtime-version { font:11px ui-monospace,Consolas,monospace;color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:5px 10px }
+.topbar-actions { gap:12px }.icon-button { width:34px;height:34px;border-radius:50%;background:transparent;font-size:20px }
+main { max-width:1450px;padding:34px 40px 24px }
+.page-heading { align-items:center;flex-direction:row;margin-bottom:26px;gap:20px }
+.eyebrow { letter-spacing:3px;font-weight:500;font-size:10px;margin-bottom:8px }
+h1 { font-size:27px;letter-spacing:0;font-weight:600;margin-bottom:6px }
+.page-heading p { font-size:12px;line-height:1.8;max-width:640px }
+.search-wrap { width:230px;flex:0 0 230px;max-width:100% }
+.search-wrap input { border-radius:24px;background:var(--surface);padding:11px 18px;font-size:12px }
+.search-results { top:49px }
+.xinji-welcome { position:relative;isolation:isolate;min-height:306px;overflow:hidden;border-radius:26px;border:1px solid var(--card-border);background:var(--hero-bg);padding:36px 40px;margin-bottom:22px;display:flex;align-items:center }
+.welcome-copy { max-width:62%;position:relative;z-index:1 }.welcome-kicker { color:var(--text-secondary);font-size:10px;letter-spacing:3px;display:flex;align-items:center;gap:10px }
+.welcome-kicker:before { content:"";width:22px;height:1px;background:var(--accent) }
+.welcome-copy h2 { font-family:"STSong","SimSun",serif;font-size:40px;line-height:1.5;font-weight:400;letter-spacing:3px;border:0;margin:14px 0 15px;padding:0;color:var(--text-strong) }
+.welcome-copy p { font-size:12px;line-height:2;color:var(--text-secondary);max-width:390px }
+.welcome-actions { display:flex;gap:12px;align-items:center;margin-top:23px;flex-wrap:wrap }
+.welcome-actions a { display:inline-flex;gap:19px;align-items:center;padding:10px 18px;border-radius:25px;font-size:12px;transition:background .2s,transform .2s }
+.welcome-primary { color:var(--surface)!important;background:var(--accent) }.welcome-primary:hover { background:var(--accent-hover);transform:translateY(-1px) }
+.welcome-secondary { color:var(--text-strong);border:1px solid var(--accent-border-soft);background:var(--surface) }
+.welcome-art { position:absolute;right:0;top:0;width:45%;height:100%;pointer-events:none;overflow:hidden }
+.halo { position:absolute;border-radius:50%;filter:blur(18px);animation:xinji-breathe 12s ease-in-out infinite alternate }
+.halo-one { width:220px;height:220px;left:5%;top:23%;background:radial-gradient(circle at 40% 35%,var(--mist-b),var(--mist-a) 66%,transparent 72%);opacity:.75 }
+.halo-two { width:300px;height:270px;left:35%;top:-17%;background:radial-gradient(circle,var(--mist-a),transparent 70%);opacity:.8;animation-delay:-5s }
+.halo-three { width:240px;height:170px;right:-5%;bottom:-10%;background:radial-gradient(ellipse,var(--mist-b),transparent 70%);animation-delay:-8s;opacity:.65 }
+.welcome-art svg { width:100%;height:100%;position:absolute;inset:0;color:var(--accent);opacity:.24 }
+.art-caption { position:absolute;right:26px;bottom:23px;font-size:9px;letter-spacing:3px;color:var(--text-secondary) }
+.motion-toggle { position:absolute;right:23px;top:19px;padding:5px 10px;border-radius:20px;font-size:10px;background:var(--surface);color:var(--text-secondary);z-index:2 }
+@keyframes xinji-breathe { from{transform:translate(0,0) scale(1)} to{transform:translate(-8px,7px) scale(1.08)} }
+[data-motion="off"] .halo { animation:none }
+@media(prefers-reduced-motion:reduce) { *,*:before,*:after{animation:none!important;scroll-behavior:auto!important;transition:none!important} }
+.overview-summary { display:grid;grid-template-columns:repeat(5,minmax(0,1fr));background:var(--surface);border:1px solid var(--card-border);border-radius:18px;padding:22px 0;margin-bottom:22px;box-shadow:none;gap:0 }
+.metric { padding:0 23px;min-width:0 }.metric>span { font-size:10px;letter-spacing:.5px }.metric strong { font-size:25px;font-weight:500;line-height:1.7;letter-spacing:-.5px }
+.metric small { font-size:10px;line-height:1.7;color:var(--muted) }#metricMode { font-size:19px }#metricSnowluma { font-size:18px }
+.journey-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:0 0 28px }
+.journey-link { display:flex;align-items:flex-start;gap:14px;border:1px solid var(--card-border);background:var(--surface);padding:23px 20px;border-radius:18px;color:var(--text);transition:border-color .2s,background .2s }
+.journey-link:hover { background:var(--surface-subtle);border-color:var(--accent-border-hover) }.journey-link .journey-index { font:11px Georgia,serif;letter-spacing:1px;color:var(--muted);padding-top:4px }
+.journey-link h3 { margin:0 0 6px;font-size:15px;font-weight:500 }.journey-link p { font-size:11px;color:var(--muted);line-height:1.9 }.journey-link .journey-arrow { margin-left:auto;color:var(--accent);font-size:18px }
+.grid { gap:20px }.card { padding:26px;border-radius:20px;box-shadow:var(--shadow-card);border-color:var(--card-border) }
+.card h2 { font-size:17px;font-weight:600;letter-spacing:.5px }.layer-heading { font-size:14px }.meta { color:var(--muted);line-height:1.9 }
+button { border-radius:10px;padding:9px 15px;font-size:13px }button.active,.primary { color:var(--surface);background:var(--accent) }
+.mode-row { gap:12px }.mode-row button { border-radius:14px;min-height:92px;padding:18px 16px;background:var(--surface-subtle) }
+.mode-row button.active { color:var(--text-strong);background:var(--accent-soft-bg);border-color:var(--accent-border-active);box-shadow:none }
+.mode-row button strong { font-size:14px }.mode-row button small { color:var(--muted);font-size:11px }.mode-indicator { background:var(--surface);border-color:var(--border-strong) }
+#engineStatus { font-size:11px;color:var(--muted);margin-bottom:8px }#section-mode>p.meta { display:none }
+.settings-group { border:1px solid var(--border);border-radius:14px;background:var(--surface-subtle);margin-top:15px }
+.settings-group>summary { padding:16px 18px;color:var(--text-strong);font-size:13px }.settings-content { padding:18px;border-top:1px solid var(--border-subtle) }
+input,textarea,select { border-radius:9px;background:var(--surface);color:var(--text-input);border-color:var(--border-input);max-width:100% }
+input[type="checkbox"] { accent-color:var(--accent);width:16px!important;height:16px;flex-shrink:0 }
+pre,.code-area { background:var(--surface-sunken);border-color:var(--border);font-size:12px;line-height:1.9 }
+#section-activity { grid-column:1/-1 }#activity { max-height:210px }.overview-footnote { margin-top:22px }.page-footer { margin-top:30px;color:var(--muted);font-size:10px }
+.menu-toggle,.nav-scrim { display:none }
+@media(min-width:1600px) { main { padding-top:42px }.xinji-welcome{min-height:340px}.welcome-copy h2{font-size:46px} }
+@media(max-width:1200px) { .sidebar{width:215px;padding:30px 15px}.workspace{margin-left:215px}main{padding:28px}.topbar{padding:0 28px}.welcome-copy h2{font-size:34px}.xinji-welcome{padding:30px}.metric{padding:0 15px}.journey-link{padding:20px 15px;gap:10px} }
+@media(max-width:900px) {
+ .sidebar { width:250px;inset:0 auto 0 0;position:fixed;display:flex;padding:30px 20px;background:var(--sidebar-bg);z-index:100;transform:translateX(-100%);visibility:hidden;transition:transform .2s,visibility .2s }
+ .sidebar #mainNav{display:block;overflow:visible}.sidebar .nav-item{width:100%}.sidebar .nav-label,.sidebar .sidebar-bottom,.sidebar .brand{display:flex}.sidebar .brand small{display:block}.sidebar .sidebar-bottom{display:block}
+ .nav-open .sidebar{transform:translateX(0);visibility:visible}.workspace{margin-left:0}.menu-toggle{display:inline-flex;align-items:center;justify-content:center;font-size:18px}
+ .nav-open .nav-scrim{display:block;position:fixed;inset:0;background:var(--overlay);border:0;border-radius:0;z-index:90}.topbar{height:66px;padding:0 24px;position:relative}.breadcrumb{gap:10px}.page-heading{flex-direction:row;align-items:center}.search-wrap{flex-basis:215px}
+ .xinji-welcome{min-height:285px}.welcome-copy h2{font-size:33px}.sidebar-note{margin-top:20px}.sidebar-bottom{margin-top:auto}
+}
+@media(max-width:640px) {
+ main{padding:24px 18px}.topbar{padding:0 18px}.breadcrumb>span{display:none}.breadcrumb{font-size:11px}.topbar-actions{gap:8px}.status-badge{font-size:10px}.runtime-version{display:inline;font-size:9px;padding:4px 6px}
+ .page-heading{display:block;margin-bottom:20px}h1{font-size:23px}.page-heading p{font-size:11px}.search-wrap{width:100%;margin-top:18px;max-width:none}.search-wrap input{font-size:12px}
+ .xinji-welcome{padding:29px 24px;min-height:315px;border-radius:22px;align-items:flex-start}.welcome-copy{max-width:100%}.welcome-kicker{font-size:9px;letter-spacing:2px}.welcome-copy h2{font-size:32px;letter-spacing:2px;margin-top:21px}.welcome-copy p{max-width:280px;font-size:11px}
+ .welcome-art{width:65%;right:-15%;opacity:.45;top:35%;height:65%}.welcome-art svg{display:none}.art-caption{display:none}.motion-toggle{right:15px;top:17px;font-size:9px}.welcome-actions{gap:8px;margin-top:19px}.welcome-actions a{padding:9px 14px;font-size:11px;gap:10px}
+ .overview-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:4px 0;margin-bottom:18px}.metric{padding:14px 18px;border:0;border-bottom:1px solid var(--border-subtle);min-width:0}.metric:last-child{grid-column:1/-1;border-bottom:0}.metric strong{font-size:22px}.metric small{font-size:10px}
+ .journey-grid{grid-template-columns:1fr;gap:10px;margin-bottom:22px}.journey-link{padding:17px 19px;gap:17px}.journey-link h3{font-size:14px;margin-bottom:3px}.journey-link p{font-size:11px}.journey-link .journey-arrow{align-self:center}
+ .card{padding:20px 17px;border-radius:16px}.mode-row{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.mode-row button{padding:15px 12px;min-height:96px}.mode-row button strong{font-size:12px}.mode-row button small{font-size:10px}
+ .settings-group>summary{padding:14px;font-size:12px}.settings-content{padding:14px}.row{gap:10px}.page-footer{gap:12px;flex-wrap:wrap}.search-results{max-width:100%}.sidebar-note{font-size:11px}
+}
+
+</style>
+
+<style id="xinji-onboarding-style">
+.setup-entry{display:flex;justify-content:space-between;align-items:center;gap:24px;margin:0 0 24px;padding:24px 28px;border:1px solid var(--card-border);border-radius:22px;background:var(--card)}
+.setup-entry h2{margin:8px 0;font-size:19px}.setup-entry p{margin:6px 0;color:var(--text-secondary)}.setup-entry small{color:var(--text-secondary)}
+.setup-dialog{width:min(760px,calc(100vw - 32px));max-height:calc(100dvh - 32px);box-sizing:border-box;padding:30px;border:1px solid var(--card-border);border-radius:26px;background:var(--card);color:var(--text);box-shadow:0 30px 100px #0005;overflow:auto}
+.setup-dialog::backdrop{background:#14291f85;backdrop-filter:blur(5px)}
+.setup-dialog h2{font-size:25px;margin:12px 0}.setup-dialog p{line-height:1.75}.setup-dialog .setup-subtle{color:var(--text-secondary);font-size:13px}
+.setup-heading,.setup-footer{display:flex;align-items:center;justify-content:space-between;gap:16px}.setup-footer{margin-top:24px;border-top:1px solid var(--card-border);padding-top:18px;flex-wrap:wrap}
+.setup-steps{display:flex;gap:8px;margin:20px 0 24px;padding:0;list-style:none}.setup-steps li{flex:1;padding:10px 8px;border-bottom:2px solid var(--border);font-size:12px;color:var(--text-secondary)}.setup-steps [aria-current=step]{border-color:var(--text);color:var(--text);font-weight:700}
+.setup-check{display:grid;grid-template-columns:110px 1fr;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)}.setup-check p{margin:0;font-size:13px}.setup-check[data-ok=false] strong{color:var(--danger,#ad5249)}
+.setup-options{display:grid;gap:10px}.setup-option{display:grid;grid-template-columns:20px 1fr;gap:12px;align-items:start;padding:15px;border:1px solid var(--border);border-radius:14px;cursor:pointer}.setup-option input{margin:4px 0}.setup-option strong{display:block;font-size:14px}.setup-option small{display:block;font-size:12px;line-height:1.7;color:var(--text-secondary);margin-top:4px}
+.setup-dim{display:grid;grid-template-columns:95px 1fr 35px;align-items:center;gap:14px;margin:16px 0}.setup-dim input{width:100%;accent-color:#658773}.setup-dim output{text-align:right}.setup-inset{border-radius:16px;background:var(--surface-open);padding:18px;margin-top:20px}.setup-inset h3{margin-top:0}.setup-dialog a{color:var(--text);text-decoration:underline}.setup-dialog [hidden]{display:none!important}.setup-error{color:var(--danger,#ad5249);min-height:20px}.setup-check strong{overflow-wrap:anywhere}
+@media(max-width:600px){.setup-entry{padding:20px;align-items:flex-start;flex-direction:column}.setup-dialog{padding:20px;border-radius:20px}.setup-check{grid-template-columns:85px 1fr}.setup-dim{grid-template-columns:75px 1fr 30px;gap:8px}.setup-steps li{font-size:11px;padding:8px 2px}}
+</style>
 </head>
 <body>
   <div class="bg-decor" aria-hidden="true"></div>
   <a class="skip-link" href="#mainContent">跳到主要内容</a>
   <aside class="sidebar" aria-label="控制台导航">
-    <a href="#overview" class="brand"><span class="brand-mark" aria-hidden="true">心<span>↗</span></span><span>心迹<small>经历 · 心绪 · 连续的自我</small></span></a>
-    <div class="nav-label">工作空间</div>
+    <a href="#overview" class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 44" fill="none" aria-hidden="true"><path d="M20 38C5 28 2 16 10 9c6-5 13 0 10 8-3-8 4-13 10-8 8 7 5 19-10 29Z" stroke="currentColor" stroke-width="1.3"/><path d="M8 24c8-7 16 10 25-6M11 31c7-5 10 2 17-3" stroke="currentColor" stroke-width="1.1"/><circle cx="28" cy="9" r="3" fill="currentColor" opacity=".28"/></svg></span><span>心迹<small>XINJI · 相处的痕迹</small></span></a>
+    <div class="nav-label">日常与自我</div>
     <nav id="mainNav">
-      <button data-view="overview" class="nav-item active" aria-current="page"><span class="nav-icon" aria-hidden="true">◫</span>运行总览</button>
-      <button data-view="sessions" class="nav-item"><span class="nav-icon" aria-hidden="true">☷</span>会话与审批<span class="nav-count" id="pendingCount">—</span></button>
-      <button data-view="persona" class="nav-item"><span class="nav-icon" aria-hidden="true">◉</span>人格与指令</button>
+      <button data-view="overview" class="nav-item active" aria-current="page"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></span>运行总览</button>
+      <button data-view="sessions" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 1-8 8H5l-3 3V11a9 9 0 0 1 18 0Z"/><path d="M7 9h8M7 13h5"/></svg></span>会话与审批<span class="nav-count" id="pendingCount">—</span></button>
+      <button data-view="persona" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg></span>人格与指令</button>
       <div class="nav-label">聊天行为</div>
-      <button data-view="social-v2" class="nav-item"><span class="nav-icon" aria-hidden="true">◈</span>二代仿真<span class="nav-note">V2</span></button>
-      <button data-view="social-v1" class="nav-item"><span class="nav-icon" aria-hidden="true">◇</span>一代仿真<span class="nav-note">V1</span></button>
+      <button data-view="social-v2" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></span>二代仿真<span class="nav-note">V2</span></button>
+      <button data-view="social-v1" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16c3-15 6 11 10-3s5-2 6-1"/></svg></span>一代仿真<span class="nav-note">V1</span></button>
       <div class="nav-label">管理</div>
-      <button data-view="usage" class="nav-item"><span class="nav-icon" aria-hidden="true">◧</span>令牌与花费</button>
-      <button data-view="access" class="nav-item"><span class="nav-icon" aria-hidden="true">⊙</span>访问与安全</button>
-      <button data-view="operations" class="nav-item"><span class="nav-icon" aria-hidden="true">⌘</span>调试与运维</button>
-      <button data-view="reference" class="nav-item"><span class="nav-icon" aria-hidden="true">ⓘ</span>工具参考</button>
+      <button data-view="usage" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v17h17M9 15v-4m5 4V6m5 9v-6"/></svg></span>令牌与花费</button>
+      <button data-view="access" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 8 4v6c0 5-8 10-8 10S4 17 4 12V6l8-4Z"/><path d="m8 12 3 3 5-6"/></svg></span>访问与安全</button>
+      <button data-view="operations" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 17h16"/><circle cx="8" cy="7" r="3" fill="var(--sidebar-bg)"/><circle cx="16" cy="17" r="3" fill="var(--sidebar-bg)"/></svg></span>调试与运维</button>
+      <button data-view="reference" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5C9 2 4 3 3 4v16c3-2 6-2 9 0 3-2 6-2 9 0V4c-3-2-6-2-9 1v15"/></svg></span>工具参考</button>
     </nav>
-    <div class="sidebar-bottom"><span class="local-dot"></span>本地控制台<small>QQ ↔ DeepSeek Harness</small></div>
+    <div class="sidebar-note"><b>从经历出发，慢慢成为自己。</b><br>记忆有来处，心绪有回响。</div>
+    <div class="sidebar-bottom"><span class="local-dot"></span>本地控制台<small>心迹 / 本地运行</small></div>
   </aside>
+  <button class="nav-scrim" id="navScrim" aria-label="关闭导航" tabindex="-1"></button>
   <div class="workspace">
     <header class="topbar">
-      <div class="breadcrumb">工作空间<span>/</span><span id="breadcrumbPage">运行总览</span></div>
-      <div class="topbar-actions"><span class="status-badge" id="statusText" role="status">正在连接…</span><button id="themeToggle" class="icon-button" type="button" aria-label="切换深色模式" aria-pressed="false" title="切换深色 / 浅色主题">☾</button><button id="refreshConsole" class="icon-button" aria-label="刷新控制台状态" title="刷新状态">↻</button></div>
+      <div class="breadcrumb"><button class="icon-button menu-toggle" id="navToggle" aria-label="打开导航" aria-expanded="false" aria-controls="mainNav">☰</button><span>心迹</span><span>/</span><span id="breadcrumbPage">运行总览</span></div>
+      <div class="topbar-actions"><span class="runtime-version" id="runtimeVersion">版本读取中</span><span class="status-badge" id="statusText" role="status">正在连接…</span><button id="themeToggle" class="icon-button" type="button" aria-label="切换深色模式" aria-pressed="false" title="切换深色 / 浅色主题">☾</button><button id="refreshConsole" class="icon-button" aria-label="刷新控制台状态" title="刷新状态">↻</button></div>
     </header>
     <main id="mainContent" tabindex="-1">
-      <div class="page-heading"><div><div class="eyebrow">XINJI / CONSOLE</div><h1 id="pageTitle">让每一次连接，都自然发生。</h1><p id="pageDescription">掌握桥接状态，轻松管理你的 QQ 智能伙伴。</p></div>
+      <div class="page-heading"><div><div class="eyebrow">XINJI / CONSOLE</div><h1 id="pageTitle">相处，从这里继续。</h1><p id="pageDescription">看看连接是否顺畅，再走近她的心绪、记忆与成长。</p></div>
         <div class="search-wrap"><label class="sr-only" for="consoleSearch">搜索功能或参数</label><input id="consoleSearch" type="search" placeholder="搜索功能或参数…" autocomplete="off" aria-controls="searchResults" aria-expanded="false"><div id="searchResults" class="search-results" hidden></div></div>
       </div>
       <div id="connectionAlert" class="connection-alert" role="alert" hidden></div>
+      <section class="xinji-welcome" data-page="overview" aria-labelledby="welcomeTitle">
+        <div class="welcome-copy"><div class="welcome-kicker">相处 · 是一件慢慢来的事</div>
+          <h2 id="welcomeTitle">让日常留下痕迹，<br>让回应有些温度。</h2>
+          <p>记住聊过的事，留意此刻的感受。<br>在一次次相处里，形成可以继续生长的自己。</p>
+          <div class="welcome-actions"><a class="welcome-primary" href="http://127.0.0.1:3080/dsh-feiyu-memory/#/continuity">走近此刻心绪 <span aria-hidden="true">↗</span></a><a class="welcome-secondary" href="http://127.0.0.1:3080/dsh-feiyu-memory/#/persona">看看她的成长 <span aria-hidden="true">↗</span></a></div>
+        </div>
+        <div class="welcome-art" aria-hidden="true"><div class="halo halo-one"></div><div class="halo halo-two"></div><div class="halo halo-three"></div>
+          <svg viewBox="0 0 480 330" fill="none"><ellipse cx="270" cy="174" rx="135" ry="105" transform="rotate(-25 270 174)" stroke="currentColor" stroke-width=".65"/><ellipse cx="270" cy="174" rx="155" ry="124" transform="rotate(-25 270 174)" stroke="currentColor" stroke-width=".45"/><ellipse cx="270" cy="174" rx="175" ry="143" transform="rotate(-25 270 174)" stroke="currentColor" stroke-width=".35"/><circle cx="367" cy="91" r="4" fill="currentColor"/><circle cx="150" cy="230" r="2.5" fill="currentColor"/><path d="M247 135c-19-24-56 11-14 48l17 15c12-13 46-30 39-53-5-17-30-24-42-10Z" stroke="currentColor" stroke-width="1"/></svg><span class="art-caption">XINJI · MOMENTS & MEMORIES</span>
+        </div>
+        <button class="motion-toggle" id="motionToggle" aria-pressed="false" title="只控制装饰光晕，不改变情绪或服务">暂停光晕</button>
+      </section>
       <div id="overviewSummary" class="overview-summary span-all" data-page="overview">
         <div class="metric"><span>DSH 连接</span><strong id="metricDsh">连接中</strong><small id="metricDshHint">等待服务响应</small></div>
         <div class="metric"><span>SnowLuma 上游</span><strong id="metricSnowluma">读取中</strong><small id="metricSnowlumaHint">等待网关健康上报</small></div>
@@ -1795,6 +1942,15 @@ button:active:not(:disabled) {
         <button class="metric metric-link" data-view="sessions"><span>已建立会话</span><strong id="metricSessions">—</strong><small>查看会话映射 <span aria-hidden="true">↗</span></small></button>
         <button class="metric metric-link" data-view="sessions" data-target="section-pending"><span>待处理请求</span><strong id="metricPending">—</strong><small>提问与工具审批 <span aria-hidden="true">↗</span></small></button>
       </div>
+      <div class="journey-grid" data-page="overview" aria-label="心迹与记忆入口">
+        <a class="journey-link" href="http://127.0.0.1:3080/dsh-feiyu-memory/#/continuity"><span class="journey-index">01</span><div><h3>此刻，在想些什么</h3><p>心绪、挂念，以及偶尔浮现的念头</p></div><span class="journey-arrow" aria-hidden="true">↗</span></a>
+        <a class="journey-link" href="http://127.0.0.1:3080/dsh-feiyu-memory/#/persona"><span class="journey-index">02</span><div><h3>慢慢形成的自己</h3><p>六维性格、自我参考与成长的依据</p></div><span class="journey-arrow" aria-hidden="true">↗</span></a>
+        <a class="journey-link" href="http://127.0.0.1:3080/dsh-feiyu-memory/#/library"><span class="journey-index">03</span><div><h3>一起留下的记忆</h3><p>查看、确认和修正相处中的记录</p></div><span class="journey-arrow" aria-hidden="true">↗</span></a>
+      </div>
+      <section class="setup-entry" data-page="overview" aria-labelledby="setupEntryTitle">
+        <div><span class="welcome-kicker">从这里开始 · 慢慢熟悉</span><h2 id="setupEntryTitle">启用与成长</h2><p id="setupGrowthStatus" role="status">检查连接、选择成长方式，了解经历如何积累。</p><small id="setupCheckedAt">检查过程不调用聊天模型</small></div>
+        <button id="setupOpen" type="button">打开启用向导 <span aria-hidden="true">↗</span></button>
+      </section>
       <div class="grid">
         <section id="section-mode" data-page="overview" class="card span-all">
       <p id="engineStatus" role="status">正在核对运行引擎…</p>
@@ -2428,33 +2584,81 @@ button:active:not(:disabled) {
   <noscript><div class="connection-alert">控制台需要启用 JavaScript 才能加载状态及保存设置。</div></noscript>
 
 <script>
+let volatileConsoleToken = '';
+function readConsoleToken() {
+  try { return localStorage.getItem('consoleToken') || volatileConsoleToken; }
+  catch { return volatileConsoleToken; }
+}
+function saveConsoleToken(token) {
+  volatileConsoleToken = token;
+  try { if(token) localStorage.setItem('consoleToken', token); else localStorage.removeItem('consoleToken'); }
+  catch { /* 禁用存储时仍可在本页使用令牌。 */ }
+}
 (function () {
-  // 如果通过 ?token= 进入（控制台启用鉴权时根路径会重定向带 token），存到 localStorage
+  // 兼容启动器的令牌入口，立即清除地址中的令牌；刷新靠请求头验证。
   const qs = new URLSearchParams(location.search);
   const token = qs.get('token');
   if (token) {
-    localStorage.setItem('consoleToken', token);
+    saveConsoleToken(token.trim());
     history.replaceState({}, '', location.pathname + location.hash);
   }
 })();
 
+let consoleLoginPromise = null, consoleLoginCancelled = false;
+function requestConsoleLogin() {
+  if (consoleLoginPromise) return consoleLoginPromise;
+  if (consoleLoginCancelled) return Promise.reject(new Error('请点击“登录控制台”继续'));
+  consoleLoginPromise = new Promise((resolve, reject) => {
+    let reopen = document.getElementById('consoleLoginButton');
+    if (!reopen) {
+      reopen = document.createElement('button'); reopen.id = 'consoleLoginButton';
+      reopen.textContent = '登录控制台';
+      reopen.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:1000';
+      document.body.append(reopen);
+      reopen.onclick = () => { consoleLoginCancelled = false; requestConsoleLogin().then(() => location.reload()).catch(() => {}); };
+    }
+    reopen.hidden = false;
+    const dialog = document.createElement('dialog'); dialog.id = 'consoleLoginDialog';
+    dialog.setAttribute('aria-labelledby', 'consoleLoginTitle');
+    dialog.style.cssText = 'width:min(420px,calc(100vw - 40px));box-sizing:border-box;border:1px solid var(--border);border-radius:24px;padding:28px;background:var(--card);color:var(--text);box-shadow:0 24px 80px #0004';
+    dialog.innerHTML = '<form><h2 id="consoleLoginTitle">连接心迹</h2><p>输入访问令牌后，此浏览器会记住登录。请在自己的设备上使用。</p><label for="consoleLoginToken">控制台访问令牌</label><input id="consoleLoginToken" type="password" autocomplete="off" required style="width:100%;box-sizing:border-box;margin:12px 0" placeholder="粘贴访问令牌"><p id="consoleLoginError" role="status" style="min-height:1.5em"></p><div style="display:flex;gap:12px;justify-content:flex-end"><button type="button" id="consoleLoginCancel">稍后</button><button type="submit">连接并记住</button></div></form>';
+    document.body.append(dialog);
+    const finish = () => { dialog.close(); dialog.remove(); };
+    const cancel = () => { consoleLoginCancelled = true; finish(); reject(new Error('请点击“登录控制台”继续')); };
+    dialog.addEventListener('cancel', e => { e.preventDefault(); cancel(); });
+    dialog.querySelector('#consoleLoginCancel').onclick = cancel;
+    dialog.querySelector('form').onsubmit = async e => {
+      e.preventDefault();
+      const value = dialog.querySelector('input').value.trim(), submit = dialog.querySelector('[type=submit]'), error = dialog.querySelector('#consoleLoginError');
+      if (!value || submit.disabled) return;
+      submit.disabled = true; error.textContent = '正在验证…';
+      try {
+        const response = await fetch('/api/status', { headers: {'x-console-token': value} });
+        if (!response.ok) throw new Error(response.status === 401 ? '令牌不正确或已更换，请重新输入。' : '暂时无法连接，请稍后重试。');
+        const result = await response.json();
+        if (result.ok === false) throw new Error('暂时无法连接，请稍后重试。');
+        if (!dialog.isConnected) return;
+        saveConsoleToken(value); consoleLoginCancelled = false; reopen.hidden = true; finish(); resolve(value);
+      } catch (err) { if (dialog.isConnected) error.textContent = err.message; }
+      finally { submit.disabled = false; }
+    };
+    dialog.showModal();
+  }).finally(() => { consoleLoginPromise = null; });
+  return consoleLoginPromise;
+}
 async function api(path, method, body, _retried = 0) {
   const headers = body ? {'content-type':'application/json'} : {};
-  const token = localStorage.getItem('consoleToken');
+  const token = readConsoleToken();
   if (token) headers['x-console-token'] = token;
   const res = await fetch(path, { method: method || 'GET', headers, body: body ? JSON.stringify(body) : undefined });
   if (res.status === 401) {
-    if (_retried >= 2) {
-      localStorage.removeItem('consoleToken');
-      throw new Error('未授权');
+    if (_retried >= 2) throw new Error('登录状态已变化，请刷新后重试');
+    // 并行请求可能拿着旧令牌返回 401，不得清除刚刚验证成功的新令牌。
+    if (!readConsoleToken() || readConsoleToken() === token) {
+      saveConsoleToken('');
+      await requestConsoleLogin();
     }
-    const t = prompt('请输入控制台访问令牌：');
-    if (t) {
-      localStorage.setItem('consoleToken', t.trim());
-      return api(path, method, body, _retried + 1);
-    }
-    localStorage.removeItem('consoleToken');
-    throw new Error('未授权');
+    return api(path, method, body, _retried + 1);
   }
   return res.json();
 }
@@ -2520,6 +2724,7 @@ async function refresh() {
     document.getElementById('roleModeText').textContent = s.roleMode === 'silent' ? '静默' : '正常';
     const modeLabel = s.mode === 'reserved' ? '一代仿真模式' : s.mode === 'reserved2' ? '二代仿真模式' : s.mode === 'closed-agent' ? '封闭 Agent' : '聊天模式';
     updateOverview(s, modeLabel);
+    document.getElementById('runtimeVersion').textContent = s.runtimeVersion ? 'v' + s.runtimeVersion : '版本未知';
     document.getElementById('engineStatus').textContent = (s.engineName || '未知引擎') + ' · ' + (s.runtimeVersion || '版本未知') + ' · QQ 通信兼容阶段';
     document.getElementById('activity').textContent = s.activity || '（空）';
     const presetSel = document.getElementById('closedPreset');
@@ -2603,11 +2808,11 @@ async function refreshSimPrompt() {
     setSimMsg('');
     const status = r.status || {};
     document.getElementById('simPromptStatus').textContent =
-      `${status.label || simPromptPreset} · ${r.chars} 字符${status.installed ? ' · 已同步到 DSH' : ' · 尚未同步到 DSH'}`;
+      `${status.label || simPromptPreset} · ${r.chars} 字符 · ${status.synced ? '预设文件已同步' : status.installed ? '预设文件与编辑内容不一致' : '尚未生成 DSH 预设文件'} · 运行中会话尚未核验`;
     document.getElementById('simPromptWarnings').textContent = (r.warnings || []).length
       ? '⚠️ ' + r.warnings.join('；') : '';
     document.getElementById('simPromptRestart').textContent =
-      '改动写入该代预设的源文件并同步到 DSH 的 preset 目录；preset 由 DSH 在会话创建时装配，因此新会话会自动用新版，正在进行的 QQ 会话需重置该会话或重启 DSH。';
+      '保存会同步 DSH 实际使用的预设文件。文件一致不等于运行中会话已经加载：改动后需重启 DSH；已有长会话还可能受到旧历史影响。防 AI 味是表达指导，不能保证每次回复都符合。';
   } catch (error) {
     setSimMsg('读取失败：' + (error?.message ?? error), false);
   }
@@ -3578,7 +3783,7 @@ async function changeConsoleToken(generate) {
     return;
   }
   // 保存到 localStorage，当前页面继续使用新令牌
-  localStorage.setItem('consoleToken', r.token);
+  saveConsoleToken(r.token);
   input.value = r.token;
   msg.textContent = r.generated ? '已生成随机令牌，当前页面已自动使用。可点击显示后复制。' : '已保存新令牌';
   msg.className = 'meta ok';
@@ -3590,14 +3795,14 @@ document.getElementById('consoleTokenRandom').addEventListener('click', () => ch
 // Retired bookmarks return to a working page. No retired learner API is queried.
 if(location.hash==='#slang')history.replaceState({},'',location.pathname+location.search+'#overview');
 const consolePages = {
-  overview: ['运行总览', '让每一次连接，都自然发生。', '掌握桥接状态，轻松管理你的 QQ 智能伙伴。'],
-  sessions: ['会话与审批', '让每一段对话，都有迹可循。', '查看 QQ 与 DSH 的会话映射，以及等待你回复的审批和提问。'],
-  persona: ['人格与指令', '给你的伙伴，一点独特个性。', '查看实际生效的性格与自我参考，管理交流和工具的底层指令。'],
+  overview: ['运行总览', '相处，从这里继续。', '看看连接是否顺畅，再走近她的心绪、记忆与成长。'],
+  sessions: ['会话与审批', '每段对话，都有来处。', '查看 QQ 与 DSH 的会话映射，以及等待你回复的审批和提问。'],
+  persona: ['人格与指令', '理解她正在成为谁。', '查看实际生效的性格与自我参考，管理交流和工具的底层指令。'],
   'social-v2': ['二代仿真', '自主参与，恰到好处。', '管理 AI 的工具、唤醒与发言节奏。展开需要调整的分组，修改后保存参数。'],
   'social-v1': ['一代仿真', '为自然对话，设定合适的节奏。', '调整参与概率、活跃周期和分条发送；所有配置项完整保留。'],
   usage: ['令牌与花费', '每一次思考，都算得清楚。', '实时查看 AI 的 token 消耗与花费，可下钻到每个群、每个好友、每一轮对话。'],
   access: ['访问与安全', '明确边界，安心连接。', '管理允许对话的对象、管理员权限与控制台访问凭证。'],
-  operations: ['调试与运维', '让桥接，始终井然有序。', '测试消息、引导 AI，或维护桥接进程与会话工作区。'],
+  operations: ['调试与运维', '照看连接，也照看日常。', '测试消息、引导 AI，或维护桥接进程与会话工作区。'],
   reference: ['工具参考', '每一种能力，都清晰可见。', '查看桥接提供给 DSH 的 MCP 工具与用途。']
 };
 let currentConsolePage = 'overview';
@@ -4221,6 +4426,109 @@ setInterval(() => { if (currentConsolePage !== 'usage') return; refreshUsage(); 
     if (!stored()) apply(event.matches ? 'dark' : 'light', false);
   });
 })();
+
+// Presentation-only controls: never save configuration or call a model.
+(function () {
+  const root=document.documentElement,button=document.getElementById('motionToggle'),media=matchMedia('(prefers-reduced-motion: reduce)');
+  let preference=null;try{preference=localStorage.getItem('xinji-console-motion')}catch{}
+  const apply=()=>{const off=media.matches||preference==='off';root.dataset.motion=off?'off':'on';button.textContent=off?'开启光晕':'暂停光晕';button.setAttribute('aria-pressed',String(off));button.disabled=media.matches;button.title=media.matches?'已遵循系统减少动态效果设置':'只控制装饰光晕，不改变情绪或服务'};
+  apply();button.addEventListener('click',()=>{preference=root.dataset.motion==='off'?'on':'off';try{localStorage.setItem('xinji-console-motion',preference)}catch{}apply()});media.addEventListener('change',apply);
+  const toggle=document.getElementById('navToggle'),sidebar=document.querySelector('.sidebar'),scrim=document.getElementById('navScrim');
+  const setOpen=(open,restore=false)=>{document.body.classList.toggle('nav-open',open);toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',open?'关闭导航':'打开导航');if(open)sidebar.querySelector('[aria-current="page"]')?.focus();else if(restore)toggle.focus()};
+  toggle.addEventListener('click',()=>setOpen(!document.body.classList.contains('nav-open')));scrim.addEventListener('click',()=>setOpen(false,true));
+  sidebar.addEventListener('click',e=>{if(e.target.closest('[data-view],.brand'))setOpen(false)});
+  document.addEventListener('keydown',e=>{if(!document.body.classList.contains('nav-open'))return;if(e.key==='Escape'){setOpen(false,true);return}if(e.key==='Tab'){const links=[...sidebar.querySelectorAll('a,button')].filter(x=>!x.disabled),first=links[0],last=links.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}});
+  matchMedia('(min-width:901px)').addEventListener('change',e=>{if(e.matches)setOpen(false)});
+})();
+// Onboarding reads local status only. Configuration changes require the final
+// review button; no background polling, model probe or simulated conversation.
+(function () {
+  const labels={memory:'可塑性记忆',continuity:'连续事件理解',self:'自我参考与六维成长',learning:'回应习惯学习',association:'空闲联想',feeling:'联想带来的轻微感受'};
+  const descriptions={
+    memory:'从新聊天提取有依据的信息。通常一批有提取和独立查漏调用，遗漏续处理可能追加；不保证每句话都成为长期记忆。',
+    continuity:'理解此刻的事件和感受。合格的主要使用者私聊通常最多增加一次事件理解调用，成功时复用情绪判断。',
+    self:'从经历形成可修正的自我参考。需要连续事件理解；至少积累12条合格原话，整理间隔至少6小时，每批另有一次整理调用。',
+    learning:'试验功能。需要连续事件理解，复用同次调用但增加输入与输出；主要学习明确的回应方式反馈。',
+    association:'试验功能。有真实记忆且空闲时才尝试，一次调用最多三步；没有来源不生成，也不会因此主动发消息。',
+    feeling:'试验功能。需要空闲联想，复用其输出，不单独调用；只形成有期限的轻微主观感受。',
+  };
+  const entry=document.getElementById('setupOpen'),status=document.getElementById('setupGrowthStatus'),checked=document.getElementById('setupCheckedAt');
+  let data=null,inflight=null,dialog=null,step=0,draft=null,starter=null,busy=false;
+  async function inspect() {
+    if(inflight)return inflight;
+    inflight=(async()=>{
+      const r=await api('/api/onboarding');
+      if(!r.ok||!Array.isArray(r.checks)||!r.features)throw Error(r.error||'当前桥接未提供启用向导，请更新运行包。');
+      data=r;status.textContent=(r.pendingRestart?'有已保存的配置等待重启。当前：':'')+r.growth.text;
+      checked.textContent='上次检查 '+new Date().toLocaleTimeString()+' · '+(r.completed?'可再次核对设置':'尚未完成启用向导');return r;
+    })().catch(error=>{status.textContent='检查未完成：'+error.message;throw error}).finally(()=>{inflight=null});
+    return inflight;
+  }
+  const byId=id=>dialog.querySelector('#'+id);
+  const linkActions=()=>{
+    dialog.querySelectorAll('[data-setup-access]').forEach(button=>button.onclick=()=>{dialog.close();document.querySelector('#mainNav [data-view="access"]').click()});
+  };
+  function render() {
+    const titles=['检查连接','选择成长方式','核对与保存'];
+    dialog.innerHTML=`<div class="setup-heading"><span class="welcome-kicker">心迹 · 初次相识，也可以慢慢来</span><button id="setupClose" class="icon-button" aria-label="关闭启用向导" type="button">×</button></div><h2 id="setupDialogTitle">${titles[step]}</h2><ol class="setup-steps">${titles.map((title,i)=>`<li ${i===step?'aria-current="step"':''}>0${i+1} · ${title}</li>`).join('')}</ol><div id="setupBody"></div><p id="setupError" class="setup-error" role="status"></p><div class="setup-footer"><button id="setupBack" type="button">${step?'上一步':'稍后再说'}</button><button id="setupNext" type="button">${step===2?'保存这些选择':'下一步'}</button></div>`;
+    byId('setupClose').onclick=()=>dialog.close();
+    byId('setupBack').onclick=()=>{if(step){step--;render()}else dialog.close()};
+    byId('setupNext').onclick=next;
+    const body=byId('setupBody');
+    if(step===0){
+      body.innerHTML=`<p class="setup-subtle">检查仅访问本机服务，不发送 QQ 消息，不调用聊天模型。当前安装仍需要已有的 DSH、QQ / SnowLuma 和桥接基础环境。</p>${data.checks.map(c=>`<div class="setup-check" data-ok="${c.ok}"><strong>${esc(c.label)} · ${c.ok===true?'已检查':c.ok===false?'待处理':'待验证'}</strong><p>${esc(c.text)}</p></div>`).join('')}<div class="setup-inset"><strong>现在的成长状态</strong><p>${esc(data.growth.text)}</p><p class="setup-subtle">主要使用者私聊用于自我与关系成长，其他私聊和群聊仍按各自权限处理记忆，不共享这份私密成长经历。</p><button type="button" data-setup-access>设置主要使用者与白名单</button> <button type="button" id="setupRecheck">重新检查</button></div>`;
+      byId('setupRecheck').onclick=async()=>{byId('setupRecheck').disabled=true;try{await inspect();render()}catch(e){byId('setupError').textContent=e.message;byId('setupRecheck').disabled=false}};
+      linkActions();
+    }else if(step===1){
+      body.innerHTML=`<p class="setup-subtle">先沿用已保存的开关。建议组合会开启记忆、事件理解和自我成长；试验功能由你选择。已有记忆和自然表达规则会保留。</p><button type="button" id="setupRecommended">采用建议组合</button><div class="setup-options" style="margin-top:16px">${Object.keys(labels).map(key=>`<label class="setup-option"><input id="setupFeature-${key}" type="checkbox" ${draft[key]?'checked':''}><span><strong>${labels[key]}</strong><small>${descriptions[key]}</small></span></label>`).join('')}</div><div class="setup-inset" id="setupStarter"></div><p class="setup-subtle">费用取决于模型、聊天长度和处理批次；这里不承诺固定金额。查看可塑性记忆的“花费”了解实际分项。</p>`;
+      for(const key of Object.keys(labels))byId('setupFeature-'+key).onchange=e=>{draft[key]=e.target.checked};
+      byId('setupRecommended').onclick=()=>{draft={memory:true,continuity:true,self:true,learning:false,association:false,feeling:false};render()};
+      const box=byId('setupStarter');
+      if(!data.starterEligible){
+        box.innerHTML='<h3>保留已有性格与经历</h3><p>已存在性格或成长记录，向导不提供重置。需要修正时，前往成长页面调整。</p><a href="http://127.0.0.1:3080/dsh-feiyu-memory/#/persona" target="_blank" rel="noopener">查看六维与自我参考 ↗</a>';
+      }else{
+        box.innerHTML=`<h3>选择一个可修改的起点</h3><p class="setup-subtle">数值表示表达倾向，不是亲密程度。不预设共同经历、真实身体或固定背景；名字与称呼可以在聊天中自然说明。</p><label for="setupPreset">初始倾向</label> <select id="setupPreset"><option value="keep">沿用当前起点</option><option value="balanced">均衡</option><option value="warm">温暖</option><option value="playful">轻快</option><option value="custom">自行调整</option></select><div id="setupDimensions"></div>`;
+        byId('setupPreset').value=starter?'custom':'keep';
+        const drawDimensions=()=>{byId('setupDimensions').innerHTML=starter?data.dimensions.map(d=>`<label class="setup-dim"><span>${esc(d.label)}<small class="setup-subtle" style="display:block">${esc(d.desc)}</small></span><input type="range" min="0" max="100" step="1" aria-label="${esc(d.label)}初始倾向" data-dim="${esc(d.key)}" value="${starter.find(r=>r.key===d.key).value}"><output>${starter.find(r=>r.key===d.key).value}</output></label>`).join(''):'';byId('setupDimensions').querySelectorAll('input').forEach(input=>input.oninput=()=>{starter.find(r=>r.key===input.dataset.dim).value=Number(input.value);input.nextElementSibling.textContent=input.value})};
+        byId('setupPreset').onchange=e=>{
+          const presets={balanced:{warm:50,initiative:50,clingy:40,stability:60,playful:50,proud:35},warm:{warm:65,initiative:50,clingy:45,stability:60,playful:50,proud:30},playful:{warm:55,initiative:60,clingy:40,stability:55,playful:65,proud:35}};
+          starter=e.target.value==='keep'?null:data.dimensions.map(d=>({key:d.key,value:presets[e.target.value]?.[d.key]??d.value}));drawDimensions();
+        };drawDimensions();
+      }
+    }else{
+      body.innerHTML=`<p>请核对这次选择。保存只更新以下配置，重启心迹后生效。</p>${Object.keys(labels).map(key=>`<div class="setup-check"><strong>${labels[key]}</strong><p>当前运行：${data.activeFeatures[key]?'开启':'关闭'} → 本次保存：${draft[key]?'开启':'关闭'}</p></div>`).join('')}<div class="setup-inset"><h3>${starter?'新的初始倾向':'沿用已有起点'}</h3><p>${starter?starter.map(r=>esc(data.dimensions.find(d=>d.key===r.key).label)+' '+r.value).join(' · '):'不改动已有性格。'}</p><p class="setup-subtle">自我参考来自后续真实交流；长期六维变化需要至少三个日期的独立经历支持，并受七天变化间隔与边界限制。聊天少时成长慢是正常的，不需要编造经历补齐。</p><p class="setup-subtle">不会导入作者或其他用户的聊天，也不会自动放开白名单、改变模型和自然表达指令。</p></div>`;
+    }
+    byId('setupDialogTitle').tabIndex=-1;byId('setupDialogTitle').focus();
+  }
+  async function next() {
+    if(busy)return;
+    if(step===1){
+      const message=(draft.self||draft.learning)&&!draft.continuity?'自我成长和回应习惯需要勾选连续事件理解。':draft.feeling&&!draft.association?'联想感受需要勾选空闲联想。':starter&&!draft.self?'选择新的初始倾向需要勾选自我成长。':'';
+      if(message){byId('setupError').textContent=message;return}
+    }
+    if(step<2){step++;render();return}
+    busy=true;byId('setupNext').disabled=true;byId('setupBack').disabled=true;byId('setupClose').disabled=true;
+    try{
+      const result=await api('/api/onboarding','POST',{revision:data.revision,features:draft,starter});
+      if(!result.ok)throw Error(result.error||'保存失败，请重新打开向导核对。');
+      dialog.innerHTML=`<h2 id="setupDialogTitle">选择已保存</h2><p>${result.restartRequired?'新配置等待下次重启心迹后生效。':'配置与当前运行一致，无需重启。'}</p><p class="setup-subtle">重启请使用心迹启动器的“重启桥接”，或在运维页操作。重启后到本页检查实际状态，再在 QQ 私聊正常聊一句。</p><p class="setup-subtle">页面检查通过不等于模型已回复；真实聊天后再查看记忆处理记录。检查或保存本身不调用模型。</p><button id="setupDone" type="button">完成</button>`;
+      byId('setupDone').onclick=()=>dialog.close();byId('setupDone').focus();await inspect().catch(()=>{});
+    }catch(e){byId('setupError').textContent=e.message;byId('setupNext').disabled=false;byId('setupBack').disabled=false;byId('setupClose').disabled=false}
+    finally{busy=false}
+  }
+  entry.onclick=async()=>{
+    entry.disabled=true;
+    try{
+      await inspect();draft={...data.features};starter=data.starterEligible&&data.savedStarter?structuredClone(data.savedStarter):null;step=0;
+      dialog=document.createElement('dialog');dialog.className='setup-dialog';dialog.id='setupDialog';dialog.setAttribute('aria-labelledby','setupDialogTitle');
+      dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault()});dialog.addEventListener('close',()=>{dialog.remove();entry.focus()},{once:true});
+      document.body.append(dialog);dialog.showModal();render();
+    }catch{}finally{entry.disabled=false}
+  };
+  document.getElementById('refreshConsole').addEventListener('click',()=>{void inspect().catch(()=>{})});
+  void inspect().catch(()=>{});
+})();
+
 </script>
 </body>
 </html>

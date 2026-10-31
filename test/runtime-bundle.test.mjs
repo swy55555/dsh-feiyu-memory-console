@@ -10,6 +10,8 @@ test("bundle requires known hashes, updates dependencies, is idempotent and reve
     fs.mkdirSync(path.join(dir, "src"));
     const target = path.join(dir, "src", "bridge.js");
     fs.writeFileSync(target, "export const custom = true;\n");
+    const retired=path.join(dir,'src','style-distillation.mjs');
+    fs.writeFileSync(retired,'// old expression learner\n');
     assert.throws(() => installRuntime(dir, "apply"), /未知/);
     assert.equal(
       installRuntime(dir, "check", { replaceLegacy: true }).status,
@@ -21,6 +23,8 @@ test("bundle requires known hashes, updates dependencies, is idempotent and reve
       "installed",
     );
     assert.equal(installRuntime(dir, "apply").status, "already-installed");
+    assert.ok(!fs.existsSync(retired));
+    assert.ok(fs.existsSync(path.join(dir,'src','expression-teacher.mjs')));
     for (const f of [
       "bridge-v09.js",
       "xinji-policy.mjs",
@@ -46,6 +50,7 @@ test("bundle requires known hashes, updates dependencies, is idempotent and reve
       "export const custom = true;\n",
     );
     assert.ok(!fs.existsSync(path.join(dir, "src", "emotion-appraisal.mjs")));
+    assert.equal(fs.readFileSync(retired,'utf8'),'// old expression learner\n');
   } finally {
     const rel = path.relative(os.tmpdir(), dir);
     if (rel && !rel.startsWith("..") && !path.isAbsolute(rel))

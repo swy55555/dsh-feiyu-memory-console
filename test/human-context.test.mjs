@@ -20,11 +20,14 @@ test('keeps source date and subject; plans are not treated as completed events',
   assert.equal(r.timeBasis, 'source'); assert.equal(r.kind, 'plan-not-known-complete');
   assert.match(block, /当前本人纠正、完成或不想再谈优先/);
 });
-test('rejects foreign private/group scopes but preserves explicit global recall', () => {
+test('rejects foreign private/group/global records unless the service grants this destination', () => {
   const result = records(buildHumanContext({ ...base, searchRows: [row('foreign', { scope: 'private:456' }),
     row('group', { scope: 'group:789' }), row('global', { scope: 'global' }), row('missing', { scope: undefined })] }));
-  assert.deepEqual(result.map(r => r.id), ['global']);
-  assert.equal(result[0].scope, 'global');
+  assert.deepEqual(result, []);
+  const allowed=records(buildHumanContext({...base,searchRows:[row('grant',{scope:'global',shared:true,shareAuthorizedFor:base.key})]}));
+  assert.deepEqual(allowed.map(r=>r.id),['grant']);
+  const denied=records(buildHumanContext({...base,searchRows:[row('wrong-target',{scope:'global',shared:true,shareAuthorizedFor:'private:456'})]}));
+  assert.deepEqual(denied,[]);
 });
 test('group speakers retain attribution, priority endpoint cannot supply another member', () => {
   const result = records(buildHumanContext({ key: 'group:9', subjectId: '123', searchRows: [row('other', { scope: 'group:9', evidence: { subjectId: '456' } })],

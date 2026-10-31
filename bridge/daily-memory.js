@@ -1,5 +1,6 @@
 ﻿// Pure policy + bounded background queue. Never sends messages to QQ.
 import { coveragePrompt, parseCoverage } from './memory-coverage.mjs';
+import { ReviewMemo } from './confirmation-review.mjs';
 import { createHash } from 'node:crypto';
 
 // Working notes are separate from durable facts and never confirm or replace a memory.
@@ -186,8 +187,11 @@ export function recallBlock(rows, budget = 2400) {
 }
 
 export class DailyMemory {
-  constructor({ extract, verify=extract, save, load, allowed, enabled, log, request, autoConfirmFor, lightContext=()=>[], onLightNotes=()=>{}, maxCallsPerDay = 0, queueMax = 5000, priorityKey = '', groupMaxCallsPerDay = 20 }) {
+  constructor({ extract, verify=extract, save, load, allowed, enabled, log, request, autoConfirmFor, lightContext=()=>[], onLightNotes=()=>{}, modelSignature=()=>null, maxCallsPerDay = 0, queueMax = 5000, priorityKey = '', groupMaxCallsPerDay = 20 }) {
     Object.assign(this, { extract, verify, save, allowed, enabled, log, request, autoConfirmFor, lightContext, onLightNotes });
+    this.modelSignature=modelSignature;
+    // Only exact, validated inputs are reusable. No persisted chat data or sliding expiry.
+    this.analysisMemo=new ReviewMemo({maxEntries:16,ttlMs:1800000});
     this.maxCallsPerDay = Math.max(0, Number(maxCallsPerDay) || 0); // 0 = 不设上限
     this.queueMax = Math.max(0, Number(queueMax) || 0);             // 0 = 队列不设上限
     this.priorityKey = String(priorityKey || '');
@@ -260,10 +264,14 @@ export class DailyMemory {
       ? (this.state.queues[forceKey]?.length ? [forceKey, this.state.queues[forceKey]] : null)
       : (() => {
           const entries = Object.entries(this.state.queues).filter(([key, q]) => {
-            if (this.state.retries[key]?.nextAt > Date.now()) return false;
+            const retry=this.state.retries[key];
+            if(retry?.nextAt>Date.now()){
+              if(!Array.isArray(retry.uncertainMessageIds))return false;
+              q=q.filter(m=>!retry.uncertainMessageIds.includes(String(m.id)));
+            }
             if (this.state.paused?.[key] > Date.now()) return false;
             if (key.startsWith('group:') && this.groupMaxCallsPerDay > 0 && (this.state.groupCalls[key] || 0) >= this.groupMaxCallsPerDay) return false;
-            return this.allowed(key) && q.some(m=>m.text.length<=12000) && (Object.keys(this.state.progress[key] || {}).length || q.length >= 12 || Date.now() - q[q.length-1].time > 90000);
+            return this.allowed(key) && q.some(m=>m.text.length<=12000) && (q.some(m=>(this.state.progress[key]?.[String(m.id)]||[]).length) || q.length >= 12 || Date.now() - q[q.length-1].time > 90000);
           });
           // 老大私聊优先：同一时间只处理一批，先把他的那一格清掉。
           entries.sort((a, b) => (b[0] === this.priorityKey ? 1 : 0) - (a[0] === this.priorityKey ? 1 : 0));
@@ -271,14 +279,15 @@ export class DailyMemory {
         })();
     if (!item) return { ok: false, reason: 'empty' };
     const [key, q] = item;
-    if (!force && this.state.retries[key]?.nextAt > Date.now()) return { ok: false, reason: 'retry-backoff' };
+    const retry=this.state.retries[key],heldIds=new Set(!force&&retry?.nextAt>Date.now()?(retry.uncertainMessageIds||[]):[]);
+    if(!force&&retry?.nextAt>Date.now()&&!Array.isArray(retry.uncertainMessageIds))return {ok:false,reason:'retry-backoff'};
     const messages=[];let characters=0;
     for(const message of q) {
-      if(message.text.length>12000)continue;
+      if(heldIds.has(String(message.id))||message.text.length>12000)continue;
       if(messages.length && characters+message.text.length>6000)break;
       messages.push(message);characters+=message.text.length;if(messages.length>=12)break;
     }
-    if(!messages.length)return {ok:false,reason:'needs-review'};
+    if(!messages.length)return {ok:false,reason:heldIds.size?'retry-backoff':'needs-review'};
     const progress = this.state.progress[key] ||= {};
     const receipts = this.state.receipts[key] ||= {};
     const hints = this.state.coverageHints[key] ||= {};
@@ -297,9 +306,14 @@ export class DailyMemory {
       }
       const input = messages.map(m => ({...m, id: String(m.id), previously_processed: progress[String(m.id)] || [], missing_quotes:hints[String(m.id)]||[]}));
       const lightTopics=this.lightContext(key);
-      const output = await this.extract(memoryPrompt(input, related, {lightTopics, ownerPrivate: Boolean(this.priorityKey) && key === this.priorityKey }), key);
+      const prompt=memoryPrompt(input, related, {lightTopics, ownerPrivate: Boolean(this.priorityKey) && key === this.priorityKey });
+      const batch=await this.analysisMemo.get('memory-extract',{key,prompt},this.modelSignature('memory_extract'),async()=>{
+        const parsed=parseMemoryBatch(await this.extract(prompt,key),messages);
+        // Invalid extraction must never become a reusable successful result.
+        for(const row of parsed.items)memoryCandidates(JSON.stringify([row]),messages,Date.now(),related,{autoConfirm:this.autoConfirmFor?.(key)===true});
+        return parsed;
+      },value=>value.items.length>0||value.completed_source_ids.length>0);
       if (!this.allowed(key) || (!this.enabled() && !forceKey)) return;
-      const batch = parseMemoryBatch(output, messages);
       // Validate every item before any write or acknowledgement; malformed output is retryable.
       const validated = batch.items.map(row => ({row, candidates: memoryCandidates(JSON.stringify([row]), messages, Date.now(), related, { autoConfirm: this.autoConfirmFor?.(key) === true })}));
       const completedMessages=messages.filter(m=>batch.completed_source_ids.includes(String(m.id)));
@@ -308,7 +322,10 @@ export class DailyMemory {
         ...validated.filter(v=>String(v.row.source_id)===String(m.id)).map(v=>({quote:v.row.quote,outcome:v.candidates.length?'proposed':'excluded',assessment:v.row.assessment}))]}));
       for(const message of completedMessages)this.mark(key,message,'checking');
       this.save(this.state);
-      const checks=completedMessages.length?parseCoverage(await this.verify(coveragePrompt(completedMessages,handled),completedMessages),completedMessages):[];
+      const checkPrompt=coveragePrompt(completedMessages,handled);
+      const checks=completedMessages.length?await this.analysisMemo.get('memory-coverage',{key,prompt:checkPrompt},this.modelSignature('coverage_check'),
+        async()=>parseCoverage(await this.verify(checkPrompt,completedMessages),completedMessages),
+        value=>value.every(c=>c.status!=='uncertain')):[];
       if(!this.allowed(key)||(!this.enabled()&&!forceKey))return;
       let lightError='';
       try { await this.onLightNotes(key,parseLightNotes(batch.light_notes,messages,lightTopics)); }
@@ -348,8 +365,20 @@ export class DailyMemory {
       if (!Object.keys(progress).length) delete this.state.progress[key];
       if (!Object.keys(receipts).length) delete this.state.receipts[key];
       if (!Object.keys(hints).length) delete this.state.coverageHints[key];
+      const previousRetry=this.state.retries[key];
       delete this.state.retries[key];
-      if(checks.some(c=>c.status==='uncertain'))this.state.retries[key]={attempts:0,nextAt:Date.now()+120000,error:'遗漏检查尚不确定，消息保留待复核'};
+      if(checks.some(c=>c.status==='uncertain')){
+        const uncertainFingerprint=createHash('sha256').update(JSON.stringify({messages,related,model:[this.modelSignature('memory_extract'),this.modelSignature('coverage_check')]})).digest('hex');
+        const uncertainAttempts=previousRetry?.uncertainFingerprint===uncertainFingerprint?Math.min(20,(previousRetry.uncertainAttempts||0)+1):1;
+        const remainingIds=new Set(this.state.queues[key].map(m=>String(m.id)));
+        const uncertainMessageIds=[...new Set([...(previousRetry?.uncertainMessageIds||[]),...checks.filter(c=>c.status==='uncertain').map(c=>c.source_id)])].filter(id=>remainingIds.has(id));
+        const otherHeld=previousRetry?.uncertainMessageIds?.some(id=>remainingIds.has(id)&&!checks.some(c=>c.source_id===id));
+        this.state.retries[key]={attempts:0,uncertainFingerprint,uncertainAttempts,uncertainMessageIds,nextAt:Math.max(otherHeld?previousRetry.nextAt:0,Date.now()+Math.min(1800000,120000*2**(uncertainAttempts-1))),error:'遗漏检查仍不确定，延后重试；原话保留，可手动复核'};
+      }
+      if(!this.state.retries[key]&&previousRetry?.uncertainMessageIds){
+        const ids=previousRetry.uncertainMessageIds.filter(id=>this.state.queues[key].some(m=>String(m.id)===id));
+        if(ids.length)this.state.retries[key]={...previousRetry,uncertainMessageIds:ids};
+      }
       if (!this.state.queues[key].length) delete this.state.queues[key];
       this.state.okCalls = (Number(this.state.okCalls) || 0) + 1;
       if (key.startsWith('group:')) this.state.groupCalls[key] = (Number(this.state.groupCalls[key]) || 0) + 1;

@@ -15,6 +15,8 @@ spec.loader.exec_module(m)
 class MemoryLifecycleTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='feiyu-regression-')
+        self.old_home = m.HOME
+        m.HOME = self.tmp.name  # Never inherit a real installation's review policy.
         m.DB_PATH = str(Path(self.tmp.name) / 'memories.db')
         m._owner_scope_cache = 'private:10001'
         m._strength_migrated = False
@@ -23,6 +25,7 @@ class MemoryLifecycleTests(unittest.TestCase):
         m.DEDUPE_SIM = 1.01
 
     def tearDown(self):
+        m.HOME = self.old_home
         self.tmp.cleanup()
 
     def add(self, text, scope='private:10001', subject='10001', **kwargs):
@@ -415,7 +418,9 @@ class MemoryLifecycleTests(unittest.TestCase):
         self.assertEqual(resumed['context']['offset'], 8)
         with m.db() as c:
             c.execute('UPDATE memories SET text=? WHERE id=?', ('changed original fact', ctx['related'][0]['id']))
-        self.assertEqual(m.confirmation_context('private:10001', candidate)['reviewed'], 0)
+        changed = m.confirmation_context('private:10001', candidate)
+        self.assertEqual(changed['reviewed'], 7)
+        self.assertEqual([r['id'] for r in changed['context']['related']], [ctx['related'][0]['id']])
 
     def test_restore_can_finish_multiple_review_pages_without_truncation(self):
         candidate = self.add('old archived record')
@@ -581,7 +586,7 @@ class MemoryLifecycleTests(unittest.TestCase):
         self.assertEqual(self.row(old)['status'], 'active')
         self.assertEqual(self.row(new)['status'], 'candidate')
 
-    def test_search_includes_global_filters_status_expiry_and_preserves_state(self):
+    def test_search_isolates_global_filters_status_expiry_and_preserves_state(self):
         active = self.add('active', confirmed=True, source_text='original wording', source_id='msg1')
         self.add('candidate')
         self.add('expired', confirmed=True, expires_at=m.now()-10)
@@ -591,7 +596,7 @@ class MemoryLifecycleTests(unittest.TestCase):
             c.execute("UPDATE memories SET scope='global' WHERE id=?", (legacy,))
         before = self.row(active)
         result = m.search_memory('question', scope='private:10001')
-        self.assertEqual({r['id'] for r in result}, {active, legacy})
+        self.assertEqual({r['id'] for r in result}, {active})
         self.assertEqual(self.row(active), before)
         evidence = result[0]['retrieval']
         self.assertAlmostEqual(evidence['score'], evidence['similarity'] * evidence['retentionMultiplier'] * evidence['importanceFactor'])
@@ -645,12 +650,126 @@ class MemoryLifecycleTests(unittest.TestCase):
             c.execute("UPDATE memories SET source_id='same'")
             c.execute("UPDATE memories SET scope='global' WHERE id=?", (shared,))
         self.assertEqual([r['id'] for r in m.associate_memory(seed, 'group:1')], [local])
+        self.assertEqual([r['id'] for r in m.associate_memory(seed, 'group:1', 99, True)], [local])
+        self.grant(shared, 'group:1', 'global')
         self.assertEqual(set(r['id'] for r in m.associate_memory(seed, 'group:1', 99, True)), {local, shared})
         self.assertEqual(m.associate_memory(foreign, 'group:1'), [])
         self.assertEqual(m.associate_memory(shared, 'group:1'), [])
         with m.db() as c:
             c.execute('UPDATE memories SET expires_at=? WHERE id=?', (m.now()-1, seed))
         self.assertEqual(m.associate_memory(seed, 'group:1'), [])
+
+    def grant(self, mid, target, scope='private:10001'):
+        view = m.memory_sharing(scope, mid)
+        return m.memory_sharing(scope, mid, 'grant', target, view['revision'])
+
+    def test_share_requires_exact_fact_target_and_current_version(self):
+        mid = self.add('喜欢小笼包', confirmed=True, source_id='source', source_text='喜欢小笼包；不愿公开的其他事情')
+        other = self.add('另一个私聊的事实', scope='private:20002', subject='20002', confirmed=True)
+        for target in ['private:20002', 'group:9']:
+            self.assertEqual(m.search_memory('question',scope=target,shared=True), [])
+        self.grant(mid, 'group:9')
+        results=m.search_memory('question',scope='group:9',shared=True)
+        self.assertEqual([r['id'] for r in results],[mid])
+        self.assertEqual(results[0]['evidence']['sourceText'],'')
+        self.assertEqual(m.search_memory('question',scope='group:8',shared=True),[])
+        self.assertEqual(m.search_memory('question',scope='private:20002',shared=True),[])
+        with m.db() as c:
+            c.execute("UPDATE memories SET text='更正后的事实' WHERE id=?",(mid,))
+        # A cached vector matrix must not keep a formerly authorized fact alive.
+        self.assertEqual(m.search_memory('question',scope='group:9',shared=True),[])
+        self.assertFalse(m.memory_sharing('private:10001',mid)['grants'][0]['current'])
+        self.grant(mid,'group:9')
+        self.assertEqual(m.search_memory('question',scope='group:9',shared=True)[0]['text'],'更正后的事实')
+        m.memory_sharing('private:10001',mid,'revoke','group:9')
+        self.assertEqual(m.search_memory('question',scope='group:9',shared=True),[])
+        self.assertEqual(self.row(other)['status'],'active')
+
+    def test_share_global_is_not_a_wildcard_and_grant_is_management_only(self):
+        mid=self.add('旧全局记忆',confirmed=True)
+        with m.db() as c:
+            c.execute("UPDATE memories SET scope='global' WHERE id=?",(mid,))
+        self.assertEqual(m.search_memory('question',scope='group:9',include_global=True),[])
+        self.grant(mid,'group:9','global')
+        self.assertEqual([r['id'] for r in m.search_memory('question',scope='group:9',include_global=True)],[mid])
+        self.assertEqual(m.search_memory('question',scope='group:8',include_global=True),[])
+        for target in ['*','global','group:*','private:10001']:
+            local=self.add('fact '+target,confirmed=True)
+            with self.assertRaises(ValueError): self.grant(local,target)
+        for kwargs in [{},{'confirmed':True,'expires_at':m.now()-1}]:
+            candidate=self.add('不能共享',**kwargs)
+            with self.assertRaises(ValueError): self.grant(candidate,'group:9')
+        with self.assertRaises(ValueError):m.memory_sharing('private:20002',mid)
+
+    def test_grants_recheck_status_expiry_source_and_do_not_extend_to_associations(self):
+        mid=self.add('授权事实',confirmed=True,source_id='same')
+        neighbor=self.add('同原话的另一条',confirmed=True,source_id='same')
+        self.grant(mid,'group:9')
+        self.assertEqual(m.associate_memory(mid,'group:9',include_global=True),[])
+        self.assertEqual([r['id'] for r in m.search_memory('question',scope='group:9',shared=True)],[mid])
+        for column,value in [('status','deleted'),('expires_at',m.now()-1),('source_text','更正原话')]:
+            with self.subTest(column=column):
+                before=self.row(mid)
+                with m.db() as c:c.execute(f'UPDATE memories SET {column}=? WHERE id=?',(value,mid))
+                self.assertEqual(m.search_memory('question',scope='group:9',shared=True),[])
+                with m.db() as c:c.execute(f'UPDATE memories SET {column}=? WHERE id=?',(before[column],mid))
+
+    def test_ordinary_and_global_memories_share_automatically_but_private_and_stale_do_not(self):
+        ordinary=self.add('喜欢茶',confirmed=True,source_text='我喜欢茶')
+        secret=self.add('私密事项',confirmed=True,source_text='这件事不要告诉别人')
+        global_id=self.add('以前的普通全局记忆',confirmed=True)
+        with m.db() as c:c.execute("UPDATE memories SET scope='global' WHERE id=?",(global_id,))
+        pending=m.sharing_context('group:9','茶')['pending']
+        self.assertEqual({r['id'] for r in pending},{ordinary,secret,global_id})
+        m.save_sharing_reviews([{**r,'level':'private' if r['id']==secret else 'public','confidence':.98,'reason':'模拟审核'} for r in pending])
+        for target in ['group:9','private:20002']:
+            result=m.search_memory('茶',scope=target,shared=True)
+            self.assertEqual({r['id'] for r in result},{ordinary,global_id})
+            self.assertTrue(all(r['evidence']['sourceText']=='' for r in result))
+            self.assertEqual(m.sharing_context(target,'茶')['pending'],[])
+        with m.db() as c:c.execute("UPDATE memories SET source_text='更正后不愿公开' WHERE id=?",(ordinary,))
+        self.assertEqual({r['id'] for r in m.search_memory('茶',scope='group:9',shared=True)},{global_id})
+        self.assertEqual([r['id'] for r in m.sharing_context('group:9','茶')['pending']],[ordinary])
+        # Stale model output cannot restore an old disclosure permission.
+        m.save_sharing_reviews([{**r,'level':'public','confidence':.99} for r in pending if r['id']==ordinary])
+        self.assertNotIn(ordinary,{r['id'] for r in m.search_memory('茶',scope='group:9',shared=True)})
+
+    def test_manual_privacy_and_target_block_override_cached_auto_sharing(self):
+        mid=self.add('普通记忆',confirmed=True)
+        rev=m.memory_sharing('private:10001',mid)['revision']
+        m.memory_sharing('private:10001',mid,'public',expected_hash=rev)
+        self.assertEqual(len(m.search_memory('x',scope='group:9',shared=True)),1)
+        m.memory_sharing('private:10001',mid,'revoke','group:9')
+        self.assertEqual(m.search_memory('x',scope='group:9',shared=True),[])
+        self.assertEqual(len(m.search_memory('x',scope='group:8',shared=True)),1)
+        self.grant(mid,'group:9')
+        m.memory_sharing('private:10001',mid,'private',expected_hash=rev)
+        self.assertEqual(m.search_memory('x',scope='group:9',shared=True),[])
+        with m.db() as c:c.execute("UPDATE memories SET text='修改仍私密' WHERE id=?",(mid,))
+        self.assertEqual(m.sharing_context('group:9','x')['pending'],[])
+        view=m.memory_sharing('private:10001',mid)
+        m.memory_sharing('private:10001',mid,'auto',expected_hash=view['revision'])
+        self.assertEqual(len(m.sharing_context('group:9','x')['pending']),1)
+
+    def test_only_participated_summary_safe_excerpts_can_reach_owner(self):
+        at=m.now()*1000
+        spoken=m.add_message('group:9',message_id='self',text='我们聊种花',at=at,is_self=True)
+        sid=m.add_summary('group:9',at-1,at+1,covered_ids=[spoken['id']],text='我们聊种花。另有隐私事项。')['id']
+        unheard=m.add_summary('group:8',at-1,at+1,text='角色未参与的聊天')['id']
+        m.add_summary('group:9',at-1,at+1,covered_ids=['not-self'],text='未覆盖角色发言的摘要')
+        self.assertEqual(m.sharing_context('private:20002','聊什么',True)['pending'],[])
+        self.assertEqual(m.sharing_context('private:10001','聊什么',False)['pending'],[])
+        pending=m.sharing_context('private:10001','聊什么',True)['pending']
+        self.assertEqual([r['id'] for r in pending],[sid])
+        m.save_sharing_reviews([{**pending[0],'level':'public','confidence':.99,'excerpts':['我们聊种花。']}])
+        owner=m.sharing_context('private:10001','聊什么',True)
+        self.assertEqual(owner['summaries'][0]['text'],'我们聊种花。')
+        self.assertEqual(owner['pending'],[])
+        self.assertEqual(m.sharing_context('group:7','聊什么',True)['summaries'],[])
+        with m.db() as c:c.execute("UPDATE session_summaries SET text='修改了摘要' WHERE id=?",(sid,))
+        changed=m.sharing_context('private:10001','聊什么',True)
+        self.assertEqual(changed['summaries'],[])
+        self.assertEqual(changed['pending'][0]['id'],sid)
 
     def test_combined_review_persists_both_parts_and_requires_all_pages(self):
         for i in range(9):
@@ -725,6 +844,28 @@ class MemoryLifecycleTests(unittest.TestCase):
         with self.assertRaises(m.MemoryConflict):
             m.confirm_memory('private:30003', negative, auto_revision=value['revision'])
         self.assertEqual(self.row(negative)['status'], 'candidate')
+
+    def test_review_completion_is_distinct_from_automatic_confirmation_readiness(self):
+        for i, relation, confidence in [(1,'coexist',.99),(2,'coexist',.85),(3,'conflict',.99)]:
+            scope='private:'+str(70000+i)
+            peer=self.add('已有事实',scope=scope,subject=str(70000+i),confirmed=True)
+            mid=self.add('候选事实',scope=scope,subject=str(70000+i),source_text='原话完整支持候选',source_id='source')
+            prepared=m.confirmation_context(scope,mid)
+            self.assertEqual(prepared['automatic']['status'],'reviewing')
+            review=self.evidence_review(mid,scope=scope)
+            review['relations']=[{'id':peer,'relation':relation,'confidence':confidence,'evidence':prepared['context']['related'][0]['quote']}]
+            saved=m.save_review_page(scope,mid,'confirm',0,review)
+            self.assertFalse(saved['pending'])
+            expected='ready' if i==1 else 'manual'
+            self.assertEqual(saved['automatic']['status'],expected)
+            cached=m.confirmation_context(scope,mid)
+            self.assertEqual(cached['automatic'],saved['automatic'])
+            if i==1:self.assertEqual(m.confirm_memory(scope,mid,auto_revision=cached['context']['revision'])['confirmed'],1)
+            else:
+                self.assertEqual(saved['automatic']['uncertain'],int(i==2))
+                self.assertEqual(saved['automatic']['conflicts'],int(i==3))
+                with self.assertRaises(m.MemoryConflict):m.confirm_memory(scope,mid,auto_revision=cached['context']['revision'])
+                self.assertEqual(self.row(mid)['status'],'candidate')
 
     def test_auto_requires_durable_evidence_even_without_related_facts(self):
         mid = self.add('喜欢茶', source_text='我喜欢茶', source_id='new')
@@ -809,6 +950,85 @@ class MemoryLifecycleTests(unittest.TestCase):
         self.assertIsNone(invalid['evidenceVerdict']);self.assertEqual(invalid['reviewed'],0)
 
 
+
+    def test_delta_only_sends_changed_pair_and_rejects_omissions(self):
+        scope='private:10001'
+        old=[self.add('old fact '+str(i),confirmed=True,source_text='source '+str(i),source_id='old'+str(i)) for i in range(16)]
+        mid=self.add('candidate',source_text='candidate source',source_id='candidate')
+        def save_next():
+            p=m.confirmation_context(scope,mid)
+            review=self.page_review(p['context'])
+            review['evidenceVerdict']=self.evidence_review(mid)['evidenceVerdict']
+            return m.save_review_page(scope,mid,'confirm',p['context']['offset'],review)
+        save_next();save_next()
+        before=m.confirmation_context(scope,mid)
+        self.assertFalse(before['needed']);self.assertEqual(before['context']['related'],[])
+        added=self.add('additional fact',confirmed=True,source_text='additional source',source_id='added')
+        with m.db() as c:c.execute("UPDATE memories SET id='000-added' WHERE id=?",(added,))
+        pending=m.confirmation_context(scope,mid)
+        self.assertEqual(pending['reviewed'],16)
+        self.assertEqual([r['id'] for r in pending['context']['related']],['000-added'])
+        self.assertIsNotNone(pending['evidenceVerdict'])
+        with self.assertRaises(m.MemoryConflict):m.confirm_memory(scope,mid,auto_revision=pending['context']['revision'])
+        save_next()
+        self.assertFalse(m.confirmation_context(scope,mid)['needed'])
+        with m.db() as c:
+            c.execute("UPDATE memories SET source_text='corrected' WHERE id IN (?,?)",(old[0],old[1]))
+        p=m.confirmation_context(scope,mid)
+        self.assertEqual(p['reviewed'],15)
+        self.assertTrue(all(r['id'] in old[:2] for r in p['context']['related']))
+        bad=self.page_review(p['context']);bad['relations']=[]
+        with self.assertRaises(m.MemoryConflict):m.save_review_page(scope,mid,'confirm',p['context']['offset'],bad)
+        while m.confirmation_context(scope,mid)['needed']:save_next()
+        self.assertEqual(m.confirmation_context(scope,mid)['reviewed'],17)
+        # Another scope / operation cannot consume the pair receipts.
+        with m.db() as c:c.execute("UPDATE memories SET status='archived' WHERE id=?",(mid,))
+        self.assertEqual(m.confirmation_context(scope,mid,'restore')['reviewed'],0)
+
+    def test_partial_uncertainty_pauses_auto_but_manual_can_finish_all_facts(self):
+        scope='private:10001'
+        for i in range(17):self.add('old '+str(i),confirmed=True)
+        mid=self.add('candidate',source_text='candidate source',source_id='candidate')
+        p=m.confirmation_context(scope,mid);review=self.page_review(p['context'])
+        review['evidenceVerdict']=self.evidence_review(mid)['evidenceVerdict']
+        review['relations'][0]['confidence']=.6
+        saved=m.save_review_page(scope,mid,'confirm',0,review)
+        self.assertTrue(saved['pending']);self.assertEqual(saved['automatic']['status'],'manual')
+        self.assertEqual(saved['automatic']['uncertain'],1)
+        self.assertEqual(m.confirmation_context(scope,mid)['automatic']['status'],'manual')
+        with self.assertRaises(m.MemoryConflict):m.confirm_memory(scope,mid,auto_revision=review['revision'])
+        while True:
+            p=m.confirmation_context(scope,mid)
+            if not p['needed']:break
+            m.save_review_page(scope,mid,'confirm',p['context']['offset'],self.page_review(p['context']))
+        self.assertEqual(p['reviewed'],17);self.assertEqual(p['automatic']['status'],'manual')
+        with self.assertRaises(m.MemoryConflict):m.confirm_memory(scope,mid,auto_revision=review['revision'])
+
+    def test_structured_routing_only_prioritizes_and_never_discards_low_similarity(self):
+        scope='private:10001'
+        for i in range(12):self.add('unrelated '+str(i),confirmed=True)
+        old=self.add('old tea preference',confirmed=True,fact=self.fact('tea','no','old tea preference'))
+        mid=self.add('new tea preference',fact=self.fact('tea','yes','new tea preference'))
+        with m.db() as c:c.execute('UPDATE memories SET embedding=? WHERE id=?',(np.array([0.,1.,0.],dtype=np.float32).tobytes(),old))
+        p=m.confirmation_context(scope,mid)
+        self.assertEqual(p['context']['related'][0]['id'],old)
+        self.assertEqual(p['total'],13)
+        with m.db() as c:
+            c.row_factory=m.sqlite3.Row
+            candidate=c.execute('SELECT * FROM memories WHERE id=?',(mid,)).fetchone()
+            full,_=m._review_context(c,candidate,all_rows=True)
+        self.assertEqual(len(full['related']),13)
+        with self.assertRaises(m.MemoryConflict):m.confirm_memory(scope,mid)
+
+    def test_partial_source_rejection_stops_auto_before_remaining_pages(self):
+        scope='private:10001'
+        for i in range(17):self.add('old '+str(i),confirmed=True)
+        mid=self.add('candidate',source_text='candidate source',source_id='candidate')
+        p=m.confirmation_context(scope,mid);review=self.page_review(p['context'])
+        review['evidenceVerdict']=self.evidence_review(mid,False)['evidenceVerdict']
+        saved=m.save_review_page(scope,mid,'confirm',0,review)
+        self.assertTrue(saved['pending']);self.assertEqual(saved['automatic']['dependency'],'source')
+        with self.assertRaises(m.MemoryConflict):m.confirm_memory(scope,mid,auto_revision=review['revision'])
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

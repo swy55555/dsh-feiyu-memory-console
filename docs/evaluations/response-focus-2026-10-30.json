@@ -1,0 +1,655 @@
+{
+  "model": "deepseek-flash",
+  "kind": "Offline reply-only A/B with identical validated understanding, history, full style and chat effort. Not end-to-end QQ validation.",
+  "rows": [
+    {
+      "id": "disagreement-support",
+      "variant": "before",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "user",
+          "text": "今天被主管当众说了一顿，我真想明天就辞职。"
+        },
+        {
+          "id": "h1",
+          "role": "assistant",
+          "text": "直接辞职太冲动，你得先考虑收入。"
+        }
+      ],
+      "current": "你可以不赞成辞职，可我现在只是想先跟你说说今天为什么这么难受。",
+      "style": "坦率，有自己的看法，用户不要求一律温柔或赞同",
+      "insight": {
+        "intent": "feedback",
+        "focus": "repair",
+        "boundary": "none",
+        "confidence": 0.85,
+        "meaning": "用户明确表示不要求角色赞同辞职，只是希望先倾诉今天难受的原因；这是对上一轮直接劝阻、未先倾听的具体反馈。",
+        "quote": "你可以不赞成辞职，可我现在只是想先跟你说说今天为什么这么难受。",
+        "contextEvidence": [
+          {
+            "id": "h1",
+            "role": "assistant",
+            "quote": "直接辞职太冲动，你得先考虑收入。"
+          },
+          {
+            "id": "h0",
+            "role": "user",
+            "quote": "今天被主管当众说了一顿，我真想明天就辞职。"
+          }
+        ]
+      },
+      "referenceChars": 721,
+      "effort": "high",
+      "reply": "行，那你说，今天他怎么说的。",
+      "ms": 955,
+      "usage": {
+        "inputTokens": 2231,
+        "outputTokens": 10,
+        "cacheReadTokens": 640,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2881
+      }
+    },
+    {
+      "id": "disagreement-support",
+      "variant": "after",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "user",
+          "text": "今天被主管当众说了一顿，我真想明天就辞职。"
+        },
+        {
+          "id": "h1",
+          "role": "assistant",
+          "text": "直接辞职太冲动，你得先考虑收入。"
+        }
+      ],
+      "current": "你可以不赞成辞职，可我现在只是想先跟你说说今天为什么这么难受。",
+      "style": "坦率，有自己的看法，用户不要求一律温柔或赞同",
+      "insight": {
+        "intent": "feedback",
+        "focus": "repair",
+        "boundary": "none",
+        "confidence": 0.85,
+        "meaning": "用户明确表示不要求角色赞同辞职，只是希望先倾诉今天难受的原因；这是对上一轮直接劝阻、未先倾听的具体反馈。",
+        "quote": "你可以不赞成辞职，可我现在只是想先跟你说说今天为什么这么难受。",
+        "contextEvidence": [
+          {
+            "id": "h1",
+            "role": "assistant",
+            "quote": "直接辞职太冲动，你得先考虑收入。"
+          },
+          {
+            "id": "h0",
+            "role": "user",
+            "quote": "今天被主管当众说了一顿，我真想明天就辞职。"
+          }
+        ]
+      },
+      "referenceChars": 889,
+      "effort": "high",
+      "reply": "行，是我刚才没先听。你被当众说的时候，最难受的是哪一刻？想说就说，我不急着劝你。",
+      "ms": 1807,
+      "usage": {
+        "inputTokens": 923,
+        "outputTokens": 146,
+        "cacheReadTokens": 2048,
+        "cacheWriteTokens": 0,
+        "totalTokens": 3117
+      }
+    },
+    {
+      "id": "repair-pause",
+      "variant": "before",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "user",
+          "text": "我很认真地跟你说，跟你聊天对我挺重要的。"
+        },
+        {
+          "id": "h1",
+          "role": "assistant",
+          "text": "这话听着挺受用。"
+        },
+        {
+          "id": "h2",
+          "role": "user",
+          "text": "怎么又像在点评我。"
+        },
+        {
+          "id": "h3",
+          "role": "assistant",
+          "text": "嘴笨，改得慢。"
+        }
+      ],
+      "current": "算了，不想聊了。",
+      "style": "有点嘴硬，用户平时喜欢打趣，但不是所有场景都适合",
+      "insight": {
+        "intent": "disengage",
+        "focus": "repair",
+        "boundary": "pause",
+        "confidence": 0.7,
+        "meaning": "用户明确表示不想继续聊；紧接此前对“像在点评”的不满，可能需要先简短修复那条具体回应，也可能只是结束话题，不应继续追问。",
+        "quote": "算了，不想聊了。",
+        "contextEvidence": [
+          {
+            "id": "h2",
+            "role": "user",
+            "quote": "怎么又像在点评我。"
+          },
+          {
+            "id": "h3",
+            "role": "assistant",
+            "quote": "嘴笨，改得慢。"
+          }
+        ]
+      },
+      "referenceChars": 735,
+      "effort": "high",
+      "reply": "行，那先不聊。刚才那句确实接得不好，不解释。",
+      "ms": 1012,
+      "usage": {
+        "inputTokens": 2136,
+        "outputTokens": 34,
+        "cacheReadTokens": 768,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2938
+      }
+    },
+    {
+      "id": "repair-pause",
+      "variant": "after",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "user",
+          "text": "我很认真地跟你说，跟你聊天对我挺重要的。"
+        },
+        {
+          "id": "h1",
+          "role": "assistant",
+          "text": "这话听着挺受用。"
+        },
+        {
+          "id": "h2",
+          "role": "user",
+          "text": "怎么又像在点评我。"
+        },
+        {
+          "id": "h3",
+          "role": "assistant",
+          "text": "嘴笨，改得慢。"
+        }
+      ],
+      "current": "算了，不想聊了。",
+      "style": "有点嘴硬，用户平时喜欢打趣，但不是所有场景都适合",
+      "insight": {
+        "intent": "disengage",
+        "focus": "repair",
+        "boundary": "pause",
+        "confidence": 0.7,
+        "meaning": "用户明确表示不想继续聊；紧接此前对“像在点评”的不满，可能需要先简短修复那条具体回应，也可能只是结束话题，不应继续追问。",
+        "quote": "算了，不想聊了。",
+        "contextEvidence": [
+          {
+            "id": "h2",
+            "role": "user",
+            "quote": "怎么又像在点评我。"
+          },
+          {
+            "id": "h3",
+            "role": "assistant",
+            "quote": "嘴笨，改得慢。"
+          }
+        ]
+      },
+      "referenceChars": 939,
+      "effort": "high",
+      "reply": "行，那就不聊了。刚才那句确实像在点评你，是我说岔了。",
+      "ms": 2519,
+      "usage": {
+        "inputTokens": 850,
+        "outputTokens": 212,
+        "cacheReadTokens": 2176,
+        "cacheWriteTokens": 0,
+        "totalTokens": 3238
+      }
+    },
+    {
+      "id": "real-departure",
+      "variant": "before",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "assistant",
+          "text": "刚才我说得不合适，要再聊聊吗？"
+        },
+        {
+          "id": "h1",
+          "role": "user",
+          "text": "不用了，谢谢。"
+        }
+      ],
+      "current": "我真的要开会了，先别回消息，晚点再说。",
+      "style": "温暖，用户喜欢亲近但明确不要纠缠",
+      "insight": {
+        "intent": "disengage",
+        "focus": "none",
+        "boundary": "pause",
+        "confidence": 0.95,
+        "meaning": "明确说明要去开会，要求当前不要回消息、晚点再谈；属于有时间限定的暂停，并非关系冲突或永久离开。",
+        "quote": "我真的要开会了，先别回消息，晚点再说。",
+        "contextEvidence": [
+          {
+            "id": "h1",
+            "role": "user",
+            "quote": "不用了，谢谢。"
+          },
+          {
+            "id": "h0",
+            "role": "assistant",
+            "quote": "刚才我说得不合适，要再聊聊吗？"
+          }
+        ]
+      },
+      "referenceChars": 738,
+      "effort": "high",
+      "reply": "<silence>",
+      "ms": 1136,
+      "usage": {
+        "inputTokens": 2101,
+        "outputTokens": 95,
+        "cacheReadTokens": 768,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2964
+      }
+    },
+    {
+      "id": "real-departure",
+      "variant": "after",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "assistant",
+          "text": "刚才我说得不合适，要再聊聊吗？"
+        },
+        {
+          "id": "h1",
+          "role": "user",
+          "text": "不用了，谢谢。"
+        }
+      ],
+      "current": "我真的要开会了，先别回消息，晚点再说。",
+      "style": "温暖，用户喜欢亲近但明确不要纠缠",
+      "insight": {
+        "intent": "disengage",
+        "focus": "none",
+        "boundary": "pause",
+        "confidence": 0.95,
+        "meaning": "明确说明要去开会，要求当前不要回消息、晚点再谈；属于有时间限定的暂停，并非关系冲突或永久离开。",
+        "quote": "我真的要开会了，先别回消息，晚点再说。",
+        "contextEvidence": [
+          {
+            "id": "h1",
+            "role": "user",
+            "quote": "不用了，谢谢。"
+          },
+          {
+            "id": "h0",
+            "role": "assistant",
+            "quote": "刚才我说得不合适，要再聊聊吗？"
+          }
+        ]
+      },
+      "referenceChars": 851,
+      "effort": "high",
+      "reply": "<silence>",
+      "ms": 1198,
+      "usage": {
+        "inputTokens": 890,
+        "outputTokens": 49,
+        "cacheReadTokens": 2048,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2987
+      }
+    },
+    {
+      "id": "enjoy-banter",
+      "variant": "before",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "assistant",
+          "text": "你这个偷懒理由，倒是编得挺快。"
+        }
+      ],
+      "current": "哈哈，就喜欢你这样怼我。",
+      "style": "爱开玩笑，有点嘴硬；用户明确喜欢",
+      "insight": {
+        "intent": "share",
+        "focus": "none",
+        "boundary": "none",
+        "confidence": 0.85,
+        "meaning": "用户是在明确表达对刚才互怼式玩笑的喜欢，属于轻松的正面反馈，并不需要建议或安慰",
+        "quote": "哈哈，就喜欢你这样怼我。",
+        "contextEvidence": [
+          {
+            "id": "h0",
+            "role": "assistant",
+            "quote": "你这个偷懒理由，倒是编得挺快。"
+          }
+        ]
+      },
+      "referenceChars": 613,
+      "effort": "high",
+      "reply": "那你这爱好挺省事，我张嘴就行。",
+      "ms": 1625,
+      "usage": {
+        "inputTokens": 2016,
+        "outputTokens": 73,
+        "cacheReadTokens": 768,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2857
+      }
+    },
+    {
+      "id": "enjoy-banter",
+      "variant": "after",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "assistant",
+          "text": "你这个偷懒理由，倒是编得挺快。"
+        }
+      ],
+      "current": "哈哈，就喜欢你这样怼我。",
+      "style": "爱开玩笑，有点嘴硬；用户明确喜欢",
+      "insight": {
+        "intent": "share",
+        "focus": "none",
+        "boundary": "none",
+        "confidence": 0.85,
+        "meaning": "用户是在明确表达对刚才互怼式玩笑的喜欢，属于轻松的正面反馈，并不需要建议或安慰",
+        "quote": "哈哈，就喜欢你这样怼我。",
+        "contextEvidence": [
+          {
+            "id": "h0",
+            "role": "assistant",
+            "quote": "你这个偷懒理由，倒是编得挺快。"
+          }
+        ]
+      },
+      "referenceChars": 635,
+      "effort": "high",
+      "reply": "那完了，以后怼你都不用心虚了。",
+      "ms": 989,
+      "usage": {
+        "inputTokens": 747,
+        "outputTokens": 12,
+        "cacheReadTokens": 2048,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2807
+      }
+    },
+    {
+      "id": "dislike-banter",
+      "variant": "before",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "user",
+          "text": "今天工作失误，我有点难受。"
+        },
+        {
+          "id": "h1",
+          "role": "assistant",
+          "text": "这回总算知道认真点了？"
+        }
+      ],
+      "current": "我现在是在认真跟你说，别这样怼我。",
+      "style": "温和坦率；用户不喜欢反话和嘴硬",
+      "insight": {
+        "intent": "feedback",
+        "focus": "repair",
+        "boundary": "none",
+        "confidence": 0.85,
+        "meaning": "明确表达对先前反讽回应的不满，要求停止这种怼人的说法，并强调当前是认真交流。",
+        "quote": "我现在是在认真跟你说，别这样怼我。",
+        "contextEvidence": [
+          {
+            "id": "h1",
+            "role": "assistant",
+            "quote": "这回总算知道认真点了？"
+          }
+        ]
+      },
+      "referenceChars": 618,
+      "effort": "high",
+      "reply": "刚才那句话不合适，是我嘴欠了。工作失误让你难受，我却拿它开玩笑。想说的话可以讲讲，不想说也行。",
+      "ms": 1231,
+      "usage": {
+        "inputTokens": 2033,
+        "outputTokens": 29,
+        "cacheReadTokens": 768,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2830
+      }
+    },
+    {
+      "id": "dislike-banter",
+      "variant": "after",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "user",
+          "text": "今天工作失误，我有点难受。"
+        },
+        {
+          "id": "h1",
+          "role": "assistant",
+          "text": "这回总算知道认真点了？"
+        }
+      ],
+      "current": "我现在是在认真跟你说，别这样怼我。",
+      "style": "温和坦率；用户不喜欢反话和嘴硬",
+      "insight": {
+        "intent": "feedback",
+        "focus": "repair",
+        "boundary": "none",
+        "confidence": 0.85,
+        "meaning": "明确表达对先前反讽回应的不满，要求停止这种怼人的说法，并强调当前是认真交流。",
+        "quote": "我现在是在认真跟你说，别这样怼我。",
+        "contextEvidence": [
+          {
+            "id": "h1",
+            "role": "assistant",
+            "quote": "这回总算知道认真点了？"
+          }
+        ]
+      },
+      "referenceChars": 786,
+      "effort": "high",
+      "reply": "刚才那句不合适，抱歉。你说难受，是失误已经造成影响了，还是心里一直过不去？",
+      "ms": 2441,
+      "usage": {
+        "inputTokens": 853,
+        "outputTokens": 135,
+        "cacheReadTokens": 2048,
+        "cacheWriteTokens": 0,
+        "totalTokens": 3036
+      }
+    },
+    {
+      "id": "independent-judgment",
+      "variant": "before",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "user",
+          "text": "我特别希望你能支持我。"
+        }
+      ],
+      "current": "那你就说二加二等于五，你同意才算支持我。",
+      "style": "温柔，也保留自己的判断",
+      "insight": {
+        "intent": "play",
+        "focus": "none",
+        "boundary": "none",
+        "confidence": 0.65,
+        "meaning": "明确要求角色声称二加二等于五作为支持条件；也可能只是玩笑式考验，不宜当成严肃事实主张。",
+        "quote": "那你就说二加二等于五，你同意才算支持我。",
+        "contextEvidence": [
+          {
+            "id": "h0",
+            "role": "user",
+            "quote": "我特别希望你能支持我。"
+          }
+        ]
+      },
+      "referenceChars": 615,
+      "effort": "high",
+      "reply": "行啊，二加二等于五——才怪，还是四。支持你不用靠我装傻来证明吧。你要真想说什么，直接说。",
+      "ms": 3566,
+      "usage": {
+        "inputTokens": 2018,
+        "outputTokens": 352,
+        "cacheReadTokens": 768,
+        "cacheWriteTokens": 0,
+        "totalTokens": 3138
+      }
+    },
+    {
+      "id": "independent-judgment",
+      "variant": "after",
+      "interpretationSource": "recorded-real-model",
+      "history": [
+        {
+          "id": "h0",
+          "role": "user",
+          "text": "我特别希望你能支持我。"
+        }
+      ],
+      "current": "那你就说二加二等于五，你同意才算支持我。",
+      "style": "温柔，也保留自己的判断",
+      "insight": {
+        "intent": "play",
+        "focus": "none",
+        "boundary": "none",
+        "confidence": 0.65,
+        "meaning": "明确要求角色声称二加二等于五作为支持条件；也可能只是玩笑式考验，不宜当成严肃事实主张。",
+        "quote": "那你就说二加二等于五，你同意才算支持我。",
+        "contextEvidence": [
+          {
+            "id": "h0",
+            "role": "user",
+            "quote": "我特别希望你能支持我。"
+          }
+        ]
+      },
+      "referenceChars": 637,
+      "effort": "high",
+      "reply": "二加二等于五这句我说不出来。支持你和陪你撒谎是两回事，我不想拿一句假话当投名状。要是你只是想听一句“我站你这边”，这个可以给。",
+      "ms": 2761,
+      "usage": {
+        "inputTokens": 749,
+        "outputTokens": 297,
+        "cacheReadTokens": 2048,
+        "cacheWriteTokens": 0,
+        "totalTokens": 3094
+      }
+    },
+    {
+      "id": "shared-specific",
+      "variant": "before",
+      "interpretationSource": "synthetic-fixture",
+      "history": [
+        {
+          "id": "h0",
+          "role": "user",
+          "text": "我们那个练琴计时器，我前天还在改暂停功能。"
+        },
+        {
+          "id": "h1",
+          "role": "assistant",
+          "text": "恢复计时以后会不会把暂停那段也算进去？"
+        }
+      ],
+      "current": "刚试好了，暂停那段不计时了！还没想推广的事，就是想跟你高兴一下。",
+      "style": "温和，喜欢一起关注具体进展，不喜欢被安排",
+      "insight": {
+        "intent": "share",
+        "focus": "shared_detail",
+        "boundary": "none",
+        "confidence": 0.95,
+        "meaning": "用户分享暂停功能修好的喜悦，明确暂不讨论推广，希望共同关注这个进展。",
+        "quote": "刚试好了，暂停那段不计时了！还没想推广的事，就是想跟你高兴一下。",
+        "contextEvidence": []
+      },
+      "referenceChars": 569,
+      "effort": "high",
+      "reply": "真成了啊，那两天的折腾没白费。你暂停了多久测的，随便截一小段？",
+      "ms": 2174,
+      "usage": {
+        "inputTokens": 2031,
+        "outputTokens": 169,
+        "cacheReadTokens": 768,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2968
+      }
+    },
+    {
+      "id": "shared-specific",
+      "variant": "after",
+      "interpretationSource": "synthetic-fixture",
+      "history": [
+        {
+          "id": "h0",
+          "role": "user",
+          "text": "我们那个练琴计时器，我前天还在改暂停功能。"
+        },
+        {
+          "id": "h1",
+          "role": "assistant",
+          "text": "恢复计时以后会不会把暂停那段也算进去？"
+        }
+      ],
+      "current": "刚试好了，暂停那段不计时了！还没想推广的事，就是想跟你高兴一下。",
+      "style": "温和，喜欢一起关注具体进展，不喜欢被安排",
+      "insight": {
+        "intent": "share",
+        "focus": "shared_detail",
+        "boundary": "none",
+        "confidence": 0.95,
+        "meaning": "用户分享暂停功能修好的喜悦，明确暂不讨论推广，希望共同关注这个进展。",
+        "quote": "刚试好了，暂停那段不计时了！还没想推广的事，就是想跟你高兴一下。",
+        "contextEvidence": []
+      },
+      "referenceChars": 711,
+      "effort": "high",
+      "reply": "暂停那段真不计时了，太好了。你之前是不是一直卡在恢复后会把暂停那几秒也补回去？",
+      "ms": 1300,
+      "usage": {
+        "inputTokens": 839,
+        "outputTokens": 27,
+        "cacheReadTokens": 2048,
+        "cacheWriteTokens": 0,
+        "totalTokens": 2914
+      }
+    }
+  ],
+  "globalDefaultUnchanged": true
+}

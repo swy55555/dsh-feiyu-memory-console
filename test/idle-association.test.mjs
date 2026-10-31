@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {IdleAssociations,parseAssociation} from '../bridge/idle-association.mjs';
+import {IdleAssociations,parseAssociation,parseAssociationChain} from '../bridge/idle-association.mjs';
 import {emptyEmotion,withSubjectiveFeeling,emotionPromptLine} from '../bridge/emotion.js';
 const key='private:123';
 const source={id:'a',text:'我喜欢雨声',source_time:10,subject_id:'123'};
@@ -18,10 +18,11 @@ test('only quiet authorized chats run and each source is read-only',async()=>{
   assert.equal(f.routes[0].body.scope,key);assert.equal(f.worker.snapshot(key).nodes.length,1);
   assert.equal((await f.worker.tick()).reason,'not-due');
 });
-test('two linked steps maximum; no recursive generation or automatic send',async()=>{
-  let n=0;const prompts=[];const f=setup(async prompt=>{prompts.push(prompt);return reply(n++?'安静的故事适合怎样的配乐？':'雨声和哪些阅读场景比较搭？',true);});
-  f.worker.note(key,'下雨了');f.advance(120000);assert.equal((await f.worker.tick()).steps,2);assert.equal(f.calls,2);
-  assert.ok(prompts[1].includes('雨声和哪些阅读场景比较搭'));assert.ok(prompts[1].includes('不是事实提取'));
+test('linked topic steps share one generation without recursive model calls or sending',async()=>{
+  const prompts=[];const f=setup(async prompt=>{prompts.push(prompt);return JSON.stringify({nodes:[
+    {...JSON.parse(reply()),continue:true,nextPurpose:'new-angle'},JSON.parse(reply('安静的故事适合怎样的配乐？'))]});});
+  f.worker.note(key,'下雨了');f.advance(120000);assert.equal((await f.worker.tick()).steps,2);assert.equal(f.calls,1);
+  assert.ok(prompts[0].includes('不是事实提取'));assert.ok(prompts[0].includes('0到3个'));
 });
 test('new message interrupts an in-flight result and prevents a second step',async()=>{
   let release;const f=setup(()=>new Promise(r=>release=r));f.worker.note(key,'下雨了');f.advance(120000);
@@ -51,7 +52,7 @@ test('invalid source citations, excessive output and repeated topics stop safely
   assert.throws(()=>parseAssociation(reply().replace('"a"','"invented"'),[source]));
   assert.equal(parseAssociation(reply(),[source],[{topic:'雨声和哪些阅读场景比较搭？'}]),null);
   const f=setup(async()=>reply('同一件事情',true));f.worker.note(key,'下雨了');f.advance(120000);
-  assert.equal((await f.worker.tick()).steps,1);assert.equal(f.calls,2);
+  assert.equal((await f.worker.tick()).steps,1);assert.equal(f.calls,1);
 });
 test('no source, model failure and no useful topic do not create state evidence',async()=>{
   const a=setup(async()=>'{invalid');a.worker.note(key,'下雨了');a.advance(120000);assert.equal((await a.worker.tick()).reason,'unavailable');assert.equal(await a.worker.take(key,[source]),'');
@@ -129,11 +130,25 @@ test('affect toggle is independent and opt-in; expiration and restart retain onl
   g.advance(600001);assert.equal(g.worker.feeling(key),null);assert.equal(g.worker.snapshot(key).status,'expired');
 });
 
-test('explicit useful continuation may take a third step, but always stops at three',async()=>{
- let index=0;const topics=['雨声适合配什么样的故事？','安静角落里可以摆哪些书？','怎样留下一份阅读清单？'];
- const f=setup(async()=>JSON.stringify({useful:true,kind:'question',topic:topics[index++],sourceIds:['a'],continue:true,nextPurpose:'new-angle'}));
- f.worker.note(key,'下雨了');f.advance(120000);assert.equal((await f.worker.tick()).steps,3);assert.equal(f.calls,3);
+test('explicit useful continuation may take a third step in the same call, but always stops at three',async()=>{
+ const topics=['雨声适合配什么样的故事？','安静角落里可以摆哪些书？','怎样留下一份阅读清单？'];
+ const f=setup(async()=>JSON.stringify({nodes:topics.map(topic=>({useful:true,kind:'question',topic,sourceIds:['a'],continue:true,nextPurpose:'new-angle'}))}));
+ f.worker.note(key,'下雨了');f.advance(120000);assert.equal((await f.worker.tick()).steps,3);assert.equal(f.calls,1);
  assert.equal(f.worker.snapshot(key).events.find(e=>e.status==='ready').stopReason,'step-limit');
  const stop=setup(async()=>JSON.stringify({useful:true,kind:'question',topic:'听着雨声读书怎么样？',sourceIds:['a'],continue:true,nextPurpose:'none'}));
  stop.worker.note(key,'下雨了');stop.advance(120000);assert.equal((await stop.worker.tick()).steps,1);
+});
+
+test('chain validation rejects invented sources and stops at repeats, missing purpose or explicit stop',()=>{
+ const a={...JSON.parse(reply()),continue:true,nextPurpose:'new-angle'},b={...a,topic:'安静的故事适合怎样的配乐？'};
+ const parse=nodes=>parseAssociationChain(JSON.stringify({nodes}),[source]);
+ assert.equal(parse([a,a,b]).length,1);
+ assert.equal(parse([{...a,continue:false},b]).length,1);
+ assert.equal(parse([{...a,nextPurpose:'none'},b]).length,1);
+ assert.equal(parse([{...a,nextPurpose:undefined},b]).length,1);
+ assert.throws(()=>parse([a,{...b,sourceIds:['invented']}]),/来源/);
+ assert.throws(()=>parse([a,b,a,b]),/格式/);
+ assert.throws(()=>parseAssociationChain('x'.repeat(8001),[source]),/过长/);
+ assert.deepEqual(parse([]),[]);
+ assert.equal(parseAssociationChain(JSON.stringify({nodes:[a,b]}),[source],[a]).length,0);
 });

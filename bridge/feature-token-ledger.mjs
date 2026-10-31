@@ -40,6 +40,8 @@ import {
 } from './feature-model-prices.mjs';
 
 /** 采样键：同一回合同一步骤同一次重试只保留一条（后到覆盖先到）。 */
+const residualBuckets=(total,covered)=>Object.fromEntries(Object.keys(ZERO_BUCKETS).map(k=>[k,Math.max(0,(total?.[k]||0)-(covered?.[k]||0))]));
+
 function sampleKeyOf(sessionId, turn, step, retry) {
   return `${sessionId}|${turn}|${step}|${retry}`;
 }
@@ -519,7 +521,7 @@ export function createTokenLedger({
    * 而且 sessionTotals/sessionCost/turnRows 各扫一遍 = 3 倍），几千条采样、几十个会话
    * 就是百万级迭代。这里压成单遍 O(采样数)。
    *
-   * 基线单独计价（它没有逐时明细，只能整体按快照时刻的峰谷算），并只把
+   * 基线中有逐次记录的部分保留原时段计价，其余按快照时刻估算；只把
    * `seq > 基线 seq` 的采样算进「权威累计」，避免和基线重复计费。
    */
   function buildIndex() {
@@ -530,6 +532,7 @@ export function createTokenLedger({
         entry = {
           liveBuckets: { ...ZERO_BUCKETS },
           liveCost: 0,
+          coveredBuckets: { ...ZERO_BUCKETS },
           liveByTier: { peak: 0, off: 0 },
           allCost: 0,
           allByTier: { peak: 0, off: 0 },
@@ -550,6 +553,7 @@ export function createTokenLedger({
         entry.liveCost += p.cost.total;
         entry.liveByTier[p.rates.tier] += p.cost.total;
       }
+      if(!isLive)entry.coveredBuckets=addBuckets(entry.coveredBuckets,s.buckets);
       let row = entry.turns.get(s.turn);
       if (!row) {
         row = {
@@ -614,10 +618,12 @@ export function createTokenLedger({
       view.byTier.off += (entry?.liveByTier.off ?? 0) + (gone?.byTier.off ?? 0);
       view.estimated ||= (entry?.estimated ?? false) || (gone?.estimated ?? false);
       if (base) {
-        const p = priceUsage(base.buckets, { model: base.model, at: base.t || now(), table: priceTable });
-        cost += p.cost.total;
+        const residual=residualBuckets(base.buckets,entry?.coveredBuckets);
+        const p = priceUsage(residual, { model: base.model, at: base.t || now(), table: priceTable });
+        cost += p.cost.total + (entry?.allCost||0) - (entry?.liveCost||0);
         view.byTier[p.rates.tier] += p.cost.total;
-        view.estimated ||= p.rates.estimated;
+        for(const tier of ['peak','off'])view.byTier[tier]+=(entry?.allByTier[tier]||0)-(entry?.liveByTier[tier]||0);
+        view.estimated ||= p.rates.estimated || totalTokensOf(residual)>0;
       }
       view.cost += cost;
       if (entry) {
@@ -837,8 +843,9 @@ export function createTokenLedger({
     const rowTurnSeen = rows.map(() => new Set());
     // 权威总额（含窗口之外）的三个组成部分，按 summary() 的同一口径在**同一次遍历**里累加：
     //   ① 被淘汰采样的累计（evicted）② 投影基线自身 ③ 仍然逐轮可拆、且没被基线覆盖的采样（seq > 基线 seq）。
-    // 非 live 采样绝不能计入：基线已经包含了它的历史，再算一次就是重复计费，offChartCost 会凭空变大。
+    // Token 不重复相加。费用优先用逐次时段价格，再加基线未覆盖部分，避免把旧高峰记录按重连时的低峰重计。
     let ledgerCost = 0;
+    const coveredBySession=new Map();
     let ledgerBuckets = { ...ZERO_BUCKETS };
     for (const e of evicted.values()) {
       if (excluded(e.sessionId)) continue;
@@ -847,8 +854,7 @@ export function createTokenLedger({
     }
     for (const base of baselines.values()) {
       if (excluded(base.sessionId)) continue;
-      // 与 sessionView() 同口径：基线没有逐时明细，按快照时刻（缺失时取当前）整体计价。
-      ledgerCost += priceUsage(base.buckets, { model: base.model, at: base.t || now(), table: priceTable }).cost.total;
+      // Token totals remain projection-based; price only the uncovered remainder below.
       ledgerBuckets = addBuckets(ledgerBuckets, base.buckets);
     }
     for (const s of samples.values()) {
@@ -857,10 +863,9 @@ export function createTokenLedger({
       const p = priceUsage(s.buckets, { model: s.model, at: s.t || endAt, table: priceTable });
       const tokens = totalTokensOf(s.buckets);
       const base = baselines.get(s.sessionId);
-      if (!base || s.seq > base.seq) {
-        ledgerCost += p.cost.total;
-        ledgerBuckets = addBuckets(ledgerBuckets, s.buckets);
-      }
+      ledgerCost += p.cost.total;
+      if (!base || s.seq > base.seq) ledgerBuckets = addBuckets(ledgerBuckets, s.buckets);
+      else coveredBySession.set(s.sessionId,addBuckets(coveredBySession.get(s.sessionId)||ZERO_BUCKETS,s.buckets));
       if (s.t < from || s.t > end) continue;
       const idx = Math.min(count - 1, Math.max(0, Math.floor((s.t - start) / bucketMs)));
       const row = rows[idx];
@@ -897,6 +902,11 @@ export function createTokenLedger({
       totals.steps += 1;
       estimated ||= p.rates.estimated;
       countedSamples += 1;
+    }
+    for(const base of baselines.values()){
+      if(excluded(base.sessionId))continue;
+      const remainder=residualBuckets(base.buckets,coveredBySession.get(base.sessionId));
+      ledgerCost+=priceUsage(remainder,{model:base.model,at:base.t||now(),table:priceTable}).cost.total;
     }
     for (const row of rows) {
       // 空桶也要有档位：用该时刻真实的峰谷归属，而不是留空。
@@ -966,6 +976,13 @@ export function createTokenLedger({
     return out;
   }
 
+  // Latest request input, not the cumulative session baseline or output tokens.
+  function latestInputTokens(sessionId) {
+    let latest;
+    for (const row of samples.values()) if (row.sessionId === sessionId && (!latest || row.seq > latest.seq || (row.seq === latest.seq && row.t > latest.t))) latest = row;
+    return latest ? latest.buckets.cacheMiss + latest.buckets.cacheHit + latest.buckets.cacheWrite : 0;
+  }
+
   function stats() {
     return {
       file,
@@ -1016,6 +1033,7 @@ export function createTokenLedger({
     conversation,
     series,
     recent,
+    latestInputTokens,
     stats,
     reset,
     compact,

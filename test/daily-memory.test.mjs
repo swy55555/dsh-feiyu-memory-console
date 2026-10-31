@@ -19,6 +19,55 @@ function fixture(t,{messages=[message()],extract=async()=>response(),verify=asyn
   return {d,writes,prompts,snapshot:()=>persisted};
 }
 
+test('unchanged extraction and independent coverage survive a transient storage failure without new model calls',async t=>{
+  const m=message();let extracts=0,checks=0,writes=0;
+  const {d}=fixture(t,{messages:[m],extract:async()=>{extracts++;return response([item(m)])},
+    verify:async()=>{checks++;return JSON.stringify({checks:[{source_id:'m1',status:'complete',missing_quotes:[],reason:'完整'}]})},
+    request:async()=>{writes++;if(writes===1)throw Error('storage temporarily offline');return {ok:true,memory:{id:'saved'}}}});
+  assert.equal((await d.flush(key)).ok,false);
+  assert.equal((await d.flush(key,{force:true})).ok,true);
+  assert.deepEqual({extracts,checks,writes},{extracts:1,checks:1,writes:2});
+  assert.equal(d.state.queues[key],undefined);
+});
+
+test('failed coverage reuses extraction but runs coverage again; uncertain verdicts are never retained',async t=>{
+  let extracts=0,checks=0;
+  const {d}=fixture(t,{extract:async()=>{extracts++;return response()},verify:async()=>{
+    checks++;if(checks===1)throw Error('review unavailable');
+    return JSON.stringify({checks:[{source_id:'m1',status:checks===2?'uncertain':'complete',missing_quotes:[],reason:'核对'}]});
+  }});
+  await d.flush(key);await d.flush(key,{force:true});
+  assert.equal(d.state.queues[key].length,1);
+  assert.equal((await d.flush(key,{force:true})).ok,true);
+  assert.deepEqual({extracts,checks},{extracts:1,checks:3});
+});
+
+test('retries re-extract after original, related memory, model settings or chat scope changes',async t=>{
+  for(const change of ['original','related','model','scope']) {
+    const m=message();let extracts=0,related=[],model='low';
+    const {d}=fixture(t,{messages:[m],extract:async()=>{extracts++;return response([item(m)])},request:async()=>{throw Error('storage offline')}});
+    const request=d.request;d.request=(route,body)=>route==='/related'?Promise.resolve({results:related}):request(route,body);
+    d.modelSignature=()=>model;
+    await d.flush(key);
+    let target=key;
+    if(change==='original')m.text+=' 我也喜欢红茶';
+    if(change==='related')related=[{id:'old',subject_id:'123',text:'喜欢咖啡',source_time:1}];
+    if(change==='model')model='high';
+    if(change==='scope'){target='group:456';d.state.queues[target]=[m];}
+    await d.flush(target,{force:true});assert.equal(extracts,2,change);
+  }
+});
+
+test('retry cache expires without extending on reuse and is lost on restart',async t=>{
+  const m=message();let calls=0,now=1000;
+  const {d,snapshot}=fixture(t,{messages:[m],extract:async()=>{calls++;return response([item(m)])},request:async()=>{throw Error('offline')}});
+  d.analysisMemo.now=()=>now;d.analysisMemo.ttlMs=100;
+  await d.flush(key);now=1090;await d.flush(key,{force:true});assert.equal(calls,1);
+  now=1101;await d.flush(key,{force:true});assert.equal(calls,2);
+  const next=fixture(t,{state:snapshot(),extract:async()=>{calls++;return response([item(m)])},request:async()=>{throw Error('offline')}});
+  await next.d.flush(key,{force:true});assert.equal(calls,3);
+});
+
 test('invalid/truncated JSON and legacy empty arrays never acknowledge queued messages',async t=>{
   for(const output of ['{invalid','{"items":[', '[]','{}','null']) {
     const {d,writes}=fixture(t,{extract:async()=>output});
@@ -127,6 +176,27 @@ test('failed or incomplete coverage never acknowledges a completed extraction',a
 test('uncertain coverage retains message and prevents auto confirmation',async t=>{
   const {d,writes}=fixture(t,{extract:async()=>response([item(message())]),verify:async()=>JSON.stringify({checks:[{source_id:'m1',status:'uncertain',missing_quotes:[],reason:'归属需核对'}]})});
   await d.flush(key);assert.equal(d.state.queues[key].length,1);assert.equal(writes[0].confirmed,false);assert.equal(writes[0].relation,'uncertain');assert.equal(d.state.processing[0].status,'review-needed');
+});
+
+test('unchanged uncertainty backs off across reload, changed model resets delay and no facts are acknowledged',async t=>{
+ const {d}=fixture(t,{verify:async()=>JSON.stringify({checks:[{source_id:'m1',status:'uncertain',missing_quotes:[],reason:'尚不确定'}]})});
+ await d.flush(key);assert.equal(d.state.retries[key].uncertainAttempts,1);
+ assert.equal((await d.flush(key)).reason,'retry-backoff');
+ await d.flush(key,{force:true});assert.equal(d.state.retries[key].uncertainAttempts,2);
+ const {d:loaded}=fixture(t,{state:structuredClone(d.state),verify:d.verify});
+ await loaded.flush(key,{force:true});assert.equal(loaded.state.retries[key].uncertainAttempts,3);assert.ok(loaded.state.retries[key].nextAt-Date.now()>470000);
+ loaded.modelSignature=()=>({model:'different'});await loaded.flush(key,{force:true});assert.equal(loaded.state.retries[key].uncertainAttempts,1);
+   assert.ok(loaded.state.retries[key].nextAt-Date.now()<=120000);
+ assert.equal(loaded.state.queues[key].length,1);assert.equal(loaded.state.processing[0].status,'review-needed');
+});
+
+test('uncertain old messages wait without blocking fresh messages or losing the old retry state',async t=>{
+ const {d}=fixture(t,{extract:async(_p)=>response([],d.state.queues[key].filter(m=>m.id!=='m1'||!d.state.retries[key]).map(m=>m.id)),
+  verify:async(_p,msgs)=>JSON.stringify({checks:msgs.map(m=>({source_id:m.id,status:m.id==='m1'?'uncertain':'complete',missing_quotes:[],reason:'核对'}))})});
+ await d.flush(key);const nextAt=d.state.retries[key].nextAt;
+ d.feed(key,message('m2','我今天看了一场电影。'));await d.flush(key);
+ assert.deepEqual(d.state.queues[key].map(m=>m.id),['m1']);assert.equal(d.state.retries[key].nextAt,nextAt);
+ assert.equal(d.state.processing.find(r=>r.id==='m2').status,'checked');assert.equal((await d.flush(key)).reason,'retry-backoff');
 });
 test('coverage rejects invented evidence, duplicate ids and contradictory completion',()=>{
   for(const checks of [[{source_id:'m1',status:'missing',missing_quotes:['编造'],reason:''}], [{source_id:'m1',status:'complete',missing_quotes:['我喜欢喝豆浆'],reason:''}]]) assert.throws(()=>parseCoverage(JSON.stringify({checks}),[message()]));

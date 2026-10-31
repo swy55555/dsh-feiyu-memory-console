@@ -1,7 +1,7 @@
 import {FEATURE_LABELS} from './usage-features.mjs';
 export const EFFORTS = Object.freeze(['low', 'high', 'max']);
-export const BACKGROUND_DEFAULTS = Object.freeze(Object.fromEntries(Object.keys(FEATURE_LABELS).map(key =>
-  [key, ['event_understanding','emotion_review','idle_association'].includes(key) ? 'low' : 'high'])));
+export const BACKGROUND_DEFAULTS = Object.freeze(Object.fromEntries(Object.keys(FEATURE_LABELS).filter(key=>!['style_distillation','expression_teacher'].includes(key)).map(key =>
+  [key, ['event_understanding','emotion_review','idle_association','growth_classroom'].includes(key) ? 'low' : 'high'])));
 export function validateEffortPatch(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length) throw Error('请选择要调整的模块');
   for (const [key, effort] of Object.entries(value)) {
@@ -14,7 +14,7 @@ export function backgroundEffort(config, feature) {
   return EFFORTS.includes(selected) ? selected : (BACKGROUND_DEFAULTS[feature] || 'high');
 }
 export function reasoningView(config) {
-  return {options:EFFORTS, chatEffort:config?.dsh?.reasoningEffort || 'max', modules:Object.entries(FEATURE_LABELS).map(([id,label])=>
+  return {options:EFFORTS, chatEffort:config?.dsh?.reasoningEffort || 'max', modules:Object.entries(FEATURE_LABELS).filter(([id])=>!['style_distillation','expression_teacher'].includes(id)).map(([id,label])=>
     ({id,label,effort:backgroundEffort(config,id),defaultEffort:BACKGROUND_DEFAULTS[id],note:id==='confirmation_review'?'同时核对完整原话和当前页的记忆关系，建议高档。':id==='candidate_review'?'旧版单独核对的兼容入口；自动确认使用确认联合复核。':id==='fact_review'?'手动关系核对和后续历史分页继续使用此档。':['memory_extract','coverage_check'].includes(id)?'默认保留高档；低档需先通过提取和查漏验证。':['fact_review','candidate_review','confirmation_review'].includes(id)?'涉及事实归属与冲突，建议保留高档。':'只调整此后台模块，不修改聊天档位。'}))};
 }
 

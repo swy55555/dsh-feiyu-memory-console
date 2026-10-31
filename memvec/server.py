@@ -3,12 +3,12 @@
 设计：
   - 向量：BAAI/bge-small-zh-v1.5（fastembed，ONNX，CPU 即可）
   - 存储：sqlite3（stdlib），向量存 BLOB
-  - 遗忘曲线：幂律 R(t) = (1 + t/(9S))^(-1)，S 是"记忆强度"（天），
+  - 可用程度：幂律形状 R(t) = (1 + t/S)^(-1)，S 是分数减半的时间（天），
     查询不强化；本人再次明确表达时有节制强化。核心记忆和待办不自然衰减。
   - 接口：POST /add /search /decay，GET /stats，监听 127.0.0.1:9881
 
 为什么用幂律而不是指数：指数曲线衰减太快（考试前突击那种），
-幂律更接近长期记忆的真实行为（FSRS 也是幂律族）。
+    该曲线受研究启发，参数是工程默认，不是对人类回忆概率的测量。
 """
 from __future__ import annotations
 
@@ -37,11 +37,12 @@ HOME = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("MEMVEC_DB_PATH", os.path.join(HOME, "memories.db"))
 PORT = int(os.environ.get("MEMVEC_PORT", "9881"))
 MODEL = os.environ.get("MEMVEC_MODEL", "BAAI/bge-small-zh-v1.5")
-HALF_LIFE_DAYS = 1.0          # 初始强度（旧默认）
-STRENGTH_CAP_DAYS = float(os.environ.get('MEMVEC_STRENGTH_CAP_DAYS', '365'))  # 强度上限
-STRENGTH_OWNER_DAYS = float(os.environ.get('MEMVEC_OWNER_STRENGTH_DAYS', '180'))  # 管理员私聊：忘得慢
-STRENGTH_OTHER_DAYS = float(os.environ.get('MEMVEC_OTHER_STRENGTH_DAYS', '2'))    # 群聊/非管理员私聊：忘得快
-ANN_MIN = int(os.environ.get('MEMVEC_ANN_MIN', '20000'))  # 超过这个量才考虑 ANN\nPRUNE_R = 0.12                # 低于这个 Recall 概率就淘汰
+HALF_LIFE_DAYS = 7.0  # Availability half-time, not a human recall probability.
+STRENGTH_CAP_DAYS = 365.0  # Engineering ceiling after spaced, evidenced experience.
+RETENTION_VERSION = 2
+RETENTION_GRACE_DAYS = 14
+ANN_MIN = int(os.environ.get('MEMVEC_ANN_MIN', '20000'))
+PRUNE_R = 0.12
 MIN_AGE_DAYS = 14.0           # 至少存活 14 天才可能被淘汰
 
 _owner_scope_cache = None
@@ -73,9 +74,39 @@ def owner_scope() -> str:
     return _owner_scope_cache
 
 
-def initial_strength(scope: str) -> float:
-    owner = owner_scope()
-    return STRENGTH_OWNER_DAYS if owner and scope == owner else STRENGTH_OTHER_DAYS
+def initial_strength(scope: str, tags: str = '', importance: float = .5) -> float:
+    # Content-based engineering defaults; scope never grants memory privilege.
+    kinds = set(re.split(r'[,;，；\s]+', str(tags or '').lower()))
+    base = 30.0 if kinds & {'preference', 'habit', '偏好', '习惯'} else 3.0 if 'episode' in kinds else 7.0
+    value = float(importance)
+    value = min(1.0, max(0.0, value)) if math.isfinite(value) else .5
+    return base * (.5 + value)
+
+
+def retention_policy(conn):
+    row = conn.execute('SELECT migrated_at FROM memory_retention_migrations WHERE version=?', (RETENTION_VERSION,)).fetchone()
+    at = float(row[0]) if row else 0
+    return {'version': RETENTION_VERSION, 'migratedAt': at * 1000,
+            'graceUntil': (at + RETENTION_GRACE_DAYS * 86400) * 1000 if at else 0,
+            'strengthMeaning': 'availability-half-time', 'scopeBias': False}
+
+
+def _reinforce_evidence(conn, mid, subject, source_id, source_time, ts):
+    row = conn.execute('SELECT status,subject_id,source_id,source_time,last_access,last_reinforced,strength_days,expires_at FROM memories WHERE id=?', (mid,)).fetchone()
+    if (row is None or row[0] != 'active' or not subject or row[1] != subject or not source_id or
+            source_id == row[2] or not math.isfinite(source_time) or source_time <= row[3] or source_time > ts + 60 or
+            (row[7] and row[7] <= ts)):
+        return False
+    anchor = max(float(row[4]), float(row[5]))
+    gap = (source_time - anchor) / 86400
+    if gap < 1:
+        return False
+    strength = max(.1, float(row[6]))
+    growth = 1.15 + .35 * min(1.0, gap / strength)
+    conn.execute('UPDATE memories SET last_access=?,last_reinforced=?,strength_days=?,access_count=access_count+1 WHERE id=?',
+                 (source_time, source_time, min(STRENGTH_CAP_DAYS, strength * growth), mid))
+    return True
+
 
 _lock = Lock()
 _model = None
@@ -131,6 +162,18 @@ def db() -> sqlite3.Connection:
         embedding BLOB NOT NULL
     )""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_scope ON memories(scope)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS memory_share_grants (
+        memory_id TEXT NOT NULL, target_scope TEXT NOT NULL, content_hash TEXT NOT NULL,
+        granted_at REAL NOT NULL, PRIMARY KEY(memory_id,target_scope)
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS sharing_privacy (
+        kind TEXT NOT NULL, id TEXT NOT NULL, revision TEXT NOT NULL,
+        level TEXT NOT NULL, share_text TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '',
+        origin TEXT NOT NULL, reviewed_at REAL NOT NULL, PRIMARY KEY(kind,id)
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS sharing_blocks (
+        memory_id TEXT NOT NULL,target_scope TEXT NOT NULL,PRIMARY KEY(memory_id,target_scope)
+    )""")
     # 原文层：逐条消息，独立于桥接的 recentMessages/DSH 会话历史。
     # 主键用 key + messageId（messageId 缺失时退回时间戳），保证重投不重复。
     conn.execute("""CREATE TABLE IF NOT EXISTS messages (
@@ -209,20 +252,36 @@ def db() -> sqlite3.Connection:
     }.items():
         if col not in existing:
             conn.execute(f'ALTER TABLE memories ADD COLUMN {col} {definition}')
-    # 一次性迁移：旧记忆默认强度 1 天，现在按 scope 分成“忘得慢/忘得快”。
+    conn.execute('CREATE TABLE IF NOT EXISTS memory_retention_migrations (version INTEGER PRIMARY KEY,migrated_at REAL NOT NULL,previous_strengths TEXT NOT NULL)')
+    # One-time migration changes no evidence, status, expiry or source timestamp.
     global _strength_migrated
     if not _strength_migrated:
+        if conn.execute('SELECT 1 FROM memory_retention_migrations WHERE version=?', (RETENTION_VERSION,)).fetchone() is None:
+            old = conn.execute('SELECT id,scope,tags,importance,strength_days FROM memories').fetchall()
+            cursor = conn.execute('SELECT * FROM memories')
+            names = [column[0] for column in cursor.description]
+            before_rows = {row[0]: dict(zip(names, row)) for row in cursor.fetchall()}
+            hashes = {}
+            for row in old:
+                strength = initial_strength(row[1], row[2], row[3])
+                conn.execute('UPDATE memories SET strength_days=? WHERE id=?', (strength, row[0]))
+                before = before_rows[row[0]]
+                hashes[row[0]] = (_fingerprint(before), _fingerprint({**before, 'strength_days': strength}))
+            # Preserve only undo receipts that were valid before this non-semantic
+            # migration; never revive a receipt already invalidated by other edits.
+            for op_id, encoded in conn.execute('SELECT id,changes FROM memory_operations').fetchall():
+                changes = json.loads(encoded)
+                changed = False
+                for item in changes:
+                    pair = hashes.get(item['id'])
+                    if pair and item['after'] == pair[0]:
+                        item['after'] = pair[1]; changed = True
+                if changed:
+                    conn.execute('UPDATE memory_operations SET changes=? WHERE id=?', (json.dumps(changes), op_id))
+            conn.execute('INSERT INTO memory_retention_migrations VALUES (?,?,?)',
+                         (RETENTION_VERSION, now(), json.dumps([{'id': r[0], 'strength': r[4]} for r in old])))
+        conn.commit()
         _strength_migrated = True
-        try:
-            owner = owner_scope()
-            if owner:
-                conn.execute('UPDATE memories SET strength_days=? WHERE strength_days<=1.01 AND scope=?', (STRENGTH_OWNER_DAYS, owner))
-                conn.execute('UPDATE memories SET strength_days=? WHERE strength_days<=1.01 AND scope<>?', (STRENGTH_OTHER_DAYS, owner))
-            else:
-                conn.execute('UPDATE memories SET strength_days=? WHERE strength_days<=1.01', (STRENGTH_OTHER_DAYS,))
-            conn.commit()
-        except Exception:
-            pass
     return conn
 
 
@@ -234,10 +293,9 @@ def embed(texts: list[str]) -> np.ndarray:
 
 
 def recall_prob(strength_days: float, last_access: float, importance: float) -> float:
-    # 幂律遗忘：R = (1 + t/(9S))^-1，再按 importance 给一点点保底
+    # Importance enters initial stability/ranking, not an everlasting floor.
     t_days = max(0.0, (now() - last_access) / 86400.0)
-    r = 1.0 / (1.0 + t_days / (9.0 * max(strength_days, 0.1)))
-    return min(1.0, r + importance * 0.1)
+    return 1.0 / (1.0 + t_days / max(strength_days, 0.1))
 
 
 def valid_scope(scope):
@@ -293,6 +351,83 @@ def fact_relation(a, b):
     return 'conflict' if left['cardinality'] == right['cardinality'] == 'single' else 'uncertain'
 
 
+RELATED_SEMANTIC_K = 6  # 语义兜底条数：只拿最像的几条，不再拖整个聊天的旧记忆
+
+
+def review_scope() -> str:
+    """审核范围：'all'（默认）或 'related'。
+
+    all     = 同主体、同聊天里全部活着的旧事实都进审核。能证明“与任何旧事实都
+              不冲突”，但在长期私聊里会退化成每次几十对无关比较：噪声级的低置信
+              度会把候选永久卡在“关系不确定”，每新增一条记忆还会让已完成的结论
+              作废（永远差最后几条）。
+    related = 只审同一件事（同 fact_key 或同 object+attribute）的旧事实，再用语义
+              最近几条兜底。一次调用内判完，代价是只能证明“与相关事实不冲突”。
+
+    默认保持 all，用 MEMVEC_REVIEW_SCOPE=related 或本目录的 review-scope.txt 显式开启。
+    """
+    value = (os.environ.get('MEMVEC_REVIEW_SCOPE') or '').strip().lower()
+    if not value:
+        try:
+            with open(os.path.join(HOME, 'review-scope.txt'), 'r', encoding='utf-8') as f:
+                value = f.read().strip().lower()
+        except OSError:
+            value = ''
+    return 'related' if value.startswith('related') else 'all'
+
+
+def _prioritized_rows(candidate, rows, similarity):
+    """旧行为：一条都不丢，只把同一件事排到最前面。"""
+    candidate_fact = stored_fact(candidate)
+    def priority(row):
+        other = stored_fact(row)
+        same = bool(candidate_fact and other and
+                    candidate_fact['object'] == other['object'] and
+                    candidate_fact['attribute'] == other['attribute'])
+        # Model-extracted structure only affects order, never approval/omission.
+        return (same, similarity(row))
+    ranked = sorted(rows, key=priority, reverse=True)
+    # Explicit links first, then structured overlap and semantics.
+    selected = [r for r in rows if r['id'] == candidate['related_id']]
+    return selected + [r for r in ranked if r not in selected]
+
+
+def _same_aspect(candidate_fact, other_fact, candidate_key='', other_key=''):
+    """同一件事 = 同一 fact_key，或同一 object+attribute。
+
+    审核要回答的是“这条新事实会不会和已有的同一件事冲突”，不是“会不会和这个
+    聊天里任何一条记忆冲突”。不同方面的事实结构上无关，交给语义兜底即可。
+    """
+    if candidate_key and other_key and candidate_key == other_key:
+        return True
+    if not candidate_fact or not other_fact:
+        return False
+    return (candidate_fact.get('object') == other_fact.get('object')
+            and candidate_fact.get('attribute') == other_fact.get('attribute'))
+
+
+def _related_rows(candidate, rows, similarity):
+    candidate_fact = stored_fact(candidate)
+    candidate_key = candidate['fact_key'] or ''
+    explicit, same, rest = [], [], []
+    for row in rows:
+        if row['id'] == candidate['related_id']:
+            explicit.append(row)
+        elif _same_aspect(candidate_fact, stored_fact(row), candidate_key, row['fact_key'] or ''):
+            same.append(row)
+        else:
+            rest.append(row)
+    same.sort(key=similarity, reverse=True)
+    rest.sort(key=similarity, reverse=True)
+    selected, seen = [], set()
+    for row in [*explicit, *same, *rest[:RELATED_SEMANTIC_K]]:
+        if row['id'] in seen:
+            continue
+        seen.add(row['id'])
+        selected.append(row)
+    return selected
+
+
 def _review_context(conn, candidate, offset=0, all_rows=False):
     rows = conn.execute("SELECT * FROM memories WHERE scope=? AND subject_id=? AND status='active' AND id<>? AND (expires_at=0 OR expires_at>?) ORDER BY id",
                         (candidate['scope'], candidate['subject_id'], candidate['id'], now())).fetchall()
@@ -300,16 +435,20 @@ def _review_context(conn, candidate, offset=0, all_rows=False):
     def similarity(row):
         v = np.frombuffer(row['embedding'], dtype=np.float32)
         return float(v @ q) if v.shape == q.shape else -1.0
-    ranked = sorted(rows, key=similarity, reverse=True)
-    # Explicit links are kept, then fill by semantic similarity; no lexical gate.
-    selected = [r for r in rows if r['id'] == candidate['related_id']]
-    selected += [r for r in ranked if r not in selected]
-    total = len(selected)
-    selected = selected if all_rows else selected[offset:offset+8]
-    revision = hashlib.sha256(json.dumps([_review_fingerprint(candidate), *[_review_fingerprint(r) for r in rows]]).encode()).hexdigest()
+    # Same-aspect facts keep every entry (they are the ones that can conflict);
+    # everything else only joins as a short semantic fallback.
+    if review_scope() == 'related':
+        related = _related_rows(candidate, rows, similarity)
+    else:
+        related = _prioritized_rows(candidate, rows, similarity)
+    total = len(related)
+    selected = related if all_rows else related[offset:offset+8]
+    # Version covers only the reviewed facts: a new unrelated memory must not
+    # invalidate a review that has already been completed and paid for.
+    revision = hashlib.sha256(json.dumps([_review_fingerprint(candidate), *[_review_fingerprint(r) for r in related]]).encode()).hexdigest()
     def public(row):
         return {**{k: row[k] for k in ('id','text','source_time','tier')}, 'quote': fact_quote(row['text']), 'fact': stored_fact(row)}
-    return {'scope': candidate['scope'], 'candidate': public(candidate), 'related': [public(r) for r in selected],
+    return {'scope': candidate['scope'], 'reviewScope': review_scope(), 'candidate': public(candidate), 'related': [public(r) for r in selected],
             'revision': revision, 'truncated': total > offset+len(selected),
             'offset': offset, 'total': total}, selected
 
@@ -346,11 +485,12 @@ def _cached_reviews(conn, candidate, operation):
                         reused.update(validated)
                 except (ValueError, TypeError):
                     pass
-            if len(reused) == len(page['related']):
-                verdict = reused
+            # Keep each valid pair even when its neighbours are new/changed.
+            # Dropping a partially cached page resent up to seven reviewed facts.
+            verdict = reused
         if verdict is not None:
             relations.update(verdict)
-        elif next_offset is None:
+        if any(row['id'] not in relations for row in rows[offset:offset+8]) and next_offset is None:
             next_offset = offset
     return context, rows, relations, next_offset
 
@@ -392,6 +532,26 @@ def _accepted_evidence(verdict):
     return bool(verdict and all(verdict.get(k) is True for k in ('supported','speakerMatches','literal','current')) and verdict.get('confidence', 0) >= .95)
 
 
+def _automatic_readiness(conn, candidate, operation, context, relations, missing):
+    # A completed review may still be uncertain. Completion is not permission
+    # to confirm; keep the transaction's independent checks as the final guard.
+    evidence = _cached_evidence(conn, candidate, operation, context['revision'])
+    if evidence is not None and not _accepted_evidence(evidence):
+        return {'status': 'manual', 'dependency': 'source', 'reason': '原话支持不足或存在歧义，保留待确认'}
+    conflicts = sum(v in ('conflict', 'replace') for v in relations.values())
+    uncertain = sum(v == 'uncertain' for v in relations.values())
+    if conflicts or uncertain:
+        source = '原话核对已通过；' if _accepted_evidence(evidence) else '原话尚未核对；'
+        progress = f'已复核 {len(relations)}/{context["total"]} 条；' if missing is not None else ''
+        reason = f'{source}{progress}{conflicts} 条关系存在矛盾或替换，{uncertain} 条关系尚不确定。自动核对暂缓，可手动继续；已有事实未改动'
+        return {'status': 'manual', 'dependency': 'relations', 'reason': reason, 'conflicts': conflicts, 'uncertain': uncertain}
+    if missing is not None:
+        return {'status': 'reviewing', 'reason': '历史关系尚未全部复核'}
+    if evidence is None:
+        return {'status': 'reviewing', 'reason': '完整原话尚未核对'}
+    return {'status': 'ready', 'conflicts': 0, 'uncertain': 0}
+
+
 def confirmation_context(scope, mid, operation='confirm'):
     scope = valid_scope(scope)
     statuses = _activation_statuses(operation)
@@ -402,11 +562,14 @@ def confirmation_context(scope, mid, operation='confirm'):
             return {'needed': False}
         full, _, relations, offset = _cached_reviews(conn, candidate, operation)
         context, _ = _review_context(conn, candidate, offset or 0)
+        context['related'] = [row for row in context['related'] if row['id'] not in relations]
+        context['reviewed'] = len(relations)
         return {'needed': offset is not None, 'context': context,
                 'evidenceVerdict': _cached_evidence(conn, candidate, operation, full['revision']),
                 'evidence': {'id': candidate['id'], 'text': candidate['text'], 'quote': candidate['source_text'],
                              'sourceId': candidate['source_id'], 'subjectId': candidate['subject_id']},
-                'reviewed': len(relations), 'total': full['total']}
+                'reviewed': len(relations), 'total': full['total'],
+                'automatic': _automatic_readiness(conn, candidate, operation, full, relations, offset)}
 
 
 def save_review_page(scope, mid, operation, offset, review, evidence_only=False):
@@ -429,8 +592,16 @@ def save_review_page(scope, mid, operation, offset, review, evidence_only=False)
         if evidence_only:
             if evidence is None or review.get('relations') != [] or review.get('candidateEvidence') != context['candidate']['quote']:
                 raise MemoryConflict('原话核对回执不完整，已有事实未改变')
-        elif not rows or _validated_review(review, context) is None:
-            raise MemoryConflict('复核版本已变化或该批证据不完整；已有事实未改变')
+        else:
+            _, _, cached_relations, _ = _cached_reviews(conn, candidate, operation)
+            missing_rows = [row for row in rows if row['id'] not in cached_relations]
+            delta_context = {**context, 'related': [row for row in context['related'] if row['id'] not in cached_relations]}
+            # Accept either the exact missing subset or a complete legacy page.
+            # Never accept arbitrary omissions, another page, or a stale revision.
+            if missing_rows and _validated_review(review, delta_context) is not None:
+                rows = missing_rows
+            elif not rows or _validated_review(review, context) is None:
+                raise MemoryConflict('复核版本已变化或该批证据不完整；已有事实未改变')
         if evidence is not None:
             conn.execute('DELETE FROM memory_evidence_reviews WHERE scope=? AND memory_id=? AND operation=? AND revision<>?',
                          (scope, mid, operation, context['revision']))
@@ -449,7 +620,8 @@ def save_review_page(scope, mid, operation, offset, review, evidence_only=False)
                              (scope, mid, operation, row['id'], _review_fingerprint(candidate), _review_fingerprint(row),
                               json.dumps(by_id[row['id']], ensure_ascii=False), now()))
         full, _, relations, missing = _cached_reviews(conn, candidate, operation)
-        return {'pending': missing is not None, 'reviewed': len(relations), 'total': full['total']}
+        return {'pending': missing is not None, 'reviewed': len(relations), 'total': full['total'],
+                'automatic': _automatic_readiness(conn, candidate, operation, full, relations, missing)}
 
 
 def _validated_review(review, context):
@@ -514,8 +686,7 @@ def add_memory(text: str, tags: str = "", scope: str = None, importance: float =
         if prior:
             # Only fresh evidence from the same speaker strengthens an active memory.
             if prior[1] == 'active' and status == 'active' and subject and source_id and source_id != prior[2] and source_time > prior[3]:
-                conn.execute("UPDATE memories SET last_access=?,last_reinforced=?,strength_days=MIN(?,strength_days*1.4),access_count=access_count+1 WHERE id=? AND last_reinforced<?",
-                             (ts, ts, STRENGTH_CAP_DAYS, prior[0], ts-259200))
+                _reinforce_evidence(conn, prior[0], subject, source_id, source_time, ts)
                 if tier == 'core':
                     conn.execute("UPDATE memories SET tier='core',expires_at=0 WHERE id=?", (prior[0],))
                 conn.execute('UPDATE memories SET source_id=?,source_time=?,source_text=? WHERE id=?', (source_id, source_time, source_text, prior[0]))
@@ -558,7 +729,7 @@ def add_memory(text: str, tags: str = "", scope: str = None, importance: float =
                 status = 'candidate'
             if relation == 'equivalent' and status == 'active':
                 if source_time > target['source_time'] and source_id != target['source_id']:
-                    conn.execute("UPDATE memories SET last_access=?,last_reinforced=?,strength_days=MIN(?,strength_days*1.4),access_count=access_count+1 WHERE id=? AND last_reinforced<?", (ts,ts,STRENGTH_CAP_DAYS,target_id,ts-259200))
+                    _reinforce_evidence(conn, target_id, subject, source_id, source_time, ts)
                     conn.execute('UPDATE memories SET source_id=?,source_text=?,source_time=? WHERE id=?',(source_id,source_text,source_time,target_id))
                     if tier == 'core':
                         conn.execute("UPDATE memories SET tier='core',expires_at=0 WHERE id=?",(target_id,))
@@ -574,7 +745,7 @@ def add_memory(text: str, tags: str = "", scope: str = None, importance: float =
         conn.execute(
             "INSERT INTO memories (id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding)"
             " VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (mid, text, tags, scope, float(importance), ts, ts, initial_strength(scope), 0, vec.tobytes()),
+            (mid, text, tags, scope, float(importance), ts, ts, initial_strength(scope, tags, importance), 0, vec.tobytes()),
         )
         conn.execute('UPDATE memories SET status=?,fact_key=?,subject_id=?,source_id=?,source_text=?,source_time=?,confidence=?,expires_at=? WHERE id=?',
                      (status, fact_key, subject, source_id, source_text, source_time, confidence, expires, mid))
@@ -657,14 +828,16 @@ def _try_merge_dated(conn, scope, subject, text, importance, tier, source_id, so
         vec = embed([merged_text])[0]
         new_tier = 'core' if (tier == 'core' or row[4] == 'core') else row[4]
         new_imp = max(float(importance), float(row[2] or 0))
-        new_strength = min(STRENGTH_CAP_DAYS, max(float(row[3] or 0), float(initial_strength(scope))) * 1.1)
+        _reinforce_evidence(conn, row[0], subject, source_id, source_time, ts)
+        stable = conn.execute('SELECT strength_days,last_access FROM memories WHERE id=?', (row[0],)).fetchone()
+        new_strength = float(stable[0])
         old_source = str(row[5] or '')
         combined_source = (old_source + '\n' + (source_text or '')).strip()[-1200:]
         conn.execute(
             "UPDATE memories SET text=?,embedding=?,importance=?,strength_days=?,last_access=?,"
             "access_count=access_count+1,tier=?,expires_at=CASE WHEN ?='core' THEN 0 ELSE expires_at END,"
             "source_id=?,source_text=?,source_time=MAX(source_time,?) WHERE id=?",
-            (merged_text, vec.tobytes(), new_imp, new_strength, ts, new_tier, new_tier,
+            (merged_text, vec.tobytes(), new_imp, new_strength, stable[1], new_tier, new_tier,
              source_id or '', combined_source, source_time, row[0]),
         )
         return {'id': row[0], 'text': merged_text, 'scope': scope, 'status': 'active', 'merged': True, 'duplicate': True}
@@ -710,7 +883,7 @@ def consolidate_scope(scope: str, dry: bool = False) -> dict:
                 continue
             vec = embed([text])[0]
             best_imp = max(it['importance'] for it in items)
-            best_strength = min(STRENGTH_CAP_DAYS, max(it['strength'] for it in items) * 1.1)
+            best_strength = max(it['strength'] for it in items)  # Housekeeping is not experience.
             best_tier = 'core' if any(it['tier'] == 'core' for it in items) else ('task' if any(it['tier'] == 'task' for it in items) else 'normal')
             conn.execute(
                 "UPDATE memories SET text=?,embedding=?,importance=?,strength_days=?,tier=?,"
@@ -925,18 +1098,148 @@ def _lexical_score(query: str, text: str) -> tuple[float, bool]:
 DEDUPE_SIM = 0.95
 
 
-PRIVATE_SHARE_RE = re.compile(r'住址|地址|家庭住址|真名|真实姓名|姓名|身份证|手机号|电话号码|护照|银行卡|密码|私密|秘密|别到处说|别告诉|不要告诉|裸|性行为|病历|医院|工资|存款|定位')
+def _share_hash(row):
+    # Authorization covers this precise fact/version, not future edits or its
+    # entire conversation. A later correction requires a new grant.
+    import hashlib
+    fields = ('id', 'text', 'tags', 'scope', 'subject_id', 'source_id', 'source_text', 'source_time', 'expires_at', 'fact_key')
+    return hashlib.sha256(json.dumps({k: row[k] for k in fields}, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
 
 
-def _shareable(row, scope: str) -> bool:
-    """管理员私聊/旧 global 里的住址、真名、证件、身体、财务等隐私不参与跨聊天共享。"""
-    if scope not in (owner_scope(), 'global'):
-        return True
-    hay = str(row[1] or '') + ' ' + str(row[2] or '')
-    return not PRIVATE_SHARE_RE.search(hay)
+def _granted_memory_ids(conn, target_scope):
+    cols = 'm.id,m.text,m.tags,m.scope,m.subject_id,m.source_id,m.source_text,m.source_time,m.expires_at,m.fact_key,g.content_hash'
+    cur = conn.execute(f"SELECT {cols} FROM memories m JOIN memory_share_grants g ON g.memory_id=m.id WHERE g.target_scope=? AND m.status='active' AND (m.expires_at=0 OR m.expires_at>?)", (target_scope, now()))
+    names = [d[0] for d in cur.description]
+    rows = [dict(zip(names, r)) for r in cur.fetchall()]
+    allowed = {r['id'] for r in rows if r['content_hash'] == _share_hash(r)}
+    policies = {r['id']: r for r in _dict_rows(conn, "SELECT * FROM sharing_privacy WHERE kind='memory'")}
+    for row in _dict_rows(conn, "SELECT * FROM memories WHERE status='active' AND (expires_at=0 OR expires_at>?)", (now(),)):
+        policy = policies.get(row['id'])
+        if not policy:
+            continue
+        if policy['origin'] == 'manual' and policy['level'] == 'private':
+            allowed.discard(row['id'])
+        elif policy['revision'] == _share_hash(row) and policy['level'] == 'public':
+            allowed.add(row['id'])
+    blocked = {r[0] for r in conn.execute('SELECT memory_id FROM sharing_blocks WHERE target_scope=?', (target_scope,))}
+    return allowed - blocked
 
 
-def _cached_memory_matrix(conn, scope: str, shared: bool = False, include_global: bool = True):
+def _dict_rows(conn, sql, args=()):
+    cur = conn.execute(sql, args)
+    names = [d[0] for d in cur.description]
+    return [dict(zip(names, row)) for row in cur.fetchall()]
+
+
+def _summary_share_hash(row):
+    return hashlib.sha256(json.dumps({k: row[k] for k in ('id','key','text','structured','covered_ids','period_start','period_end')}, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def _participated(conn, row):
+    messages = _dict_rows(conn, 'SELECT id,message_id FROM messages WHERE key=? AND is_self=1 AND at BETWEEN ? AND ?', (row['key'],row['period_start'],row['period_end']))
+    try: covered = set(json.loads(row['covered_ids'] or '[]'))
+    except (ValueError, TypeError): return False
+    return any(not covered or m['id'] in covered or m['message_id'] in covered for m in messages)
+
+
+def sharing_context(scope, query='', include_summaries=False):
+    scope = valid_scope(scope)
+    query = str(query or '')[:1000]
+    pending, summaries = [], []
+    with _lock, db() as conn:
+        policies = {(r['kind'],r['id']):r for r in _dict_rows(conn,'SELECT * FROM sharing_privacy')}
+        blocked = {r[0] for r in conn.execute('SELECT memory_id FROM sharing_blocks WHERE target_scope=?',(scope,))}
+        memories = _dict_rows(conn,"SELECT * FROM memories WHERE scope<>? AND status='active' AND (expires_at=0 OR expires_at>?)",(scope,now()))
+        unknown=[]
+        for r in memories:
+            if r['id'] in blocked: continue
+            revision=_share_hash(r);p=policies.get(('memory',r['id']))
+            if p and (p['revision']==revision or p['origin']=='manual' and p['level']=='private'): continue
+            unknown.append((r,revision))
+        # Rank locally; no language model call for query matching.
+        if unknown and query:
+            q=embed([query])[0]
+            ranked=sorted([(float(np.frombuffer(r['embedding'],dtype=np.float32)@q),r,rev) for r,rev in unknown],key=lambda x:-x[0])
+            for score,r,rev in ranked:
+                if score<.4 or len(pending)>=4: continue
+                # Do not classify with silently clipped confidentiality context.
+                if len(r['text'])>2000 or len(r['source_text'] or '')>3000: continue
+                pending.append({'kind':'memory','id':r['id'],'scope':r['scope'],'revision':rev,'text':r['text'],'sourceText':r['source_text'] or ''})
+        if include_summaries and scope==owner_scope():
+            for r in _dict_rows(conn,"SELECT * FROM session_summaries WHERE key<>? AND status='active' AND kind='summary' ORDER BY period_end DESC LIMIT 40",(scope,)):
+                if not _participated(conn,r): continue
+                rev=_summary_share_hash(r);p=policies.get(('summary',r['id']))
+                if p and p['revision']==rev:
+                    if p['level']=='public' and p['share_text'] and len(summaries)<2:
+                        summaries.append({'id':r['id'],'scope':r['key'],'text':p['share_text'],'at':r['period_end'],'participated':True})
+                elif len(pending)<6 and sum(p['kind']=='summary' for p in pending)<2 and len(r['text'])<=5000 and len(r['structured'] or '')<=5000:
+                    pending.append({'kind':'summary','id':r['id'],'scope':r['key'],'revision':rev,'text':r['text'],'sourceText':r['structured'],'participated':True})
+                if len(summaries)>=2: break
+    return {'pending':pending,'summaries':summaries}
+
+
+def save_sharing_reviews(reviews):
+    if not isinstance(reviews,list) or not 1<=len(reviews)<=6: raise ValueError('invalid privacy batch')
+    with _lock, db() as conn:
+        for verdict in reviews:
+            kind=verdict.get('kind');mid=str(verdict.get('id',''));level=verdict.get('level')
+            if kind not in ('memory','summary') or level not in ('public','private','uncertain'): raise ValueError('invalid privacy verdict')
+            table='memories' if kind=='memory' else 'session_summaries'
+            rows=_dict_rows(conn,f"SELECT * FROM {table} WHERE id=? AND status='active'",(mid,))
+            if not rows: continue
+            row=rows[0];revision=_share_hash(row) if kind=='memory' else _summary_share_hash(row)
+            if verdict.get('revision')!=revision: continue
+            old=conn.execute('SELECT origin,level,revision FROM sharing_privacy WHERE kind=? AND id=?',(kind,mid)).fetchone()
+            if old and old[0]=='manual' and (old[1]=='private' or old[2]==revision): continue
+            confidence=verdict.get('confidence')
+            if type(confidence) not in (int,float) or not 0<=confidence<=1: raise ValueError('invalid privacy confidence')
+            if level=='public' and confidence<.9: level='uncertain'
+            shared=''
+            if kind=='summary' and level=='public':
+                parts=verdict.get('excerpts')
+                if not isinstance(parts,list) or not 1<=len(parts)<=2 or any(not isinstance(p,str) or not p.strip() or len(p)>800 or p not in row['text'] for p in parts): raise ValueError('invalid summary evidence')
+                shared='\n'.join(parts)
+            reason=str(verdict.get('reason',''))[:200]
+            conn.execute('INSERT OR REPLACE INTO sharing_privacy VALUES (?,?,?,?,?,?,?,?)',(kind,mid,revision,level,shared,reason,'semantic',now()))
+    _matrix_cache_clear()
+    return {'saved':True}
+
+
+def memory_sharing(scope, mid, action='view', target_scope='', expected_hash=''):
+    # Management-only route; never called by extraction or a model proposal.
+    scope = 'global' if scope == 'global' else valid_scope(scope)
+    if action not in ('view', 'grant', 'revoke', 'private', 'public', 'auto'):
+        raise ValueError('invalid sharing action')
+    if action in ('grant','revoke') and (not re.fullmatch(r'(private|group):[0-9]+', str(target_scope)) or target_scope == scope):
+        raise ValueError('请选择另一个具体聊天，不能授权全部聊天')
+    with _lock, db() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute('SELECT * FROM memories WHERE id=? AND scope=?', (str(mid), scope)).fetchone()
+        if not row:
+            raise ValueError('记忆不存在或不属于此会话')
+        revision = _share_hash(row)
+        if action == 'grant':
+            if expected_hash != revision or row['status'] != 'active' or (row['expires_at'] and row['expires_at'] <= now()):
+                raise ValueError('记忆已变化、未确认或已到期，请重新查看后授权')
+            conn.execute('INSERT OR REPLACE INTO memory_share_grants VALUES (?,?,?,?)', (mid, target_scope, revision, now()))
+            conn.execute('DELETE FROM sharing_blocks WHERE memory_id=? AND target_scope=?',(mid,target_scope))
+        elif action == 'revoke':
+            conn.execute('DELETE FROM memory_share_grants WHERE memory_id=? AND target_scope=?', (mid, target_scope))
+            conn.execute('INSERT OR IGNORE INTO sharing_blocks VALUES (?,?)',(mid,target_scope))
+        elif action in ('private','public','auto'):
+            if expected_hash!=revision: raise ValueError('记忆已变化，请刷新后操作')
+            if action=='auto': conn.execute("DELETE FROM sharing_privacy WHERE kind='memory' AND id=?",(mid,))
+            else: conn.execute('INSERT OR REPLACE INTO sharing_privacy VALUES (?,?,?,?,?,?,?,?)',('memory',mid,revision,action,'','管理员手动设置','manual',now()))
+        grants = [dict(r) for r in conn.execute('SELECT target_scope,content_hash,granted_at FROM memory_share_grants WHERE memory_id=?', (mid,))]
+        policy=conn.execute("SELECT level,origin,revision FROM sharing_privacy WHERE kind='memory' AND id=?",(mid,)).fetchone()
+        blocked=[r[0] for r in conn.execute('SELECT target_scope FROM sharing_blocks WHERE memory_id=?',(mid,))]
+    if action != 'view':
+        _matrix_cache_clear()
+    return {'id': mid, 'scope': scope, 'text': row['text'], 'revision': revision,'privacy':dict(policy) if policy else {'level':'unreviewed','origin':'auto'},'blocked':blocked,
+            'grants': [{'target': g['target_scope'], 'at': g['granted_at'], 'current': g['content_hash'] == revision} for g in grants]}
+
+
+def _cached_memory_matrix(conn, scope: str, shared: bool = False, include_global: bool = False):
     """按 scope 缓存 active 记忆的向量矩阵，避免每次检索都重新 stack。
 
     写入后最多 30 秒内可能看到旧缓存；写入路径会主动清缓存，30 秒只是兜底。
@@ -946,10 +1249,11 @@ def _cached_memory_matrix(conn, scope: str, shared: bool = False, include_global
     if hit and (now() - hit[0]) < _MATRIX_CACHE_TTL:
         return hit[1], hit[2]
     cols = "SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at FROM memories"
-    if shared:
+    if shared or include_global:
+        permitted = _granted_memory_ids(conn, scope)
         rows = conn.execute(cols + " WHERE status='active'").fetchall()
-    elif include_global:
-        rows = conn.execute(cols + " WHERE (scope=? OR scope='global') AND status='active'", (scope,)).fetchall()
+        rows = [r for r in rows if (r[3] == scope and not shared) or
+                (r[0] in permitted and r[3] != scope and (shared or r[3] == 'global'))]
     else:
         rows = conn.execute(cols + " WHERE scope=? AND status='active'", (scope,)).fetchall()
     ts = now()
@@ -975,7 +1279,8 @@ def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2, i
         ).fetchone()
         if not row or (row[16] and row[16] <= time.time()):
             return []
-        if row[3] != scope and not (include_global and row[3] == 'global' and _shareable(row, row[3])):
+        permitted = _granted_memory_ids(conn, scope) if include_global else set()
+        if row[3] != scope and not (include_global and row[3] == 'global' and row[0] in permitted):
             return []
         fact_key = str(row[17] or '')
         source_id = str(row[11] or '')
@@ -995,7 +1300,7 @@ def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2, i
         rows = conn.execute(sql, [*params[:2], time.time(), *params[2:]]).fetchall()
         out = []
         for r in rows:
-            if not _shareable(r, r[3]):
+            if r[3] != scope and r[0] not in permitted:
                 continue
             reason = 'same_source' if source_id and str(r[11] or '') == source_id else 'same_fact'
             out.append({
@@ -1004,12 +1309,13 @@ def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2, i
                 'tier': r[10], 'source_id': r[11], 'source_time': r[13],
                 'subject_id': r[14], 'confidence': r[15], 'expires_at': r[16],
                 'status': 'active', 'score': 0.5, 'reason': reason,
+                'shareAuthorizedFor': scope if r[3] != scope else '',
             })
             if len(out) >= limit:
                 break
         return out
 
-def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: float = 0.35, shared: bool = False, exclude_scope: str | None = None, include_global: bool = True) -> list[dict]:
+def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: float = 0.35, shared: bool = False, exclude_scope: str | None = None, include_global: bool = False) -> list[dict]:
     scope = valid_scope(scope)
     if not isinstance(query, str) or not query.strip() or len(query) > 2000:
         return []
@@ -1020,9 +1326,10 @@ def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: f
         if not len(rows):
             return []
         sims = mat @ q
+        permitted = _granted_memory_ids(conn, scope)
         scored = []
         for r, sim in zip(rows, sims):
-            if shared and (r[3] == exclude_scope or not _shareable(r, r[3])):
+            if (r[3] != scope and r[0] not in permitted) or (shared and (r[3] == exclude_scope or r[3] == scope)):
                 continue
             rp = 1.0 if r[10] != 'normal' else recall_prob(r[7], r[6], r[4])
             # 相关性 × 时近性 × 重要性。
@@ -1033,7 +1340,7 @@ def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: f
             lex, phrase = _lexical_score(query, r[1])
             score *= 1.0 + 0.35 * lex + 0.15 * (1.0 if phrase else 0.0)
             if r[3] == 'global' and scope != 'global':
-                # 旧 global 记忆是共享的，保留可召回，但别压过当前聊天里的直接证据。
+                # 旧 global 经过隐私审核或指定授权才能召回，不压过本聊天直接证据。
                 score *= 0.88
             scored.append((score, rp, float(sim), imp_factor, r, lex))
         scored.sort(key=lambda x: -x[0])
@@ -1056,10 +1363,11 @@ def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: f
             kept_vecs.append(vec)
             out.append({
                 "id": r[0], "text": r[1], "tags": r[2], "scope": r[3],
+                'shareAuthorizedFor': scope if r[3] != scope else '',
                 "importance": r[4], "sim": round(sim, 4), "score": round(score, 4),
                 "recall": round(rp, 3), "access_count": r[8],
                 'created_at': r[5],
-                'evidence': {'sourceId': r[11], 'sourceText': r[12], 'sourceTime': r[13] * 1000,
+                'evidence': {'sourceId': r[11], 'sourceText': r[12] if r[3] == scope else '', 'sourceTime': r[13] * 1000,
                              'subjectId': r[14], 'confidence': r[15]},
                 'retrieval': {'similarity': float(sim), 'retention': rp,
                               'retentionMultiplier': 0.65 + 0.35 * rp,
@@ -1075,13 +1383,9 @@ def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: f
 
 
 def reinforce(scope, ids):
-    scope = valid_scope(scope)
-    changed = 0
-    with _lock, db() as conn:
-        for mid in list(dict.fromkeys(ids))[:20]:
-            changed += conn.execute("UPDATE memories SET last_access=?,last_reinforced=?,strength_days=MIN(?,strength_days*1.4),access_count=access_count+1 WHERE id=? AND scope=? AND status='active' AND last_reinforced<? AND (expires_at=0 OR expires_at>?)",
-                (now(), now(), STRENGTH_CAP_DAYS, mid, scope, now()-259200, now())).rowcount
-    return {'changed': changed}
+    valid_scope(scope)
+    # This legacy adoption-only endpoint supplies no independent evidence.
+    return {'changed': 0, 'reason': '需要新的本人原话证据；检索或采用本身不加固'}
 
 
 def related_memories(scope, subject_id, query):
@@ -1162,7 +1466,7 @@ def manage_memory(scope, subject_id, action, query='', replacement='', source_id
         if action == 'correct':
             mid, ts = uuid.uuid4().hex, now()
             conn.execute("INSERT INTO memories (id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,status,fact_key,subject_id,source_id,source_text,source_time,confidence,expires_at,tier) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (mid,new_text,old['tags'],scope,old['importance'],ts,ts,HALF_LIFE_DAYS,0,vec.tobytes(),'active',old['fact_key'],subject_id,str(source_id)[:120],replacement,ts,1,old['expires_at'],old['tier']))
+                (mid,new_text,old['tags'],scope,old['importance'],ts,ts,initial_strength(scope,old['tags'],old['importance']),0,vec.tobytes(),'active',old['fact_key'],subject_id,str(source_id)[:120],replacement,ts,1,old['expires_at'],old['tier']))
             conn.execute("UPDATE memories SET status='superseded',superseded_by=? WHERE id=?", (mid,old['id']))
             if old['status'] == 'candidate' and old['related_id']:
                 conn.execute("UPDATE memories SET status='superseded',superseded_by=? WHERE id=? AND scope=? AND subject_id=? AND status='active'",(mid,old['related_id'],scope,subject_id))
@@ -1390,11 +1694,125 @@ def restore_memory(scope, mid, resolution=None, revision=None, review=None):
         return {'id': mid, 'status': 'active', 'changed': 1, 'undo': _record_confirmation(conn, scope, before)}
 
 
+_organize_plans = {}  # Local previews only; restart requires a fresh preview.
+ORGANIZE_PAGE_SIZE = 50
+ORGANIZE_TTL = 15 * 60
+
+
+def _organize_decision(conn, row, grace_until):
+    expired = bool(row['expires_at'] and row['expires_at'] <= now())
+    faded = (row['status'] == 'active' and (now() - row['last_access']) / 86400 > MIN_AGE_DAYS
+             and recall_prob(row['strength_days'], row['last_access'], row['importance']) < PRUNE_R)
+    if (expired or faded) and row['tier'] == 'normal' and row['importance'] < .8:
+        if now() * 1000 < grace_until:
+            return {'action': 'hold', 'reason': '遗忘规则迁移保护期内，暂不建议归档'}
+        return {'action': 'archive', 'reason': '已超过明确有效期' if expired else '普通、低重要记忆已低于归档线'}
+    if row['status'] != 'candidate':
+        return {'action': 'hold', 'reason': '未达到归档条件'}
+    if expired or not row['source_text'] or len(row['source_text']) > 500 or not row['source_id']:
+        return {'action': 'hold', 'reason': '已过期或原话来源不完整，保留待处理'}
+    context, _, relations, missing = _cached_reviews(conn, row, 'confirm')
+    readiness = _automatic_readiness(conn, row, 'confirm', context, relations, missing)
+    if readiness['status'] != 'ready':
+        return {'action': 'hold', 'reason': readiness['reason'] + '；本次不调用模型'}
+    coverage = '选入的相关事实' if context.get('reviewScope') == 'related' else '全部现有事实'
+    return {'action': 'confirm', 'reason': f'原话与{coverage}的审核已通过，可复用', 'revision': context['revision']}
+
+
+def organize_preview(scope, after=''):
+    if not scope:
+        raise ValueError('请选择一个具体聊天')
+    scope = valid_scope(scope)
+    if not isinstance(after, str) or len(after) > 128:
+        raise ValueError('invalid cursor')
+    with _lock, db() as conn:
+        conn.row_factory = sqlite3.Row
+        # Keyset pagination limits semantic receipt checks to 50 per request.
+        # Pending records never fade out just because they have waited.
+        condition = """scope=? AND (status='candidate' OR (status='active' AND tier='normal' AND importance<0.8
+            AND ((expires_at>0 AND expires_at<=?) OR (last_access<? AND
+              1.0/(1.0+max(0,?-last_access)/86400.0/max(0.1,strength_days))<?))))"""
+        args = (scope, now(), now()-MIN_AGE_DAYS*86400, now(), PRUNE_R)
+        total = conn.execute('SELECT count(*) FROM memories WHERE '+condition, args).fetchone()[0]
+        rows = conn.execute('SELECT * FROM memories WHERE '+condition+' AND id>? ORDER BY id LIMIT ?',
+                            (*args, after, ORGANIZE_PAGE_SIZE+1)).fetchall()
+        more = len(rows) > ORGANIZE_PAGE_SIZE
+        rows = rows[:ORGANIZE_PAGE_SIZE]
+        grace_until = retention_policy(conn)['graceUntil']
+        items, expected = [], {}
+        for row in rows:
+            decision = _organize_decision(conn, row, grace_until)
+            items.append({**decision, **{k: row[k] for k in ('id', 'text', 'status', 'subject_id', 'source_text', 'expires_at')}})
+            expected[row['id']] = {'fingerprint': _fingerprint(row), **decision}
+        for token in list(_organize_plans):
+            if _organize_plans[token]['expires'] <= now():
+                del _organize_plans[token]
+        while len(_organize_plans) >= 16:
+            del _organize_plans[next(iter(_organize_plans))]
+        token = uuid.uuid4().hex
+        _organize_plans[token] = {'scope': scope, 'expires': now()+ORGANIZE_TTL, 'expected': expected}
+        return {'token': token, 'scope': scope, 'items': items, 'total': total,
+                'next': rows[-1]['id'] if more else '', 'graceUntil': grace_until,
+                'expiresAt': (now()+ORGANIZE_TTL)*1000, 'modelCalls': 0}
+
+
+def organize_apply(scope, token, ids, action='recommended', acknowledge=False):
+    if not scope:
+        raise ValueError('请选择一个具体聊天')
+    scope = valid_scope(scope)
+    if action not in ('recommended', 'archive-selected') or (action == 'archive-selected' and acknowledge is not True):
+        raise ValueError('主动归档前请确认：保留原文，但不再参与正常记忆检索')
+    if not isinstance(token, str) or not isinstance(ids, list) or not 1 <= len(ids) <= ORGANIZE_PAGE_SIZE or any(not isinstance(i, str) for i in ids) or len(set(ids)) != len(ids):
+        raise ValueError('请选择本页 1–50 条记录')
+    with _lock:
+        plan = _organize_plans.get(token)
+        if not plan or plan['scope'] != scope or plan['expires'] <= now():
+            raise MemoryConflict('预览已过期或服务已重启，请重新预览')
+        if 'result' in plan:
+            if set(ids) != plan['selection'] or action != plan['action']:
+                raise MemoryConflict('这次预览已执行，请重新预览')
+            return {**plan['result'], 'replayed': True}
+        if any(i not in plan['expected'] or (action == 'recommended' and plan['expected'][i]['action'] == 'hold') for i in ids):
+            raise ValueError('只能选择预览中可处理的记录')
+        with db() as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute('BEGIN IMMEDIATE')
+            grace_until = retention_policy(conn)['graceUntil']
+            before, applied, skipped = {}, [], []
+            for mid in ids:
+                expected = plan['expected'][mid]
+                row = conn.execute('SELECT * FROM memories WHERE scope=? AND id=?', (scope, mid)).fetchone()
+                if row is None or _fingerprint(row) != expected['fingerprint']:
+                    skipped.append({'id': mid, 'reason': '预览后记录已变化，请重新预览'})
+                    continue
+                # Explicit user archiving is separate from automatic recommendations.
+                # It never activates a fact or calls semantic review; the preview
+                # fingerprint and transaction/undo protections still apply.
+                decision = {'action': 'archive'} if action == 'archive-selected' else _organize_decision(conn, row, grace_until)
+                if action == 'recommended' and (decision['action'] != expected['action'] or decision.get('revision') != expected.get('revision')):
+                    skipped.append({'id': mid, 'reason': '相关事实或处理条件已变化；保留原状，请重新预览'})
+                    continue
+                if decision['action'] == 'confirm':
+                    _confirm_one(conn, scope, mid, before)
+                else:
+                    before[mid] = dict(row)
+                    conn.execute("UPDATE memories SET status='archived' WHERE id=? AND scope=?", (mid, scope))
+                applied.append({'id': mid, 'action': decision['action']})
+            undo = _record_confirmation(conn, scope, before) if before else None
+            result = {'changed': len(applied), 'applied': applied, 'skipped': skipped, 'undo': undo, 'modelCalls': 0}
+        _matrix_cache_clear()
+        plan['selection'], plan['result'], plan['action'] = set(ids), result, action
+        return result
+
+
 def decay(prune: bool = True) -> dict:
     _matrix_cache_clear()
     removed = 0
     total = 0
     with _lock, db() as conn:
+        policy = retention_policy(conn)
+        if now() * 1000 < policy['graceUntil']:
+            return {'total': 0, 'removed': 0, 'prune_r': PRUNE_R, 'graceUntil': policy['graceUntil'], 'reason': '新遗忘规则迁移保护期内，不归档现有记忆'}
         rows = conn.execute("SELECT id,last_access,strength_days,importance FROM memories WHERE status='active' AND tier='normal'").fetchall()
         total = len(rows)
         for mid, last, strength, importance in rows:
@@ -1408,14 +1826,17 @@ def decay(prune: bool = True) -> dict:
 
 def stats() -> dict:
     with _lock, db() as conn:
+        policy = retention_policy(conn)
         total = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
         scopes = conn.execute("SELECT scope, COUNT(*) FROM memories GROUP BY scope").fetchall()
         avg = conn.execute("SELECT AVG(strength_days), AVG(importance) FROM memories").fetchone()
         messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
         summaries = conn.execute("SELECT COUNT(*) FROM session_summaries WHERE status='active'").fetchone()[0]
     return {
-        'version': '0.10.0',
-        'capabilities': ['combined-confirm-review', 'confirmation-relation-groups', 'auto-confirm-guard', 'source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
+        'version': '0.10.1',
+        'retentionPolicy': policy,
+        'reviewScope': review_scope(),
+        'capabilities': ['local-memory-organizer', 'content-retention-v2', 'combined-confirm-review', 'confirmation-relation-groups', 'auto-confirm-guard', 'source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
         'embed_threads': EMBED_THREADS,
         'index': 'exact-cache',
         'ann_threshold': ANN_MIN,
@@ -1457,7 +1878,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            if self.path == "/add":
+            if self.path == '/sharing/context':
+                b=self._body()
+                self._send(200,{'ok':True,**sharing_context(b.get('scope'),b.get('query',''),b.get('include_summaries') is True)})
+            elif self.path == '/sharing/reviews':
+                self._send(200,{'ok':True,**save_sharing_reviews(self._body().get('reviews'))})
+            elif self.path == "/sharing":
+                b = self._body()
+                self._send(200, {"ok": True, **memory_sharing(b.get("scope"), b.get("id"), b.get("action", "view"), b.get("target_scope", ""), b.get("expected_hash", ""))})
+            elif self.path == "/add":
                 b = self._body()
                 r = add_memory(**b)
                 self._send(200, {"ok": True, "memory": r})
@@ -1511,7 +1940,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {"ok": True, "results": r})
             elif self.path == "/search":
                 b = self._body()
-                r = search_memory(b.get("query", ""), int(b.get("k", 5)), b.get("scope"), float(b.get('min_score', 0.35)), bool(b.get('shared', False)), b.get('exclude_scope'), bool(b.get('include_global', True)))
+                r = search_memory(b.get("query", ""), int(b.get("k", 5)), b.get("scope"), float(b.get('min_score', 0.35)), bool(b.get('shared', False)), b.get('exclude_scope'), bool(b.get('include_global', False)))
                 self._send(200, {"ok": True, "results": r})
             elif self.path == '/reinforce':
                 b = self._body()
@@ -1535,6 +1964,12 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == '/list':
                 b = self._body()
                 self._send(200, {'ok': True, 'memories': list_memories(b.get('scope'), b.get('status', 'active'))})
+            elif self.path == '/organize/preview':
+                b = self._body()
+                self._send(200, {'ok': True, **organize_preview(b.get('scope'), b.get('after', ''))})
+            elif self.path == '/organize/apply':
+                b = self._body()
+                self._send(200, {'ok': True, **organize_apply(b.get('scope'), b.get('token'), b.get('ids'), b.get('action', 'recommended'), b.get('acknowledge', False))})
             elif self.path == '/confirm/context':
                 b = self._body()
                 self._send(200, {'ok': True, **confirmation_context(b.get('scope'), b.get('id'), b.get('operation', 'confirm'))})

@@ -2,7 +2,7 @@
 export const XINJI_IDENTITY = Object.freeze({
   engine: 'xinji',
   engineName: '心迹',
-  runtimeVersion: '0.10.0',
+  runtimeVersion: '0.10.1',
   architecture: 'qq-compatible',
   migrationStage: 'transport-adapter',
 });

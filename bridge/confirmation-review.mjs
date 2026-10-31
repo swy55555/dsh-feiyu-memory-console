@@ -48,7 +48,7 @@ const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof v
 // receipts. Failed/invalid calls are not retained. Hits never extend the TTL.
 export class ReviewMemo {
   constructor({now=Date.now,ttlMs=1800000,maxEntries=128}={}){Object.assign(this,{now,ttlMs,maxEntries});this.ready=new Map();this.pending=new Map();}
-  async get(kind,context,modelSignature,run){
+  async get(kind,context,modelSignature,run,shouldCache=()=>true){
     const key=createHash('sha256').update(JSON.stringify(canonical(['confirmation-v1',kind,modelSignature,context]))).digest('hex');
     const old=this.ready.get(key);
     if(old&&old.until>this.now())return structuredClone(old.value);
@@ -59,7 +59,7 @@ export class ReviewMemo {
       const value=await job;
       for(const [k,v]of this.ready)if(v.until<=this.now())this.ready.delete(k);
       while(this.ready.size>=this.maxEntries)this.ready.delete(this.ready.keys().next().value);
-      this.ready.set(key,{value:structuredClone(value),until:this.now()+this.ttlMs});return structuredClone(value);
+      if(shouldCache(value))this.ready.set(key,{value:structuredClone(value),until:this.now()+this.ttlMs});return structuredClone(value);
     }finally{this.pending.delete(key);}
   }
 }

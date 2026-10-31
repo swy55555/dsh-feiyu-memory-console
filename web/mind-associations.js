@@ -19,6 +19,6 @@ export function mindAssociations(el,ui){
     stage('04 · 表达','此刻回应基调',el('p',{text:e?`${e.state?.label||'未提供'}${e.state?.nuance?' · '+e.state.nuance:''} · ${e.stance||'正常交流'}`:ui.emotionError||'正在读取情绪'}),el('p',{class:'small muted',text:'当前值已包含生效的感受，不会在此重复叠加。并非每轮都要谈论自己的情绪。'}),el('a',{href:'#/emotion',text:'查看情绪曲线与设置'})));
   root.appendChild(flow);
   root.appendChild(el('div',{class:'row'},el('button',{class:'btn sm',on:{click:ui.details},text:'查看联想去向'}),el('span',{class:'small muted',text:'交给模型不代表已经说出来；不会因为联想而主动发消息。'})));
-  root.appendChild(el('details',{},el('summary',{text:'节奏、期限与消耗'}),el('p',{class:'note',text:'主人私聊安静两分钟后，最多联想两步；每轮最多两次模型调用，两轮至少间隔三十分钟。话题保留十分钟，不相关时暂存。主观感受五分钟减半、十分钟失效，新的主人私聊消息清除旧感受。关闭联想清除临时话题；关闭感受清除当前印象。事件理解与空闲联想可分别开启。'})));
+  root.appendChild(el('details',{},el('summary',{text:'节奏、期限与消耗'}),el('p',{class:'note',text:'主人私聊安静两分钟后，一次生成最多三步短联想，逐步校验来源、重复和停止条件；每轮最多一次模型调用，两轮至少间隔三十分钟。话题保留十分钟，不相关时暂存。主观感受五分钟减半、十分钟失效，新的主人私聊消息清除旧感受。关闭联想清除临时话题；关闭感受清除当前印象。事件理解与空闲联想可分别开启。'})));
   return root;
 }

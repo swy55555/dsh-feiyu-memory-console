@@ -14,12 +14,21 @@ function run(command, args) {
 }
 try {
   for (const name of ['host', 'diary', 'audit', 'features', 'integration', 'human-context', 'runtime-extras', 'emotion-v2', 'turn-traces', 'runtime-bundle', 'runtime-integration', 'emotion-context', 'daily-memory', 'idle-association', 'usage-features', 'continuity', 'continuity-wiring', 'candidate-auto', 'emotion-feelings', 'headless-snapshot', 'mind-workspace', 'response-patterns', 'mind-wiring', 'human-presence', 'light-profile', 'xinji-runtime', 'background-reasoning', 'confirmation-review', 'self-reference']) run(process.execPath, [`test/${name}.test.mjs`])
+  run(process.execPath, ['test/expression-teacher.test.mjs'])
+  run(process.execPath, ['test/sharing-privacy.test.mjs'])
+  run(process.execPath, ['test/growth-classroom.test.mjs'])
+  run(process.execPath, ['test/emotion-scopes.test.mjs'])
+  run(process.execPath, ['test/fishtalk-boundary.test.mjs'])
   const python = findPython()
-  if (python) run(python.command, [...python.args, 'test/memvec_test.py'])
+  run(process.execPath, ['test/onboarding.test.mjs'])
+  run(process.execPath, ['test/interaction-context.test.mjs'])
+  run(process.execPath, ['test/cost-control.test.mjs'])
+  run(process.execPath, ['test/preset-sync.test.mjs'])
+  if (python) {run(python.command, [...python.args, 'test/memvec_test.py']);run(python.command, [...python.args, 'test/retention_test.py']);run(python.command, [...python.args, 'test/organizer_test.py']);run(python.command, [...python.args, 'test/review_scope_test.py'])}
   else { failures++; console.error('Python 3.10+ with numpy is required for memory regression tests.') }
 } finally {
   const relative = path.relative(tempParent, path.resolve(temp))
   if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) fs.rmSync(temp, { recursive: true, force: true })
 }
-console.log(`Regression suites: ${30 - failures}/30 passed`)
+console.log(`Regression suites: ${42 - failures}/42 passed`)
 process.exitCode = failures ? 1 : 0

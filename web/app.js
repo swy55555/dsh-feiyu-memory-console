@@ -1,3 +1,5 @@
+import { classroomPanel } from './growth-classroom.js'
+import { organizerPanel } from './memory-organizer.js'
 import { mindWorkspacePanel } from './mind-workspace.js'
 import { mindAssociations } from './mind-associations.js'
 import { continuityVisual } from './continuity-view.js'
@@ -146,12 +148,13 @@ const S = {
     focusId: '',
     diaryDates: {},
   },
+  classroom: {data:null,loading:false,error:'',timer:0},
   candidateAuto: {data:null,loading:false,error:'',timer:0},
   semantic: null,
   semanticQuery: '',
   semanticTrace: null,
   memes: { data: null, settings: null, q: '', page: 1, loading: false },
-  cost: { data: null, loading: false, hours: 24, series: null }, 
+  cost: { data: null, loading: false, hours: 24, series: null },
   light: { scopes: null, key: '', data: null, seq: 0 },
   diary: { books: null, book: 'public', index: -1, showIntro: false, dates: {}, days: {}, wantDate: '', seq: 0, token: '', autoImport: false },
   upkeep: { queue: null, preview: null },
@@ -175,6 +178,45 @@ const S = {
     etag: null, total: 0, loadingMore: false,
   },
   theme: localStorage.getItem('feiyu-theme') || 'dark',
+}
+
+async function loadClassroom(){
+ if(S.classroom.loading)return;
+ S.classroom.loading=true;
+ try{S.classroom.data=await api('/classroom');S.classroom.error=''}catch(e){S.classroom.error=e.message}
+ finally{
+  S.classroom.loading=false;
+  if(S.tab==='classroom'){
+   paintCurrent();
+   if(S.classroom.data?.busy&&!S.classroom.timer)S.classroom.timer=setInterval(()=>void loadClassroom(),3000);
+   if(!S.classroom.data?.busy&&S.classroom.timer){clearInterval(S.classroom.timer);S.classroom.timer=0}
+  }
+ }
+}
+async function classroomAction(body){
+ if(S.classroom.loading)return;
+ if(body.action==='feedback'){
+  const result=await openModal({title:'记录实际使用反馈',desc:'可写下具体哪里有帮助或不合适；这不会自动触发模型调用。',fields:[{name:'note',label:'具体表现（可不填）',type:'textarea',maxlength:300}],submit:'保存反馈'});
+  if(!result)return;body={...body,note:result.note||''};
+ }
+ S.classroom.loading=true;
+ try{const data=await api('/classroom',{method:'POST',body});S.classroom.data=data;S.classroom.error='';toast(body.action==='generate'?(data.reused?'已复用原草案，没有新增模型调用':'已开始一次整理，完成后请核对'):'课堂已更新','ok')}
+ catch(e){toast(e.message,'error')}
+ finally{S.classroom.loading=false;if(S.tab==='classroom')paintCurrent();if(S.classroom.data?.busy&&!S.classroom.timer)S.classroom.timer=setInterval(()=>void loadClassroom(),3000)}
+}
+async function editCourse(course=null,reference=false){
+ const fields=reference?[
+  {name:'guidance',label:'学习参考（最多220字）',type:'textarea',maxlength:220,required:true,value:course.draft?.guidance||''},
+  {name:'avoid',label:'应该避免什么（可不填，最多160字）',type:'textarea',maxlength:160,value:course.draft?.avoid||''},
+ ]:[
+  {name:'title',label:'课程名称',type:'text',maxlength:40,required:true,value:course?.title||''},
+  {name:'goal',label:'希望学会怎样处理（最多600字）',type:'textarea',maxlength:600,required:true,value:course?.goal||''},
+  {name:'when',label:'什么情况下适用（最多120字）',type:'textarea',maxlength:120,required:true,value:course?.when||''},
+  {name:'scene',label:'对话或练习场景（可不填，最多1200字）',type:'textarea',maxlength:1200,value:course?.scene||''},
+  {name:'example',label:'你认为合适的示例（可不填，最多600字）',type:'textarea',maxlength:600,value:course?.example||''},
+ ];
+ const result=await openModal({title:reference?'自己写学习参考':course?.id?'编辑课程':'新建课程',desc:reference?'保存不调用模型，核对后再启用；只写通用方法，不把模拟内容写成事实或固定人设。':'写具体目标和使用场景，比“要更像人”更容易检查。保存不调用模型，修改课程会停用旧参考。',fields,submit:'保存'});
+ if(result)await classroomAction({action:reference?'reference':'save',...(course?.id?{id:course.id}:{}),...result});
 }
 
 let mainEl = null
@@ -404,6 +446,7 @@ function buildTabs() {
     { id: 'persona', label: '性格', count: S.persona?.pending },
     { id: 'emotion', label: '情绪' },
     { id: 'continuity', label: '当前心绪' },
+    { id: 'classroom', label: '成长课堂' },
     { id: 'memes', label: '玩梗' },
     { id: 'cost', label: '花费' },
     { id: 'library', label: '长期记忆', count: S.overview?.active },
@@ -417,7 +460,7 @@ function buildTabs() {
       class: `tab ${S.tab === tab.id ? 'active' : ''}`,
       dataset: { tab: tab.id },
       on: { click: () => go(tab.id) },
-    }, tab.label, (tab.id === 'overview' || tab.id === 'emotion' || tab.id === 'continuity') ? null : el('span', { class: 'n', text: tab.count == null ? '…' : String(tab.count) })))
+    }, tab.label, (tab.id === 'overview' || tab.id === 'emotion' || tab.id === 'continuity' || tab.id === 'classroom') ? null : el('span', { class: 'n', text: tab.count == null ? '…' : String(tab.count) })))
   }
   // 会话上下文是独立页（原文层 + 摘要层），不在 SPA 里，单独挂一个入口。
   bar.appendChild(el('a', {
@@ -499,7 +542,7 @@ function route(force = false) {
     if (params.get('book') === 'private' || params.get('book') === 'public') S.diary.book = params.get('book')
     if (params.get('date')) { S.diary.wantDate = params.get('date'); S.diary.showIntro = false }
   }
-  if (!['overview', 'graph', 'persona', 'emotion', 'continuity', 'memes', 'cost', 'library', 'light', 'diary', 'upkeep'].includes(tab)) { go('overview', { replace: true }); return }
+  if (!['overview', 'graph', 'persona', 'emotion', 'continuity', 'classroom', 'memes', 'cost', 'library', 'light', 'diary', 'upkeep'].includes(tab)) { go('overview', { replace: true }); return }
   if (tab !== S.tab || force) {
     const changed = tab !== S.tab
     S.tab = tab
@@ -512,6 +555,7 @@ function route(force = false) {
 
 function paintCurrent() {
   if (!mainEl) return
+  if (S.tab !== 'classroom' && S.classroom.timer) {clearInterval(S.classroom.timer);S.classroom.timer=0}
   if (S.tab !== 'graph') stopGraphLoop()
   if (S.tab !== 'library' && S.candidateAuto.timer) {clearInterval(S.candidateAuto.timer);S.candidateAuto.timer=0}
   if (S.tab !== 'continuity' && S.continuity.timer) {clearInterval(S.continuity.timer);S.continuity.timer=0}
@@ -545,6 +589,7 @@ function paintCurrent() {
   else if (S.tab === 'persona') { mainEl.appendChild(renderPersona()); if (!S.persona && !S.personaLoading) void loadPersona(); if (S.chatProfiles === null) void loadChatProfiles() }
   else if (S.tab === 'emotion') { mainEl.appendChild(renderEmotion()); if (!S.emotion && !S.emotionLoading) void loadEmotion() }
   else if (S.tab === 'continuity') { mainEl.appendChild(renderContinuity()); if (!S.continuity.data && !S.continuity.loading && !S.continuity.error) void loadContinuity() }
+  else if (S.tab === 'classroom') {mainEl.appendChild(classroomPanel(el,{...S.classroom,edit:editCourse,action:classroomAction,refresh:()=>loadClassroom()}));if(!S.classroom.data&&!S.classroom.loading&&!S.classroom.error)void loadClassroom()}
   else if (S.tab === 'memes') { mainEl.appendChild(renderMemes()); if (!S.memes.data && !S.memes.loading) void loadMemes() }
   else if (S.tab === 'cost') { mainEl.appendChild(renderCost()); if (!S.cost.data && !S.cost.loading) void loadCost() }
   else if (S.tab === 'library') mainEl.appendChild(renderLibrary())
@@ -577,6 +622,7 @@ async function refreshAll() {
     try { S.version = (await api('/version')).version; const badge = $('.app-version'); if (badge) badge.textContent = `v${S.version}` } catch {}
     await refreshOverview({ paint: false })
     if (S.tab === 'library') { S.library.loaded = false; await loadLibrary() }
+    else if (S.tab === 'classroom') {await loadClassroom()}
     else if (S.tab === 'persona') { S.persona = null; await loadPersona() }
     else if (S.tab === 'light') { S.light.scopes = null; await loadLightScopes(true) }
     else if (S.tab === 'diary') { S.diary.books = null; S.diary.loaded = false; S.diary.days = {}; paintCurrent() }
@@ -792,13 +838,13 @@ function renderOverview() {
 
   const shareCard = el('section', { class: 'card pad' },
     el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '跨聊天记忆共享' })),
-    el('p', { class: 'note', style: { margin: '0 0 8px' } }, '开启后，她能把别的聊天里的普通记忆带过来；管理员私聊和 global 里的住址、真名、证件、电话、密码、私密约定等仍然不共享。'),
+    el('p', { class: 'note', style: { margin: '0 0 8px' } }, '开启后，普通记忆和旧 global 通过隐私判断即可自动共享；私密或不确定内容不自动共享。相同版本的判断会复用，首次相关审核产生后台用量。在“共享范围”可标记私密、设为普通、禁止某个目标或单独授权。'),
     el('div', { class: 'row', style: { gap: '10px' } },
-      el('span', { class: 'pill', text: o.memoryShare !== false ? '已开启' : '已关闭' }),
+      el('span', { class: 'pill', text: o.memoryShare === true ? '已开启' : '已关闭' }),
       el('button', {
-        class: 'btn sm ' + (o.memoryShare !== false ? '' : 'primary'),
-        on: { click: () => toggleMemoryShare(o.memoryShare === false) },
-      }, o.memoryShare !== false ? '关闭共享' : '开启共享'),
+        class: 'btn sm ' + (o.memoryShare === true ? '' : 'primary'),
+        on: { click: () => toggleMemoryShare(o.memoryShare !== true) },
+      }, o.memoryShare === true ? '关闭共享' : '开启共享'),
     ),
   )
   const associationCard = el('section', { class: 'card pad' },
@@ -859,6 +905,30 @@ async function showIdleAssociation() {
     for(const event of data.events || []) content.appendChild(el('p',{text:`${new Date(event.at).toLocaleString()} · ${labels[event.status]||event.status}${event.topics?.length?' · '+event.topics.join(' / '):''}${event.impression?' · '+event.impression.text:''}`}))
     await openModal({title:'联想去向',desc:'保留最近的状态记录；主观印象不是事实记忆。“已交给聊天模型”不等于模型实际说了出来。重启保留记录、清除临时想法。',content,submit:'知道了',cancel:'关闭',fields:[]})
   } catch (error) { toast(error.message, 'error') }
+}
+async function editMemorySharing(row) {
+  try {
+    const call = body => api('/memory-sharing',{method:'POST',body:{id:row.id,scope:row.scope,...body}})
+    const current = await call({action:'view'})
+    const name = scope => S.overview?.scopes?.find(s=>s.scope===scope)?.label || scope
+    const labels={public:'普通，可自动共享',private:'私密，不自动共享',uncertain:'暂不确定，不自动共享',unreviewed:'等待首次相关检索时判断'}
+    const policy=current.privacy||{level:'unreviewed'}
+    const content=el('div',{},el('p',{text:current.text}),el('p',{text:`当前：${labels[policy.level]||policy.level} · ${policy.origin==='manual'?'手动设置':'自动判断'}${policy.revision&&policy.revision!==current.revision?'（内容已变，需重新判断；手动私密继续有效）':''}`}),el('p',{class:'note',text:'普通记忆无需逐条授权。手动私密优先于所有目标授权；自动判断不确定时可自行核对。共享只带事实，不附带整段原话。撤销会禁止该目标后续检索，不能收回已发送的内容或模型上下文。'}))
+    for(const grant of current.grants||[]) content.appendChild(el('div',{class:'row'},el('span',{text:`${name(grant.target)} · ${grant.current?'单独授权':'内容已变，授权失效'}`}),el('button',{type:'button',class:'btn sm',on:{click:async event=>{try{const entry=event.currentTarget.parentElement;await call({action:'revoke',target_scope:grant.target});entry.remove();toast('已禁止该目标后续检索','ok')}catch(error){toast(error.message,'error')}}}},'撤销并禁止')))
+    for(const target of current.blocked||[])content.appendChild(el('p',{class:'note',text:`已禁止：${name(target)}（可通过下方指定授权恢复）`}))
+    const options=(S.overview?.scopes||[]).filter(s=>s.scope!==row.scope&&/^(private|group):\d+$/.test(s.scope)).map(s=>({value:s.scope,label:`${s.label||s.scope}（${s.scope}）`}))
+    const result=await openModal({title:'这条记忆的共享范围',desc:S.overview?.memoryShare===true?'共享总开关已开启。':'共享总开关已关闭；保存授权不会自动开启。',content,
+      fields:[{name:'policy',label:'这条记忆的隐私设置',type:'select',options:[{value:'',label:'保持现状'},{value:'private',label:'私密：不向任何其他聊天共享'},{value:'public',label:'普通：允许自动共享'},{value:'auto',label:'重新交给自动判断'}]},
+        ...(options.length?[{name:'target',label:'指定目标（可选）',type:'select',options:[{value:'',label:'不选择'},...options]},{name:'targetAction',label:'目标操作',type:'select',options:[{value:'grant',label:'单独授权 / 恢复'},{value:'revoke',label:'禁止带到该聊天'}]}]:[])],submit:'保存'})
+    if(!result)return
+    if(result.policy==='public'&&!await confirmDialog({title:'允许这条普通记忆自动共享？',desc:current.text,ok:'设为普通'}))return
+    if(result.policy)await call({action:result.policy,expected_hash:current.revision})
+    if(result.target){
+      if(result.targetAction==='grant'&&!await confirmDialog({title:`允许带到 ${name(result.target)}？`,desc:'仅授权这一条。手动私密仍会阻止共享。'+current.text,ok:'授权这条记忆'}))return
+      await call({action:result.targetAction,target_scope:result.target,expected_hash:current.revision})
+    }
+    toast('已保存共享范围','ok')
+  } catch(error) {toast(error.message,'error')}
 }
 async function toggleMemoryShare(enabled) {
   try {
@@ -1110,7 +1180,7 @@ function ring(value, label = '鲜活度') {
   const r = 15
   const c = 2 * Math.PI * r
   const color = v >= 0.66 ? 'var(--green)' : v >= 0.33 ? 'var(--amber)' : 'var(--rose)'
-  return el('div', { class: 'ring', title: `${label} ${Math.round(v * 100)}%` },
+  return el('div', { class: 'ring', title: `${label} ${Math.round(v * 100)}% · 记忆可用程度的程序分数，不是正确率或真人回忆概率` },
     el('div', {
       html: `<svg width="38" height="38" viewBox="0 0 38 38" aria-hidden="true">
         <circle cx="19" cy="19" r="${r}" fill="none" stroke="var(--line)" stroke-width="3"/>
@@ -1172,6 +1242,7 @@ function memRow(row, { semantic = false } = {}) {
   }
 
   const actions = el('div', { class: 'actions' })
+  if (row.status === 'active') actions.appendChild(el('button',{class:'btn sm',on:{click:()=>editMemorySharing(row)}},'共享范围'))
   if (row.status === 'candidate') {
     actions.appendChild(actionBtn('check', '确认这条是真的', () => act('confirm', { id: row.id, scope: row.scope }, { success: '确认了，这回她真的记住了' })))
   }
@@ -2662,7 +2733,7 @@ function renderUpkeep() {
       el('span', { class: 'spacer' }),
       el('span', { class: 'muted small', text: '按顺序来，不用一次做完' }),
     ),
-    el('p', { class: 'note', style: { margin: '0 0 10px' } }, '整理不是清空，也不是点一下就全没：它把攒着的聊天分批提炼成记忆，一次最多 12 条；提炼出 0 条候选也正常，说明这批只是聊天、没有可记的事实。只有「待确认」需要你点头；队列会自动跑；衰减是可选的归档。'),
+    el('p', { class: 'note', style: { margin: '0 0 10px' } }, '上方「省心整理」在本地复用审核、批量归档，不调用模型。下方聊天队列会分批调用模型提炼，可能不产生候选；待确认有歧义时仍需审核，已审妥的可以批量处理。'),
     el('div', { class: 'todo-list' }, tasks.length ? tasks : el('div', { class: 'empty', text: '现在没有需要你处理的。' })),
   )
 
@@ -2673,11 +2744,12 @@ function renderUpkeep() {
     el('div', { class: 'section-head' }, el('h2', { class: 'h2', text: '服务状态' })),
     el('p', { class: 'note', style: { margin: '0 0 10px' } }, healthNote),
     el('dl', { class: 'kv-grid' },
-      el('dt', { text: '记忆库' }), el('dd', { text: h?.memvec?.ok ? `在线 · ${h.memvec.total} 条 · 平均强度 ${h.memvec.avg_strength_days ?? '—'} 天` : h?.memvec?.error || '—' }),
+      el('dt', { text: '记忆库' }), el('dd', { text: h?.memvec?.ok ? `在线 · ${h.memvec.total} 条 · 平均可用程度半衰时间 ${h.memvec.avg_strength_days ?? '—'} 天（工程参数）` : h?.memvec?.error || '—' }),
       el('dt', { text: '桥接' }), el('dd', { text: h?.bridge?.ok ? `${h.bridge.role || '大肥鱼'} · ${h.bridge.mode || '—'}${h.bridge.paused ? ' · 暂停中' : ''}` : h?.bridge?.error || '—' }),
       el('dt', { text: 'QQ' }), el('dd', { text: h?.bridge?.snowluma ? (h.bridge.snowluma.good ? '连接正常' : (h.bridge.snowluma.hint || '连接异常')) : '—' }),
       el('dt', { text: '数据库' }), el('dd', null, el('span', { class: 'mono', text: h?.db?.path || '—' }), h?.db?.ok ? el('span', { class: 'muted small', text: ` · ${fmtBytes(h.db.bytes)}` }) : null),
       el('dt', { text: '记忆服务' }), el('dd', { class: 'mono', text: MEMVEC }),
+      el('dt', { text: '审核范围' }), el('dd', {text:h?.memvec?.reviewScope==='related'?'相关范围（可选）：可能漏掉范围外冲突，不代表全部历史已审核':'全部当前有效的同主体历史（默认）'}),
     ),
   )
 
@@ -2690,7 +2762,8 @@ function renderUpkeep() {
           el('span', { class: 'spacer' }),
           el('button', { class: 'btn sm danger', on: { click: () => runDecay() } }, '确认归档'),
         )
-      : el('p', { class: 'note', style: { marginBottom: 0 } }, '现在没有到线的，不用动。'),
+      : el('div', null, el('p', { class: 'note' }, '现在没有到线的，不用动。'),
+          el('button', { class: 'btn sm', on: { click: () => previewDecay() } }, '先看看会清掉谁')),
     el('div', { id: 'decay-box' }),
   )
   const decayCard = el('section', { class: 'card pad' },
@@ -2738,14 +2811,14 @@ function renderUpkeep() {
     el('div', { class: 'section-head' },
       el('h2', { class: 'h2', text: '最近改了什么' }),
       el('span', { class: 'spacer' }),
-      el('span', { class: 'muted small', text: '每次写入都留了 before / after；能撤的这里可以直接撤' }),
+      el('span', { class: 'muted small', text: '实际修改保留前后记录；暂未通过审核不会改动记忆，原因会直接显示' }),
       el('button', { class: 'btn sm ghost', title: '重新读审计日志', on: { click: () => loadAudit() } }, icon('refresh')),
     ),
     el('div', { id: 'audit-box', class: 'audit-list' }, el('div', { class: 'empty small', text: '正在读审计日志…' })),
     el('div', { id: 'audit-path', class: 'audit-path mono', text: '' }),
   )
 
-  wrap.append(todoCard, healthCard, decayCard, queueCard, dataCard, auditCard)
+  wrap.append(organizerPanel(el, { api, confirmDialog, scopes: o?.scopes || [], ownerQQ: o?.ownerQQ, onApplied: loadAudit }), todoCard, healthCard, decayCard, queueCard, dataCard, auditCard)
   queueMicrotask(loadQueue)
   queueMicrotask(loadAudit)
   return wrap
@@ -2842,12 +2915,14 @@ async function loadAudit() {
       return
     }
     for (const entry of data.entries) {
+      const deferred=entry.status==='deferred'||(entry.op==='confirm'&&entry.status==='error'&&/^自动核对期间事实变化或仍有不确定关系/.test(entry.error||''));
       const row = el('div', { class: 'audit-row' },
         el('span', { class: 'audit-time', text: fmtWhen(Date.parse(entry.at)) }),
         el('span', { class: 'audit-op', text: entry.label || entry.op }),
-        el('span', { class: 'audit-summary', text: entry.summary || '', title: entry.error || '' }),
+        el('span', { class: 'audit-summary', text: deferred&&entry.status==='error'?'自动核对暂未通过：关系仍不确定或事实已变化；已有记忆未改动':entry.error || entry.summary || '', title: entry.error || '' }),
       )
-      if (entry.status === 'error') row.appendChild(el('span', { class: 'pill deleted', text: '失败' }))
+      if(deferred)row.appendChild(el('span',{class:'pill candidate',text:'暂未确认'}))
+      else if (entry.status === 'error') row.appendChild(el('span', { class: 'pill deleted', text: '失败' }))
       else if (entry.undone) row.appendChild(el('span', { class: 'pill archived', text: '已撤销' }))
       else if (entry.undoable) {
         row.appendChild(el('button', {
@@ -2893,6 +2968,7 @@ async function previewDecay() {
     S.upkeep.preview = data
     if (!box) return
     box.replaceChildren(el('div', { class: 'note', style: { marginTop: '10px' } }, `现在活着的 ${data.totalActive} 条里，这一轮会被归档的是 `, el('b', { text: String(data.count) }), ' 条。'))
+    if(data.graceUntil>Date.now())box.appendChild(el('p',{class:'note',text:`新遗忘规则迁移保护至 ${new Date(data.graceUntil).toLocaleString()}，期间只自然淡化，不归档旧记忆。主人、其他私聊和群聊使用相同内容规则。`}))
     if (data.rows.length) {
       box.appendChild(el('div', { class: 'decay-list' }, data.rows.map((r) => el('div', { class: 'decay-row' },
         el('span', { text: r.text }),
@@ -3322,7 +3398,7 @@ function renderEmotion() {
   const st = e.state || {}
   const mood = e.mood || {}
   const base = e.baseline || {}
-  const label = String(st.label || '平静')
+  const label = String(st.displayLabel || [st.label,st.nuance].filter(Boolean).join(' · ') || '平静')
   const intensity = Math.max(0, Math.min(1, Number(st.intensity) || 0))
   const valence = Number(st.valence) || 0
   const arousal = Number(st.arousal) || 0
@@ -3339,9 +3415,11 @@ function renderEmotion() {
 
   const hero = el('section', { class: 'hero' },
     el('div', { class: 'kicker', text: '此刻的情绪' }),
+    e.scopeInfo?.isolated ? el('p',{class:'muted small',text:'这里展示各段交流共同形成的当前心情；回应态度和下方事件记录属于主人私聊。其他人的冲突可以影响语气，但不会归罪于主人或降低对主人的信任。'}) : null,
+    e.sharedMood ? el('p',{class:'muted small',text:`共享心情：愉悦 ${Number(e.sharedMood.valence||0).toFixed(3)} / 活跃 ${Number(e.sharedMood.arousal||0).toFixed(3)}（已包含在当前心绪中；事件原因仍按对象记录）`}) : null,
     el('p', {class:'muted small',text:`判断来源：${reviewNames[e.lastEvent?.review?.status] || '本地判断'}${e.lastEvent?.review?.count ? ` · 今日复核 ${e.lastEvent.review.count} 次（每日无上限）` : ''} · 近期修正 ${(e.corrections || []).length} 次`}),
     el('h2', null, frag('她现在：', el('em', { text: label }), intensity < .01 ? '，接近平常状态。' : `，情绪波动 ${Math.round(intensity * 100)}%。`)),
-    st.nuance?el('div',{class:'emotion-nuances'},...(st.feelings||[]).map(f=>el('span',{class:'mind-badge',text:f.label}))):null,
+    st.nuance?el('div',{class:'emotion-nuances'},...(st.feelings||[]).map(f=>el('span',{class:'mind-badge',text:f.label+(Number.isFinite(f.level)?` · ${Math.round(f.level*100)}%`:'')}))):null,
     el('p', { text: `回应态度：${e.stance || '正常交流'}。快变量是“现在”，心情是“今天”，底色是“长期”。情绪波动表示相对平常状态的变化，0.00 不代表没有感受。` }),
     el('p', { class:'muted small', text: e.lastCause ? `最近影响情绪的事件：${e.lastCause.kind} · ${(e.lastCause.evidence || []).join(' / ')}（${fmtWhen(e.lastCause.at)}）` : '尚无明确的情绪触发事件' }),
   )
@@ -3371,9 +3449,11 @@ function renderEmotion() {
       ? el('div', { class: 'mini-list' }, triggers.map((t) => el('div', { class: 'mini' },
           el('span', { class: 'd', text: fmtWhen(t.at) }),
           el('span', { class: 't', text: `${sourceName[t.source] || t.source || '—'}：${t.summary || '—'} · ${t.kind || '旧事件'} / ${t.target || '未知对象'} · 判断分 ${Number(t.confidence || 0).toFixed(2)}` }),
-          el('span', { class: 'r', text: `${t.label || '—'}  V${Number(t.deltaV || 0) >= 0 ? '+' : ''}${Number(t.deltaV || 0).toFixed(2)} / A${Number(t.deltaA || 0) >= 0 ? '+' : ''}${Number(t.deltaA || 0).toFixed(2)}` }),
+          el('span', { class: 'r', text: `${t.displayLabel || t.label || '—'} · 本轮变化 V${Number(t.deltaV || 0) >= 0 ? '+' : ''}${Number(t.deltaV || 0).toFixed(3)} / A${Number(t.deltaA || 0) >= 0 ? '+' : ''}${Number(t.deltaA || 0).toFixed(3)}` }),
+          t.feelings?.length?el('span',{class:'small muted',text:'本轮采用的细微感受：'+t.feelings.map(f=>f.label+(f.action==='settle'?'（收束）':'')).join('、')}):null,
         )))
       : el('div', { class: 'empty', text: '还没有触发。等她收到第一条有情绪的话。' }),
+    el('p',{class:'note',text:'neutral / none 表示没有明确的关系事件，不代表没有温暖、轻快等感受。V 是舒适度，A 是唤醒度；这里列的是本轮事件变化，不含此前的自然淡化。判断分是分类把握，不是心情分数。旧记录保留当时算法的结果。'}),
   )
 
   const episodeCard = el('section', { class: 'card pad' },
@@ -4737,7 +4817,7 @@ async function boot() {
 boot()
 
 // ---------------------------------------------------------------- 当前心绪
-const CONTINUITY_STATUS = {open:'进行中',paused:'暂不聊',closed:'已结束',expired:'已过期',tentative:'待验证',observed:'多次经历支持，仍可修正',rejected:'已否定',understood:'已理解事件',unavailable:'本轮使用原有处理',interrupted:'已丢弃过时理解',busy:'繁忙，保持原有处理',injected:'已交给聊天模型',rejected_delivery:'投递未接受','delivery-unknown':'投递结果未知',manual:'手动修正','reply-result':'回复结果'}
+const CONTINUITY_STATUS = {open:'进行中',paused:'暂不聊',closed:'已结束',expired:'已过期',tentative:'待验证',observed:'多次经历支持，仍可修正',rejected:'已否定',understood:'已理解事件',partial:'已复用情绪，其他更新未通过',unavailable:'本轮使用原有处理',interrupted:'已丢弃过时理解',busy:'繁忙，保持原有处理',injected:'已交给聊天模型',rejected_delivery:'投递未接受','delivery-unknown':'投递结果未知',manual:'手动修正','reply-result':'回复结果'}
 async function loadContinuity(force=false) {
   if (S.continuity.loading) return
   S.continuity.loading = true
@@ -4797,7 +4877,7 @@ function renderContinuity() {
   if(!d)return wrap
   wrap.appendChild(el('section',{class:'card pad'},
     el('label',{},el('input',{type:'checkbox',checked:d.enabled,disabled:S.continuity.loading,on:{change:e=>changeContinuity({enabled:e.target.checked})}}),' 启用连续事件理解（试验）'),
-    el('p',{class:'muted',text:'默认关闭，仅主人私聊。开启后每条符合条件的消息最多新增一次事件理解调用，成功时复用情绪判断；花费单列“事件理解”，不设每日硬上限。单次等待最多约 8 秒，失败时保持原有处理。'}),
+    el('p',{class:'muted',text:'默认关闭，仅主人私聊。开启后每条符合条件的消息最多新增一次事件理解调用，成功时复用情绪判断；花费单列“事件理解”，不设每日硬上限。单次等待最多约 12 秒，失败时保持原有处理。'}),
     !d.enabled?el('p',{text:'当前关闭：保留历史记录，但不会生成或使用挂念、认识及关系参考。'}):null,
     d.storageError?el('p',{role:'alert',text:'状态保存异常，重启后可能丢失最近变化。请检查磁盘和权限。'}):null))
   if(S.continuity.view==='visual'){

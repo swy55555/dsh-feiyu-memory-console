@@ -1,13 +1,13 @@
 // Presentation only: colours and motion describe the stored state, never update it.
 export function referenceText(r) {
-  try { const v = JSON.parse(r.text); if (typeof v.text === 'string') return v.text; if (typeof v.currentEvidence === 'string') return v.currentEvidence; } catch {}
+  try { const v = JSON.parse(r.text); if (r.type === 'interaction' && typeof v.meaning === 'string') return v.meaning; if (typeof v.text === 'string') return v.text; if (typeof v.currentEvidence === 'string') return v.currentEvidence; } catch {}
   return String(r.text || '');
 }
 
 export function mindLandscape(el, ui, types) {
   const s = ui.emotion?.state;
   const known = s && Number.isFinite(s.valence) && Number.isFinite(s.arousal);
-  const label = known ? s.nuance || s.label || '当前状态' : '等待心绪';
+  const label = known ? s.displayLabel || [s.label,s.nuance].filter(Boolean).join(' · ') || '当前状态' : '等待心绪';
   const intensity = known && Number.isFinite(s.intensity) ? Math.max(0, Math.min(1, s.intensity)) : null;
   const palette = !known ? 'unknown' : s.valence < -.12 ? (s.arousal > .55 ? 'restless' : 'quiet') : s.valence > .3 ? 'warm' : 'calm';
   const root = el('div', {class: `hub-landscape palette-${palette}`});
@@ -29,11 +29,12 @@ export function mindLandscape(el, ui, types) {
       el('p', {class:'small muted', text:'入选表示交给模型参考，不代表已经采用，也不代表事实已确认。'})
     ] : [
       el('span', {class:'eyebrow', text:'此刻的心境'}), el('h3', {text:label}),
-      el('p', {class:'hub-nuance', text:known ? s.nuance ? `整体${s.label}，此刻有一点${s.nuance}。` : '没有额外记录到的细微感受。' : '情绪数据尚未就绪，暂不推断心情。'}),
+      el('p', {class:'hub-nuance', text:known ? s.nuance ? `整体${s.label}，同时有${s.nuance}。` : '没有额外记录到的细微感受。' : '情绪数据尚未就绪，暂不推断心情。'}),
       ...(s?.feelings||[]).filter(f=>f.evidence).slice(0,2).map(f=>el('details',{},el('summary',{text:`为什么${f.label}`}),el('p',{text:f.reason||'来自当时的明确表达'}),el('p',{text:`原话：${f.evidence}`}))),
-      el('div', {class:'hub-feelings'}, ...(s?.feelings || []).slice(0,3).map(f => el('span', {class:'mind-badge', text:f.label}))),
+      el('div', {class:'hub-feelings'}, ...(s?.feelings || []).slice(0,3).map(f => el('span', {class:'mind-badge', text:f.label+(Number.isFinite(f.level)?` · ${Math.round(f.level*100)}%`:'')}))),
       el('p', {text:intensity === null ? '暂无情绪波动数据' : intensity < .01 ? '接近平常状态' : `情绪波动 ${Math.round(intensity * 100)}%`}),
-      el('p', {class:'small muted', text:'波动衡量相对平常状态的变化。接近零不代表没有感受；光晕的颜色与呼吸速度只是状态的视觉表达。'}),
+      el('p', {class:'small muted', text:'整体波动是舒适度与唤醒度偏离基线的程度；每项感受另列强度，两种感受可能相互抵消。这些是程序状态值，不是对人类感情的测量。'}),
+      el('p', {class:'small muted', text:'这里显示供回复参考的状态，不是从已发送的文字反推情绪。'+(selected.some(r=>r.type==='emotion')?'本轮表达基调已选入参考；是否表现出来仍取决于聊天模型。':ui.data.workspace.stale?'上轮参考已过期，暂不能核对本轮使用情况。':'本轮尚未选入表达基调。')}),
       el('details', {}, el('summary', {text:'查看状态数值'}), el('p', {class:'small', text:known ? `情绪波动 ${intensity === null ? '未知' : intensity.toFixed(2)} · 舒适度 ${s.valence.toFixed(2)} · 唤醒度 ${s.arousal.toFixed(2)}` : '暂无数值'})),
       el('p', {class:'small muted', text:selected.length ? '点选光晕旁的线索，查看内容与来源。' : ui.data.workspace.stale ? '上轮参考已过期，等待新的主人私聊。' : '暂无本轮参考，等待新的主人私聊。'})
     ]));

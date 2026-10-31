@@ -5,8 +5,15 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.10.0";
+export const RUNTIME_VERSION = "0.10.1";
 const templates = {
+  "growth-classroom.mjs": "growth-classroom.mjs",
+  "sharing-privacy.mjs": "sharing-privacy.mjs",
+  "emotion-scopes.mjs": "emotion-scopes.mjs",
+  "style-distillation.mjs": "@retired",
+  "expression-teacher.mjs": "expression-teacher.mjs",
+  "interaction-context.mjs": "interaction-context.mjs",
+  "onboarding.mjs": "onboarding.mjs",
   "self-temperament.mjs": "self-temperament.mjs",
   "xinji-console.html": "xinji-console.html",
   "self-reference.mjs": "self-reference.mjs",
@@ -86,8 +93,8 @@ export function installRuntime(
   if (mcpManaged || (mcpBytes && hasRetiredTools(mcpBytes.toString('utf8')))) files['mcp-snowluma-safe.js'] = '@mcp';
   if (mcpManaged && (!mcpBytes || digest(mcpBytes) !== previous.files['mcp-snowluma-safe.js'].afterHash)) throw Error('安装后 QQ MCP 有修改，未覆盖');
   const migratedMcp = mode === 'undo' ? null : (files['mcp-snowluma-safe.js'] ? retireLexiconTools(mcpBytes) : null);
-  const sourceBytes = source => source === '@mcp' ? migratedMcp : fs.readFileSync(path.join(here, source));
-  const normalizedSourceHash = source => digest(sourceBytes(source).toString('utf8').replace(/^\uFEFF/, '').replaceAll('\r\n', '\n'));
+  const sourceBytes = source => source === '@retired' ? null : source === '@mcp' ? migratedMcp : fs.readFileSync(path.join(here, source));
+  const normalizedSourceHash = source => source === '@retired' ? null : digest(sourceBytes(source).toString('utf8').replace(/^\uFEFF/, '').replaceAll('\r\n', '\n'));
 
   const rawHash = (file) =>
     fs.existsSync(file) ? digest(fs.readFileSync(file)) : null;
@@ -120,7 +127,7 @@ export function installRuntime(
       const file = path.join(src, name),
         record = previous.files[name];
       if (record.existed) fs.copyFileSync(path.join(backup, name), file);
-      else fs.unlinkSync(file);
+      else if(fs.existsSync(file)) fs.unlinkSync(file);
     }
     if (previous.hadReceipt) fs.copyFileSync(oldReceipt, receiptPath);
     else fs.unlinkSync(receiptPath);
@@ -128,6 +135,7 @@ export function installRuntime(
   }
   const identical = Object.entries(files).every(([name, source]) => {
     try {
+      if(source==='@retired')return !fs.existsSync(path.join(src,name));
       return (
         sourceHash(path.join(src, name)) === normalizedSourceHash(source)
       );
@@ -163,7 +171,7 @@ export function installRuntime(
       throw Error(`辅助模块 ${name} 存在未知修改，未覆盖`);
   }
   for (const source of Object.values(files)) {
-    if (source.endsWith(".html")) continue;
+    if (source.endsWith(".html")||source==='@retired') continue;
     const check = spawnSync(
       process.execPath,
       ["--input-type=module", "--check"],
@@ -198,7 +206,7 @@ export function installRuntime(
     result.files[name] = {
       existed,
       beforeHash: rawHash(file),
-      afterHash: digest(sourceBytes(source)),
+      afterHash: source==='@retired'?null:digest(sourceBytes(source)),
     };
     if (existed) fs.copyFileSync(file, path.join(backup, name));
   }
@@ -206,8 +214,8 @@ export function installRuntime(
     for (const [name, source] of Object.entries(files)) {
       const file = path.join(src, name),
         staged = `${file}.bundle-stage`;
-      fs.writeFileSync(staged, sourceBytes(source));
-      fs.renameSync(staged, file);
+      if(source==='@retired'){if(fs.existsSync(file))fs.unlinkSync(file);}
+      else {fs.writeFileSync(staged, sourceBytes(source));fs.renameSync(staged, file);}
       if (rawHash(file) !== result.files[name].afterHash)
         throw Error("安装写入校验失败");
     }

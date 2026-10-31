@@ -1,6 +1,6 @@
 {
   "name": "dsh-feiyu-memory-console",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "private": false,
   "description": "心迹：基于经历、可塑记忆与当前心绪的陪伴系统，保留 QQ 通信和二代仿真兼容能力。",
   "license": "MIT",
@@ -27,6 +27,8 @@
     "simulate:mind": "node scripts/simulate-mind.mjs",
     "test:browser:mind": "node test/mind-browser.test.mjs",
     "test:browser:light": "node test/light-browser.test.mjs",
+    "test:browser:xinji": "node test/xinji-console-browser.test.mjs",
+    "test:browser:onboarding": "node test/onboarding-browser.test.mjs",
     "simulate:everyday": "node scripts/simulate-everyday.mjs",
     "check:engine": "node bridge/xinji-engine.mjs --check"
   },
@@ -58,8 +60,8 @@
     "LICENSE",
     "test",
     "UPGRADE.md",
-    "manual/USER_GUIDE-0.10.0.md",
-    "manual/USER_GUIDE-0.10.0.pdf"
+    "manual/USER_GUIDE-0.10.1.md",
+    "manual/USER_GUIDE-0.10.1.pdf"
   ],
   "dsh": {
     "bundle": {

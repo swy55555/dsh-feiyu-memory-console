@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import {ReviewMemo,reviewConfirmation,combinedReviewPrompt} from '../bridge/confirmation-review.mjs';
 import {advanceConfirmation} from '../lib/confirmation-flow.js';
 import {CandidateAuto,reviewSetFingerprint} from '../lib/candidate-auto.js';
+test('non-reusable results can coalesce in flight but are not returned on a later retry',async()=>{
+ const memo=new ReviewMemo();let calls=0;
+ const run=async()=>{calls++;return {status:'uncertain'}};
+ await Promise.all([memo.get('coverage',{key:'private:1'},'low',run,()=>false),memo.get('coverage',{key:'private:1'},'low',run,()=>false)]);
+ assert.equal(calls,1);await memo.get('coverage',{key:'private:1'},'low',run,()=>false);assert.equal(calls,2);
+});
 const context={scope:'private:1',revision:'r1',operation:'confirm',offset:0,total:1,evidenceOnly:false,
  candidate:{id:'c',text:'我喜欢茶',quote:'我喜欢茶'},related:[{id:'a',text:'我喜欢小笼包',quote:'我喜欢小笼包'}],
  evidence:{id:'c',text:'我喜欢茶',quote:'他说喜欢咖啡，但我喜欢茶',sourceId:'m1',subjectId:'1'}};
@@ -74,6 +80,17 @@ test('negative evidence and disabled in-flight checks never confirm or overwrite
  deps.combined=async()=>{enabled=false;return result};await assert.rejects(advanceConfirmation(prepared,deps),/关闭/);assert.equal(saved,1);
 });
 
+test('complete but uncertain or conflicting reviews stop before confirmation, including cached reviews',async()=>{
+ for(const reason of ['3 条关系尚不确定','1 条关系存在矛盾']){
+  let calls=0,confirms=0;
+  const automatic={status:'manual',dependency:'relations',reason};
+  const deps={valid:()=>true,combined:async()=>{calls++;return result},facts:async()=>{throw Error('duplicate')},save:async()=>({pending:false,automatic}),confirm:async()=>{confirms++;throw Error('must not submit')}};
+  assert.deepEqual(await advanceConfirmation(prepared,deps),{status:'manual',dependency:'relations',reason});
+  assert.deepEqual(await advanceConfirmation({...prepared,needed:false,evidenceVerdict:verdict,automatic},deps),{status:'manual',dependency:'relations',reason});
+  assert.equal(calls,1);assert.equal(confirms,0);
+ }
+});
+
 test('related fact changes wake a previously blocked candidate; retrieval counters do not',async()=>{
  const peer={id:'a',text:'旧事实',source_text:'原话',scope:'private:1',subject_id:'1',access_count:1};
  assert.equal(reviewSetFingerprint([peer]),reviewSetFingerprint([{...peer,access_count:50,last_access:100}]));
@@ -90,4 +107,13 @@ test('unsupported original evidence is not retried just because unrelated memory
  const w=new CandidateAuto({load:()=>({enabled:true}),save:()=>{},list:async()=>[row],step:async()=>{calls++;return{status:'manual',dependency:'source'}}});
  await w.tick();row={...row,review_context_version:'v2'};await w.tick();assert.equal(calls,1);
  row={...row,source_text:'新的完整原话'};await w.tick();assert.equal(calls,2);
+});
+
+test('a partial review with a blocker pauses automatic work without claiming remaining facts are safe',async()=>{
+ let calls=0,commits=0;
+ const automatic={status:'manual',dependency:'relations',reason:'已复核 8/100 条；1 条关系尚不确定'};
+ const deps={valid:()=>true,combined:async()=>{calls++;return result},facts:async()=>{throw Error('must not review more')},save:async()=>({pending:true,reviewed:8,total:100,automatic}),confirm:async()=>commits++};
+ assert.equal((await advanceConfirmation(prepared,deps)).status,'manual');
+ assert.equal((await advanceConfirmation({...prepared,needed:true,evidenceVerdict:verdict,automatic},deps)).status,'manual');
+ assert.equal(calls,1);assert.equal(commits,0);
 });

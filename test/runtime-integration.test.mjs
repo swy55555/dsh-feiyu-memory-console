@@ -1,3 +1,4 @@
+import {EmotionScopes,emotionScope} from '../bridge/emotion-scopes.mjs';
 import os from "node:os";
 import path from "node:path";
 import { appraisalContext } from "../bridge/emotion-context.mjs";
@@ -13,6 +14,7 @@ import { TurnTraces } from "../bridge/turn-traces.mjs";
 import {backgroundEffort,runBoundedHeadless} from '../bridge/background-reasoning.mjs';
 import {featureKey} from '../bridge/usage-features.mjs';
 import {createTokenLedger} from '../bridge/feature-token-ledger.mjs';
+function bindScopes(ctx){const lanes=new EmotionScopes({ownerKey:'private:1',legacy:ctx.emotionState});ctx.emotionScope=emotionScope;ctx.emotionLanes=lanes;ctx.commitEmotionLane=(k,s)=>{lanes.set(k,s);ctx.emotionState=lanes.owner()};}
 const source = fs.readFileSync(
   new URL("../bridge/bridge-v09.js", import.meta.url),
   "utf8",
@@ -176,6 +178,26 @@ test("actual withMemoryContext records only selected rows with subject and assoc
   assert.equal(traces[0].injected.find((r) => r.id === "good").tags, "food");
 });
 
+test('actual recall prepares privacy before shared search and only gives owner requested summaries',async()=>{
+ for(const key of ['private:1','private:2','group:9'])for(const asked of [true,false]){
+  const order=[],body='你刚才在群里聊了什么';
+  const ctx=vm.createContext({...human,crypto,AbortSignal,
+   cfg:{ownerQQ:'1',socialV2:{humanContext:{enabled:true},memoryShare:{enabled:true},context:{enabled:false}}},
+   recordRetrievalTrace:()=>{},noteSessionTurn:()=>{},scheduleRotationCheck:()=>{},
+   dailyMemorySubjects:new Map([[key,'1']]),dailyRecallQueries:new Map([[key,'1 '+body]]),
+   getSocialV2State:()=>({}),memoryScope:k=>k,log:()=>{},recallQuery:()=>'',
+   fetch:async()=>({ok:true,json:async()=>({results:[]})}),
+   sharingPrivacy:{prepare:async(scope,query,opts)=>{order.push('privacy');assert.equal(opts.includeSummaries,key==='private:1'&&asked);return {summaries:opts.includeSummaries?[{id:'recap',scope:'group:7',text:'聊了种花。',participated:true}]:[]}}},
+   memoryRequest:async route=>{order.push(route);return {results:[]}},
+  });
+  const fn=vm.runInContext(between('  async function withMemoryContext(','  const dailyRecallQueries')+';withMemoryContext',ctx);
+  const text=await fn(key,body,{conversationRecall:asked});
+  assert.equal(text.includes('聊了种花。'),key==='private:1'&&asked);
+  assert.ok(order.indexOf('privacy')<order.indexOf('/search'));
+  if(key==='private:1'&&asked)assert.match(text,/可自行选择讲述、简述或不谈/);
+ }
+});
+
 test("actual noteEmotion/refinement replaces scores once and ignores a late response", async (t) => {
   const quotaDir = fs.mkdtempSync(path.join(os.tmpdir(), "feiyu-quota-"));
   t.after(() => {
@@ -206,6 +228,7 @@ test("actual noteEmotion/refinement replaces scores once and ignores a late resp
     log: () => {},
     runHeadlessPrompt: () => new Promise((r) => (resolveModel = r)),
   });
+  bindScopes(ctx);
   vm.runInContext(
     between("  function noteEmotion(", "  const emotionTimer ="),
     ctx,
@@ -300,6 +323,7 @@ test("actual model gate reviews ordinary owner messages, reuses semantic results
       throw Error("timeout");
     },
   });
+  bindScopes(ctx);
   vm.runInContext(
     between("  function noteEmotion(", "  const emotionTimer ="),
     ctx,

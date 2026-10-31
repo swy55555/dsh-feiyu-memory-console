@@ -1,6 +1,10 @@
 // Stable ledger keys: attribution is persisted with usage, never inferred from prompts.
 export const PLUGIN_PREFIX = 'internal:可塑性记忆';
 export const FEATURE_LABELS = Object.freeze({
+  style_distillation: '旧文风蒸馏（已停用）',
+  expression_teacher: '旧表达教师（已停用）',
+  growth_classroom: '成长课堂',
+  memory_privacy: '共享隐私判断',
   memory_extract: '记忆提取', coverage_check: '提取查漏', fact_review: '事实复核',
   confirmation_review: '确认联合复核',
   event_understanding: '事件理解', candidate_review: '候选核对',

@@ -10,13 +10,15 @@ try{
  let available=true; let emotion={state:{label:'平静',valence:.12,arousal:.32,intensity:0,nuance:'',feelings:[]}};const patterns=new ResponsePatterns({allowed:()=>true,enabled:()=>true});
  const quote='今天的回答简短清楚 <img src=x onerror=alert(1)>';
  patterns.observe('private:1',[{strategy:'concise_first',outcome:'helpful',experienceId:'',evidenceKind:'new',quote,confidence:.99}],{id:'demo',at:Date.now(),original:quote,source:'user'});
+ patterns.adjust('private:1',[{kind:'response_style',instruction:'请简短一点 <img src=x onerror=alert(1)>',quote,explicit:true,confidence:.95}],{id:'request-demo',at:Date.now(),original:quote,source:'user'});
  const data={ok:true,workspace:{enabled:true,budgetChars:2400,maxItems:5,usedChars:520,selected:[{id:'demo',type:'concern',text:'明天面试，想先把路线确认好（演示）',reason:'本轮语义理解选中，尚未结束',evidenceIds:['m1']},{id:'m2',type:'emotion',text:'有一点牵挂，但不替用户下结论',reason:'来自本轮明确表达'}],deferred:[{id:'idea',type:'association',text:'周末阅读的话题',reason:'与本轮关联不足'}]},learningConfigured:false,continuityEnabled:false,patterns:patterns.view('private:1')};
+ Object.assign(data,{teacherConfigured:false,teacherModel:{model:'test-teacher',effort:'low'},teacher:{enabled:false,rounds:2,queueCount:0,lessons:[],audit:[]}});
  await page.route('**/api/**',async route=>{
   const url=new URL(route.request().url()).pathname.replace(/^.*\/api/,'');let body={ok:true};
   if(url==='/version')body={ok:true,version:'0.9.1'};
   else if(url==='/overview')body={ok:true,total:0,active:0,scopes:[],recent:[],fading:[],health:{ok:true,capabilities:['emotion','persona','mind-workspace'],bridge:{ok:true}}};
   else if(url==='/emotion')body={ok:true,emotion};
-  else if(url==='/continuity')body={ok:true,enabled:false,concerns:[],beliefs:[],events:[]};
+  else if(url==='/continuity')body={ok:true,enabled:false,concerns:[],beliefs:[],events:[{id:'interaction',at:Date.now(),status:'understood',summary:'依据双方原话理解本轮反馈',contextMessages:2,interaction:{meaning:'用户希望这次回应更具体',boundary:'pause',contextEvidence:[{role:'assistant',quote:'刚才的回应 <img src=x onerror=alert(1)>'}]}}]};
   else if(url==='/mind'){
    if(!available){await route.fulfill({status:503,contentType:'application/json',body:'{"ok":false,"error":"offline"}'});return;}
    if(route.request().method()==='POST'){const b=route.request().postDataJSON();posts.push(b);if(typeof b.enabled==='boolean')data.workspace.enabled=b.enabled;else if(typeof b.learningEnabled==='boolean')data.learningConfigured=b.learningEnabled;else data.patterns=patterns.edit('private:1',b);}
@@ -25,9 +27,20 @@ try{
   await route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
  });
  await page.goto(`http://127.0.0.1:${server.address().port}/#/continuity`);await page.locator('.hub-landscape').waitFor();
+ assert.equal(await page.locator('a[href="#/classroom"]').count(),1);
+ assert.equal(await page.getByRole('button',{name:'成长课堂',exact:true}).count(),1);
+ assert.equal(posts.length,0);
+ await page.getByText('本轮交流理解（可修正）',{exact:true}).click();
+ await page.getByText('用户希望这次回应更具体',{exact:true}).waitFor();
+ assert.ok(await page.getByText(/角色：刚才的回应 <img/).isVisible());
+ assert.equal(await page.locator('main img').count(),0);
  await page.getByText('中枢设置',{exact:true}).click();
  await page.getByLabel('从明确反馈学习回应倾向（试验）').check();await page.getByText(/学习开关已保存/).waitFor();assert.deepEqual(posts[0],{learningEnabled:true});
  await page.getByText('回应习惯 · 从明确反馈中学习',{exact:true}).click();
+ await page.locator('.hub-adjustment').getByText('当前明确的表达要求',{exact:true}).waitFor();
+ await page.getByText('短期尝试：尚未形成习惯',{exact:true}).waitFor();
+ assert.equal(await page.locator('.hub-adjustment img').count(),0);
+ await page.getByRole('button',{name:'撤销这条表达要求',exact:true}).click();await page.locator('.hub-adjustment').waitFor({state:'detached'});
  const strategy=page.locator('.hub-strategy').filter({has:page.getByRole('heading',{name:'先简短，再按需展开'})});
  await strategy.getByText('查看反馈依据（1）',{exact:true}).click();assert.equal(await page.locator('main img').count(),0);
  await strategy.getByRole('button',{name:'撤销这条反馈',exact:true}).click();await strategy.getByText('查看反馈依据（1）',{exact:true}).click();await strategy.getByText(/已撤销/).waitFor();

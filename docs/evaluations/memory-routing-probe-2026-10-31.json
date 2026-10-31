@@ -1,0 +1,106 @@
+{
+  "kind": "synthetic adversarial retrieval smoke test",
+  "paidModelCalls": 0,
+  "model": "BAAI/bge-small-zh-v1.5",
+  "cases": [
+    {
+      "candidate": "我现在不吃任何肉。",
+      "knownConflict": "我现在每周都会吃牛肉。",
+      "conflictRank": 1,
+      "cosine": 0.6823,
+      "top8FindsConflict": true,
+      "threshold035FindsConflict": true
+    },
+    {
+      "candidate": "我现在每个周末都休息，不用上班。",
+      "knownConflict": "我现在每周六都要值班。",
+      "conflictRank": 1,
+      "cosine": 0.7702,
+      "top8FindsConflict": true,
+      "threshold035FindsConflict": true
+    },
+    {
+      "candidate": "我没有兄弟姐妹。",
+      "knownConflict": "我有一个亲妹妹。",
+      "conflictRank": 1,
+      "cosine": 0.7548,
+      "top8FindsConflict": true,
+      "threshold035FindsConflict": true
+    },
+    {
+      "candidate": "我从来没养过任何宠物。",
+      "knownConflict": "我小时候养过一只鹦鹉。",
+      "conflictRank": 1,
+      "cosine": 0.6078,
+      "top8FindsConflict": true,
+      "threshold035FindsConflict": true
+    },
+    {
+      "candidate": "我现在住的房子里只有我一个人。",
+      "knownConflict": "我现在和室友一起住在同一套房子里。",
+      "conflictRank": 1,
+      "cosine": 0.7241,
+      "top8FindsConflict": true,
+      "threshold035FindsConflict": true
+    },
+    {
+      "candidate": "我现在每天都在家吃早饭。",
+      "knownConflict": "我现在每周一都在公司吃早饭。",
+      "conflictRank": 1,
+      "cosine": 0.8567,
+      "top8FindsConflict": true,
+      "threshold035FindsConflict": true
+    },
+    {
+      "candidate": "我现在不喝任何含咖啡因的饮料。",
+      "knownConflict": "我现在每天都喝含咖啡因的美式咖啡。",
+      "conflictRank": 20,
+      "cosine": 0.717,
+      "top8FindsConflict": false,
+      "threshold035FindsConflict": true
+    },
+    {
+      "candidate": "我现在没有任何需要偿还的借款。",
+      "knownConflict": "我现在还有一笔没还清的房贷。",
+      "conflictRank": 1,
+      "cosine": 0.7021,
+      "top8FindsConflict": true,
+      "threshold035FindsConflict": true
+    },
+    {
+      "candidate": "我从未出过国。",
+      "knownConflict": "我去年去过日本。",
+      "conflictRank": 3,
+      "cosine": 0.5441,
+      "top8FindsConflict": true,
+      "threshold035FindsConflict": true
+    },
+    {
+      "candidate": "我现在不会弹任何乐器。",
+      "knownConflict": "我现在会弹钢琴。",
+      "conflictRank": 1,
+      "cosine": 0.7759,
+      "top8FindsConflict": true,
+      "threshold035FindsConflict": true
+    },
+    {
+      "candidate": "我现在所有鞋子都是黑色的。",
+      "knownConflict": "我现在有一双白色运动鞋。",
+      "conflictRank": 1,
+      "cosine": 0.7241,
+      "top8FindsConflict": true,
+      "threshold035FindsConflict": true
+    },
+    {
+      "candidate": "我现在只用安卓手机，没有别的手机。",
+      "knownConflict": "我现在还在用一台苹果手机。",
+      "conflictRank": 1,
+      "cosine": 0.7282,
+      "top8FindsConflict": true,
+      "threshold035FindsConflict": true
+    }
+  ],
+  "top8Misses": 1,
+  "threshold035Misses": 0,
+  "productionPruningEnabled": false
+}

@@ -129,8 +129,15 @@ try {
   assert.equal(autoContext.data.evidence.quote,'我喜欢散步')
   assert.equal((await json(`${realService}/confirm`,{scope:'private:40004',id:autoId,autoRevision:'stale'})).status,409)
   const automaticArgs={scope:'private:40004',id:autoId,automatic:true,autoRevision:autoContext.data.context.revision}
-  await assert.rejects(core.memoryAction('confirm',{...automaticArgs,isStillAllowed:()=>false}),e=>e.status===409)
-  await assert.rejects(core.memoryAction('confirm',{...automaticArgs,isStillAllowed:()=>true}),e=>e.status===409)
+  const originalFetch=globalThis.fetch,automaticRequests=[]
+  globalThis.fetch=(url,...args)=>{automaticRequests.push(String(url));return originalFetch(url,...args)}
+  try{
+    await assert.rejects(core.memoryAction('confirm',{...automaticArgs,isStillAllowed:()=>false}),e=>e.status===409)
+    await assert.rejects(core.memoryAction('confirm',{...automaticArgs,isStillAllowed:()=>true}),e=>e.status===409)
+  }finally{globalThis.fetch=originalFetch}
+  assert.equal(automaticRequests.some(url=>/confirmation-review|fact-review|confirm\/context/.test(url)),false)
+  const deferred=(await (await fetch(`${api}/api/audit`)).json()).entries.find(e=>e.target?.id===autoId)
+  assert.equal(deferred.status,'deferred');assert.equal(deferred.undoable,false)
   const proof={id:autoId,revision:autoContext.data.context.revision,evidence:autoContext.data.evidence.quote,supported:true,speakerMatches:true,literal:true,current:true,confidence:.99,reason:'测试原话完整支持'}
   assert.equal((await json(`${realService}/confirm/review`,{scope:'private:40004',id:autoId,operation:'confirm',offset:0,evidenceOnly:true,review:{revision:proof.revision,candidateEvidence:autoContext.data.context.candidate.quote,relations:[],evidenceVerdict:proof}})).status,200)
   const autoResult=await core.memoryAction('confirm',{...automaticArgs,isStillAllowed:()=>true})

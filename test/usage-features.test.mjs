@@ -7,6 +7,7 @@ import {createTokenLedger} from '../bridge/feature-token-ledger.mjs';
 import {featureKey} from '../bridge/usage-features.mjs';
 import {classifyHistory, readSession} from '../scripts/audit-usage-history.mjs';
 import zlib from 'node:zlib';
+import {DEFAULT_PRICE_TABLE,priceUsage} from '../bridge/feature-model-prices.mjs';
 
 function fixture(t, options={}) {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'feiyu-usage-'));
@@ -19,6 +20,29 @@ function fixture(t, options={}) {
   };
   return {ledger,add,file,at,keys};
 }
+
+test('rotation input uses latest individual request, survives reload and never sums session history',t=>{
+ const f=fixture(t);f.add('s','private:1',f.at-500,100000,1);f.add('s','private:1',f.at,200,2);
+ assert.equal(f.ledger.latestInputTokens('s'),200);assert.equal(f.ledger.latestInputTokens('missing'),0);
+ assert.equal(createTokenLedger({file:f.file}).latestInputTokens('s'),200);
+ f.ledger.ingestEvent({sessionId:'s',event:{type:'assistant/message',seq:3,time:f.at+100,data:{turn:2,step:1,usage:{inputTokens:500,cacheReadTokens:99000,outputTokens:700}}}});
+ assert.equal(f.ledger.latestInputTokens('s'),99500);
+});
+
+test('reconnect baseline preserves known peak prices and only estimates unknown remainder',t=>{
+ const table={...DEFAULT_PRICE_TABLE,peakWeekdays:[0,1,2,3,4,5,6],peakWindows:[[9,10]],peakMultiplier:3,holidays:[]};
+ const f=fixture(t,{priceTable:table}),peak=Date.parse('2026-10-30T01:00:00Z'),off=Date.parse('2026-10-30T02:00:00Z');
+ f.add('s','private:1',peak,10000,1);
+ const known=f.ledger.summary().totals.cost;
+ f.ledger.ingestBaseline({sessionId:'s',projection:{asOfSeq:1,values:{tokenUsage:{cacheMiss:10000,output:20,reasoning:10}}},at:off});
+ assert.ok(Math.abs(f.ledger.summary().totals.cost-known)<1e-12);
+ f.ledger.ingestBaseline({sessionId:'s',projection:{asOfSeq:2,values:{tokenUsage:{cacheMiss:11000,output:20,reasoning:10}}},at:off});
+ const totals=f.ledger.summary().totals,expected=known+priceUsage({cacheMiss:1000},{at:off,table}).cost.total;
+ assert.ok(Math.abs(totals.cost-expected)<1e-12);assert.ok(Math.abs(totals.cost-totals.attributedCost-totals.unattributedCost)<1e-12);
+ const series=f.ledger.series({hours:24});assert.ok(Math.abs(series.totals.cost+series.offChartCost-expected)<1e-12);
+ const reloaded=createTokenLedger({file:f.file,priceTable:table,now:()=>f.at}).summary().totals;
+ assert.ok(Math.abs(reloaded.cost-expected)<1e-12);assert.equal(reloaded.totalTokens,totals.totalTokens);
+});
 test('all feature totals survive conversation pagination and restart; reasoning is not counted twice',t=>{
   const f=fixture(t);
   for(let i=0;i<70;i++) f.add(`chat-${i}`,`private:${i}`,undefined,10000);
