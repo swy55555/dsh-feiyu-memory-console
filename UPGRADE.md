@@ -1,6 +1,8 @@
 # 心迹 0.10.1 升级与回退
 
-适用于已经运行 DSH、QQ/SnowLuma、QQ 桥接和独立记忆服务的环境。本包不是完整 QQ 客户端或 DSH 安装器。心迹接管入口和成长逻辑，通信与二代调度继续使用 QQ 兼容适配层。
+适用于已经运行 DSH、QQ/SnowLuma、心迹桥接和独立记忆服务的环境，也包含从已知原 QQ 桥接版本迁移的步骤。本包不是完整 QQ 客户端或 DSH 安装器。当前运行产品是心迹桥接，通信与二代调度保留原 QQ 桥接兼容适配层；无需另外并行启动旧桥接。
+
+文档修订：2026-10-31，docs.1。仅澄清产品名称和路径，不改变 v0.10.1 安装包、功能或配置。`qq-bridge` 是沿用的真实目录名，下面的命令保持它；不要直接改名，也不要用发布者路径替换自己的路径。
 
 ## 1. 下载与核验
 
@@ -14,7 +16,7 @@ Get-FileHash -Algorithm SHA256 .\dsh-feiyu-memory-console-0.10.1.tgz
 
 ## 2. 停止并备份
 
-停止 DSH、QQ 桥接及其守护进程、独立记忆服务；确认实际监听端口与进程，不按名称批量结束所有 Node/Python。
+停止 DSH、心迹桥接及其守护进程、独立记忆服务；从旧版迁移时停止原 QQ 桥接进程。确认实际监听端口与进程，不按名称批量结束所有 Node/Python。
 
 备份插件目录、实际 memvec/server.py、SQLite 数据库及 WAL/SHM、桥接 src/public/config/state/roles/owner-contact.json、聊天预设源文件与生成文件、控制台数据目录、.runtime-backups 与 runtime-bundle.json。在线数据库应使用 SQLite backup；只复制正在运行的 .db 不可靠。不要用发布包替换个人配置和数据库。
 
