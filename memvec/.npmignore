@@ -1,6 +1,11 @@
 __pycache__/
+**/__pycache__/**
 *.pyc
-*.db
-*.db-wal
-*.db-shm
+**/*.pyc
+.venv/
 hfcache/
+*.db
+*.db-*
+*.sqlite
+*.log
+review-scope.txt
