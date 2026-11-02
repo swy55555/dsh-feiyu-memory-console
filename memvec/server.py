@@ -1620,9 +1620,6 @@ def _lexical_score(query: str, text: str) -> tuple[float, bool]:
     return min(1.0, overlap), phrase
 
 
-DEDUPE_SIM = 0.95
-
-
 def _share_hash(row):
     # Authorization covers this precise fact/version, not future edits or its
     # entire conversation. A later correction requires a new grant.
@@ -1877,22 +1874,16 @@ def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: f
             scored.append((score, rp, float(sim), imp_factor, r, lex))
         scored.sort(key=lambda x: -x[0])
         out = []
-        kept_bodies = set()
-        kept_vecs = []
+        kept_evidence = set()
         for score, rp, sim, imp_factor, r, lex in scored:
             if score < min_score:
                 continue
-            # 同一条正文只保留最高分的一条，避免“10月1日去广场/10月2日去广场”占满 top-k。
-            parsed = _parse_event(r[1])
-            body = parsed[2] if parsed else MERGE_NORM.sub('', r[1] or '')
-            if body and body in kept_bodies:
+            # Similar vectors do not establish equivalent facts. Keep negation,
+            # punctuation, dates, subjects and distinct provenance intact.
+            evidence = (r[3], r[14], r[17], r[10], (r[1] or '').strip(), r[11], r[12], r[13])
+            if r[11] and evidence in kept_evidence:
                 continue
-            vec = np.frombuffer(r[9], dtype=np.float32)
-            if any(float(vec @ kv) >= DEDUPE_SIM for kv in kept_vecs):
-                continue
-            if body:
-                kept_bodies.add(body)
-            kept_vecs.append(vec)
+            kept_evidence.add(evidence)
             out.append({
                 "id": r[0], "text": r[1], "tags": r[2], "scope": r[3], "memory_kind": r[17],
                 'shareAuthorizedFor': scope if r[3] != scope else '',

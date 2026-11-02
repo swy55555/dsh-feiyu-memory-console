@@ -73,6 +73,7 @@ export function buildHumanContext({ key, subjectId = '', currentMessage = '', pr
       const hasSource = Boolean(r.evidence?.sourceId || r.source_id);
       const sourceAt = hasSource ? time(r.evidence?.sourceTime, true) || time(r.source_time) : null;
       byId.set(r.id, { id: r.id, memory_kind: r.memory_kind || 'fact', scope, who, subject_id: who, tags: r.tags || '', shared: r.shared === true, text, tier, score, related: !isPriority, associated: r.associated === true, kind: r.associated ? 'associated' : isPriority ? 'priority' : r.shared ? 'shared' : 'search',
+        sourceId: r.evidence?.sourceId || r.source_id || '',
         at: sourceAt || time(r.created_at), timeBasis: sourceAt ? 'source' : 'stored', sourceQuote: r.sourceQuote, sourceContext: r.sourceContext, sourceContextStatus: r.sourceContextStatus });
     }
   }
@@ -88,7 +89,10 @@ export function buildHumanContext({ key, subjectId = '', currentMessage = '', pr
   const prefix = RESPONSE_GUIDANCE + MEMORY_GUIDANCE;
   let used = prefix.length + 1;
   for (const r of candidates) {
-    const identity = JSON.stringify([r.scope, r.who, r.text]);
+    // Exact wording can refer to different events (e.g. "tomorrow"). Without
+    // provenance, only the same record ID establishes a duplicate.
+    const identity = JSON.stringify([r.scope, r.who, r.text, r.memory_kind,
+      r.sourceId || r.id, r.at, r.timeBasis, r.sourceQuote, r.sourceContext]);
     if (seen.has(r.id) || contentSeen.has(identity) || (r.tier === 'task' && tasks >= 1)) continue;
     const line = JSON.stringify({ id: r.id, scope: r.scope, who: r.who || 'unknown',
       at: r.at, timeBasis: r.timeBasis, sourceQuote:r.sourceQuote, sourceContext:r.sourceContext, sourceContextStatus:r.sourceContextStatus,

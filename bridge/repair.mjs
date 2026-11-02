@@ -1,15 +1,16 @@
-// 修复：识别对方在纠正，生成“先认错再更正”的提示，并记录教训。
-export const REPAIR_CUES = ['不是', '不对', '记错', '搞错', '我说的是', '并没有', '你弄错', '反了', '错了吧'];
-
-export function detectCorrection(text) {
+// Reuse validated current-turn understanding; keywords alone do not establish an error.
+export function detectCorrection(text, interaction = null) {
   const s = String(text || '').trim();
-  if (!s || s.length > 300) return { isCorrection: false, cue: '' };
-  const cue = REPAIR_CUES.find((c) => s.includes(c)) || '';
-  return { isCorrection: Boolean(cue), cue };
+  const quote = typeof interaction?.quote === 'string' ? interaction.quote.trim() : '';
+  const valid = !!s && !!quote && s.includes(quote) && interaction?.focus === 'repair'
+    && interaction.feedbackTarget === 'claim' && Number.isFinite(interaction.confidence)
+    && interaction.confidence >= .65 && interaction.confidence <= 1
+    && Array.isArray(interaction.contextEvidence) && interaction.contextEvidence.some(r => r.role === 'assistant' && r.id && r.quote);
+  return { isCorrection: valid, cue: valid ? quote : '' };
 }
 
-export function repairHint({ cue = '', text = '' } = {}) {
-  return `\n【更正】对方在纠正你（线索：${cue || '语气'}）。先直接承认可能记错了，再按对方说的改；不要把旧说法继续当事实，也不要辩解。\n`;
+export function repairHint({ isCorrection = false } = {}) {
+  return isCorrection ? '\n【更正】本轮理解提示对方可能在纠正先前说法。核对当前原话与被指出的旧说法；确认有误再承认并更正，有效的当前澄清优先。信息不足时保留不确定，不自动认错，也不把旧说法继续当事实。\n' : '';
 }
 
 export function normalizeRepairs(raw) {

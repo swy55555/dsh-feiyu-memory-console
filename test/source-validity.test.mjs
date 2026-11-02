@@ -44,3 +44,15 @@ test('self-reference consolidation skips withdrawn queued inputs and discards pe
  f.undo('e1');const job=s.consolidate({force:true});f.revoke('e1');finish('{"changes":[]}');assert.deepEqual(await job,{skipped:true});assert.equal(s.state.claims.length,0);assert.equal(s.state.queue.length,1);
  }finally{f.close()}
 });
+
+test('completed interaction cannot be reused after its source is withdrawn; history remains intact',async()=>{
+ const f=fixture();try{
+ const c=new Continuity({enabled:()=>true,allowed:()=>true,sourceBlocked:(k,r)=>f.v.blocked(k,r),sourceRevision:()=>f.v.revision(),
+  generate:async()=>JSON.stringify({...neutral(),interaction:{intent:'request',focus:'answer',boundary:'none',confidence:.95,meaning:'解释这道题',quote:'帮我看题',contextEvidence:[]}})});
+ const ticket=c.begin(key,'m-completed');await c.observe(key,{text:'帮我看题'},ticket);
+ assert.ok(c.replyState(key)?.interaction);assert.match(c.prompt(key,{}),/解释这道题/);
+ const saved=structuredClone(c.state(key));f.revoke(ticket.eventId);
+ assert.equal(c.replyState(key),null);assert.doesNotMatch(c.prompt(key,{}),/解释这道题/);
+ assert.deepEqual(c.state(key),saved);
+ }finally{f.close()}
+});

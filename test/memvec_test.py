@@ -22,8 +22,6 @@ class MemoryLifecycleTests(unittest.TestCase):
         m._owner_scope_cache = 'private:10001'
         m._strength_migrated = False
         m.embed = lambda texts: np.array([[1., 0., 0.] for _ in texts], dtype=np.float32)
-        # 这些用例比较生命周期/排序，不是去重；用相同模拟向量时关掉相似去重。
-        m.DEDUPE_SIM = 1.01
 
     def tearDown(self):
         m.HOME = self.old_home

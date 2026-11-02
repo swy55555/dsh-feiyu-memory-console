@@ -170,6 +170,7 @@ export class Continuity {
     s.seen=[...s.seen,id].slice(-256);this.busy++;
     const source={id,messageId:ticket.messageId,at:this.now(),fingerprint:hash(body)};
     const sourceRevision=this.sourceRevision();
+    ticket.sourceRevision=sourceRevision;
     const current=()=>this.sourceRevision()===sourceRevision&&!this.sourceBlocked(key,[id])&&this.permitted(key)&&this.live.get(key)===ticket&&ticket.eligible;
     const snapshot=clone(this.usable(key,s)),recent=Array.isArray(input.dialogue)?input.dialogue:ticket.recent;let timer;
     const courses=this.courseContext(key);
@@ -334,19 +335,26 @@ export class Continuity {
   replyState(key){
     if(!this.permitted(key))return null;
     const live=this.live.get(key);
-    if(!live?.eligible||!live.eventId||this.now()-live.at>120000)return null;
+    if(!live?.eligible||!live.eventId||this.now()-live.at>120000||!this.liveSourcesValid(key,live))return null;
     return clone({messageId:live.messageId,interaction:live.interaction||null});
   }
+  liveSourcesValid(key,live){
+    return !this.sourceBlocked(key,[live.eventId,...(live.interaction?.contextEvidence||[]).map(r=>r.id)])
+      && (live.sourceRevision===undefined || (live.sourceRevision!=='unavailable' && live.sourceRevision===this.sourceRevision()));
+  }
   prompt(key,context={}){
+    context.interaction=null;context.continuityItems=[];context.continuity=null;
+    context.styleIntent=null;context.styleBoundary='uncertain';context.classroomRef=null;context.conversationRecall=false;
     if(!this.permitted(key))return '';
     const s=this.state(key);this.expire(s);const live=this.live.get(key);
-    if(!live?.eligible||!live.eventId||(context.continuityMessageId&&context.continuityMessageId!==live.messageId))return '';
+    if(!live?.eligible||!live.eventId||!this.liveSourcesValid(key,live)||(context.continuityMessageId&&context.continuityMessageId!==live.messageId))return '';
     const concerns=s.concerns.filter(r=>!this.sourceBlocked(key,r.evidence)&&live.focus.includes(r.id)&&r.status==='open').map(r=>({id:r.id,title:r.title,detail:r.detail,source:r.evidence?.at(-1)}));
     const beliefs=s.beliefs.filter(r=>!this.sourceBlocked(key,r.evidence)).map(r=>beliefView(r,this.now())).filter(r=>live.focus.includes(r.id)&&['tentative','observed'].includes(r.status)&&r.confidence>=.12).map(r=>({id:r.id,text:r.text,status:r.status,confidence:r.confidence}));
     const event=s.events.find(e=>e.id===live.eventId);
     const relation=event?.appraisal?.target==='character'&&event?.relation?.requested!=='none'
       ? {trust:s.relation.trust,familiarity:s.relation.familiarity,tension:s.relation.tension,currentEvidence:event.relation.quote} : null;
     const interaction=interactionReference(this.now()-live.at<=120000?live.interaction:null);
+    context.interaction=interaction?clone(live.interaction):null;
     // 惦记（worry）只做背景：不进重点、不催问，最多带 3 条。
     const worries=s.concerns.filter(r=>!this.sourceBlocked(key,r.evidence)&&r.status==='open'&&r.kind==='worry').slice(-3).map(r=>({id:r.id,title:r.title,detail:r.detail}));
     context.continuity={key,eventId:live.eventId,traceId:context.traceId,used:!!(concerns.length||worries.length||beliefs.length||relation||interaction||(Array.isArray(s.relation.knots)&&s.relation.knots.length)),interactionUsed:!!interaction};

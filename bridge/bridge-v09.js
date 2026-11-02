@@ -3502,6 +3502,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
   const contextEfficiency = new ContextEfficiency();
   async function dispatchTracedPrompt(params, context = {}) {
     const key = reverse.get(params.sessionId);
+    if(context.guardSourceReferences)params={...params,content:context.guardSourceReferences(params.content)};
     if(typeof expressionDispatchBlocked==='function'&&expressionDispatchBlocked(key))return {result:{ok:false,error:{code:'EXPRESSION_REWRITE_LIMIT',message:'表达改写已停止，等待新消息或管理端调整规则'}}};
     const expressionHint=typeof expressionPromptHint==='function'?expressionPromptHint(key):'';
     if(expressionHint&&Array.isArray(params.content)){
@@ -3515,15 +3516,22 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
         params={...params,content:params.content.map((part,i)=>i===index?{...part,text:selfReference.render(key)+'\n\n'+part.text}:part)};
       }
     }
-    const reuse = await referenceReuse.prepare({sessionId: params.sessionId, key,
+    let reuse = await referenceReuse.prepare({sessionId: params.sessionId, key,
       content: params.content, blocks: context.referenceBlocks,
       enabled: cfg.socialV2?.context?.referenceReuse !== false});
     params = {...params, content: reuse.content};
+    // prepare() can yield while a source is withdrawn. Recheck immediately
+    // before handing the prompt to the host; preserve the user's request/media.
+    if(context.guardSourceReferences)params={...params,content:context.guardSourceReferences(params.content)};
+    if(context.sourceReferencesDiscarded){
+      reuse.commit(false);
+      reuse={...reuse,savedChars:0,reused:[],commit:()=>{}};
+    }
     const ticket = key ? turnTraces.enqueue(params.sessionId, context.traceId || null, key) : null;
     try {
       const result = await api.sessions.prompt(params);
       reuse.commit(result.result.ok && !result.result.value?.command);
-      if(key&&context.referenceAssembly&&typeof contextEfficiency!=='undefined')contextEfficiency.record(key,'delivery',{accepted:result.result.ok&&!result.result.value?.command,savedChars:reuse.savedChars,reused:reuse.reused});
+      if(key&&context.referenceAssembly&&typeof contextEfficiency!=='undefined')contextEfficiency.record(key,'delivery',{accepted:result.result.ok&&!result.result.value?.command,savedChars:reuse.savedChars,reused:reuse.reused,sourceReferencesDiscarded:context.sourceReferencesDiscarded===true});
       if (result.result.ok && !result.result.value?.command && reuse.savedChars > 0)
         log(`reference reuse: ${reuse.reused.join(',')}, saved ${reuse.savedChars} chars (not token count)`);
       if (context.continuity) continuity.delivery(context.continuity, result.result.ok && !result.result.value?.command ? 'injected' : 'rejected');
@@ -3619,6 +3627,29 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
 
   async function withMemoryContext(key, promptText, context = {}) {
     context.traceId = crypto.randomUUID();
+    const sourceRevision = typeof sourceValidity === 'object' ? sourceValidity.revision() : null;
+    const sourcesCurrent = () => sourceRevision === null || (sourceRevision !== 'unavailable' && sourceValidity.revision() === sourceRevision);
+    context.sourceReferencesDiscarded=false;
+    const discardReferences = () => {
+      context.sourceReferencesDiscarded=true;
+      context.referenceBlocks=[];
+      context.referenceAssembly={discarded:true,reason:'source-revision-changed',usedChars:0,
+        decisions:(context.referenceAssembly?.decisions||[]).map(row=>({...row,selectedChars:0,reason:'source-revision-changed'}))};
+      if(context.evalCapture)context.evalCapture.assembly=context.referenceAssembly;
+      if(typeof contextEfficiency!=='undefined')contextEfficiency.record(key,'assembly',context.referenceAssembly);
+      context.interaction=null;context.continuity=null;context.continuityItems=[];
+      context.classroomRef=null;context.styleIntent=null;context.styleBoundary='uncertain';context.conversationRecall=false;
+      context.mindWorkspace={key,messageId:context.continuityMessageId,ids:[]};
+      delete context.idleAssociation;
+    };
+    // Keep the original text in this closure, not in serialized trace metadata.
+    context.guardSourceReferences = content => {
+      if(sourcesCurrent() && !context.sourceReferencesDiscarded)return content;
+      discardReferences();
+      if(!Array.isArray(content))return content;
+      const index=content.findIndex(part=>part.type==='text');
+      return content.map((part,i)=>i===index?{...part,text:promptText}:part);
+    };
     const workspaceOn = context.allowIdleAssociation === true && typeof mindWorkspaceEnabled === 'function' && mindWorkspaceEnabled(key);
     context.requireUnderstanding = mindAllowed(key) && cfg.socialV2?.continuity?.enabled === true;
     if(workspaceOn && !context.continuityMessageId)context.continuityMessageId=mindWorkspaces.current.get(key)||'';
@@ -3640,17 +3671,18 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
       } catch {}
     }
     const sharedLine = key === ownerKey ? recentSharedLine(sharedState) : '';
+    context.interaction=null;
+    const continuityPart = (context.disableContinuity !== true && context.allowIdleAssociation === true && typeof continuity !== 'undefined')
+      ? continuity.prompt(key, context) : '';
     const repairEnabled = cfg.socialV2?.repair?.enabled !== false;
-    const correction = (repairEnabled && key === ownerKey) ? detectCorrection(promptText) : { isCorrection: false };
+    const correction = (repairEnabled && key === ownerKey) ? detectCorrection(promptText, context.interaction) : { isCorrection: false };
     if (repairEnabled && correction.isCorrection) {
       repairState = addRepair(repairState, { cue: correction.cue, text: String(promptText).slice(0, 200) });
       saveRepairState();
     }
-    const repairLine = (repairEnabled && correction.isCorrection) ? repairHint({ cue: correction.cue }) : '';
+    const repairLine = (repairEnabled && correction.isCorrection) ? repairHint(correction) : '';
     const lesson = (repairEnabled && key === ownerKey) ? lessonLine(repairState) : '';
-    const continuityPart = (context.disableContinuity !== true && context.allowIdleAssociation === true && typeof continuity !== 'undefined')
-      ? continuity.prompt(key, context) : '';
-    const continuityBlock = continuityPart + goalBlock + rhythmBlock + selfBlock + sharedLine + repairLine + lesson;
+    const continuityBlock = continuityPart + goalBlock + rhythmBlock + selfBlock + sharedLine;
     const narrativeBlock = cfg.socialV2?.narrative?.enabled === true && key === ownerKey
       ? narrativePromptLine(narrativeState) : '';
     const linkageInfo = ((context.forceLinkageInject === true || cfg.socialV2?.linkageInject?.enabled === true) && key === ownerKey && context.disableLinkageInject !== true)
@@ -3697,6 +3729,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     const contextEmotionView = cfg.socialV2?.emotion?.enabled === false ? null : withSubjectiveFeeling(emotionViewFor(key), idleAssociations.feeling(key), Date.now(), emotionRecoveryCfg());
     const contextEmotionLine = cfg.socialV2?.emotion?.enabled === false ? '' : emotionPromptLine(contextEmotionView, { isOwner: true, compact: true });
     const finish = (memoryBlock = '', memoryRows = []) => {
+      if(!sourcesCurrent()){discardReferences();return promptText;}
       // All optional references, including outer blocks, belong to this turn.
       if(workspaceOn && mindWorkspaces.current.get(key)!==context.continuityMessageId){
         context.mindWorkspace={key,messageId:context.continuityMessageId,ids:[]};

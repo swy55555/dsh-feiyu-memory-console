@@ -16,7 +16,9 @@ export class MindWorkspace {
     const rows=[],seen=new Set(),deferred=[];
     for(const item of [...(candidates||[])].sort((a,b)=>(Number(b?.score)||0)-(Number(a?.score)||0))){
       if(!item||!Object.hasOwn(TYPES,item.type)||typeof item.id!=='string'||typeof item.text!=='string'||!item.text.trim())continue;
-      const identity=item.type+':'+item.id,body=item.text.normalize('NFKC').replace(/\s+/g,'');
+      const identity=item.type+':'+item.id;
+      const evidence=Array.isArray(item.evidenceIds)?[...new Set(item.evidenceIds.filter(id=>typeof id==='string'&&id))].sort():[];
+      const body=JSON.stringify([item.type,item.text.trim(),evidence.length?evidence:[item.id]]);
       if(seen.has(identity)||seen.has(body)){deferred.push({...item,reason:'与已选参考重复'});continue;}
       seen.add(identity);seen.add(body);rows.push({...item,score:Number.isFinite(item.score)?Math.max(0,Math.min(1,item.score)):0});
     }

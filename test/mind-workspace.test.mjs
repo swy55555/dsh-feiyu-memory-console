@@ -4,6 +4,19 @@ import {MindWorkspace} from '../bridge/mind-workspace.mjs';
 import {IdleAssociations} from '../bridge/idle-association.mjs';
 const key='private:123';
 const memory=(id,score=.8,text='历史表述 '+id)=>({id,type:'memory',score,text,evidenceIds:[id]});
+
+test('workspace keeps distinct evidence and meaningful whitespace instead of guessing equivalence',()=>{
+ for(const rows of [
+  [memory('a',.9,'我明天出发'),memory('b',.8,'我明天出发')],
+  [memory('a',.9,'now here'),{...memory('b',.8,'nowhere'),evidenceIds:['a']}],
+ ]){
+  const w=new MindWorkspace({allowed:()=>true,enabled:()=>true});w.begin(key,'m');
+  assert.deepEqual(w.compose(key,rows,{continuityMessageId:'m'}).selected.map(r=>r.id),['a','b']);
+ }
+ const w=new MindWorkspace({allowed:()=>true,enabled:()=>true});w.begin(key,'m');
+ const original=memory('a',.9,'同一条参考');
+ assert.equal(w.compose(key,[original,{...original,id:'copy',score:.8}],{continuityMessageId:'m'}).selected.length,1);
+});
 test('bounded selection preserves whole statements, provenance, highest-ranked duplicates and type quotas',()=>{
  const w=new MindWorkspace({allowed:k=>k===key,enabled:()=>true,budgetChars:1200});w.begin(key,'m');
  const rows=[memory('a',.4),memory('a',.95),memory('b'),memory('c'),{id:'belief',type:'belief',score:.5,text:'只是可能的理解'},memory('huge',1,'条件'.repeat(1000)),{id:'low',type:'concern',score:.1,text:'无关'}];
