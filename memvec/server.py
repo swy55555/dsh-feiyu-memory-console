@@ -2557,6 +2557,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    _ensure_self_token()
     get_model()  # 先把模型加载好，避免第一个请求超时
     conn = db()
     conn.close()
