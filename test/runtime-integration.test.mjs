@@ -1,4 +1,4 @@
-import {extras} from './bridge-test-context.mjs';
+import {extras,wireEvidenceFixture} from './bridge-test-context.mjs';
 import * as replyContext from '../bridge/reply-context.mjs';
 import {ReferenceReuse} from '../bridge/reference-reuse.mjs';
 import {EmotionScopes,emotionScope} from '../bridge/emotion-scopes.mjs';
@@ -78,6 +78,7 @@ test("actual bridge dispatch wrapper cancels rejected/command slots and binds ac
     reverse: new Map([["s", "private:1"]]),
     api: { sessions: { prompt: async () => result } },
   });
+  wireEvidenceFixture(ctx);
   const fn = vm.runInContext(
     between("  async function dispatchTracedPrompt(", "  function traceRow(") +
       ";dispatchTracedPrompt",
@@ -162,6 +163,7 @@ test("actual withMemoryContext records only selected rows with subject and assoc
     between("  function traceRow(", "  function recordRetrievalTrace("),
     ctx,
   );
+  wireEvidenceFixture(ctx);
   const fn = vm.runInContext(
       between(
         "  async function withMemoryContext(",
@@ -194,6 +196,7 @@ test('actual recall prepares privacy before shared search and only gives owner r
    sharingPrivacy:{prepare:async(scope,query,opts)=>{order.push('privacy');assert.equal(opts.includeSummaries,key==='private:1'&&asked);return {summaries:opts.includeSummaries?[{id:'recap',scope:'group:7',text:'聊了种花。',participated:true}]:[]}}},
    memoryRequest:async route=>{order.push(route);return {results:[]}},
   });
+  wireEvidenceFixture(ctx);
   const fn=vm.runInContext(between('  async function withMemoryContext(','  const dailyRecallQueries')+';withMemoryContext',ctx);
   const text=await fn(key,body,{conversationRecall:asked});
   assert.equal(text.includes('聊了种花。'),key==='private:1'&&asked);

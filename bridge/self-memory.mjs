@@ -1,5 +1,6 @@
 // 她自己的记忆（P0.5 v1）：不放进向量库，先用本地 JSON，避免动 memvec 服务。
 // 每条必须带来源（url/摘录/时间）；「读到的事实」和「模型的印象」分开标记。
+import {externalEvidence} from './evidence-contract.mjs';
 export const SELF_MEMORY_LIMITS = Object.freeze({
   maxItems: 300,
   maxText: 200,
@@ -14,6 +15,7 @@ export function emptySelfMemory() {
 
 export function normalizeSelfMemory(raw) {
   const out = emptySelfMemory();
+  out._evidenceCursor=raw?._evidenceCursor||0;
   const list = Array.isArray(raw?.items) ? raw.items : [];
   for (const row of list) {
     const text = String(row?.text || '').trim();
@@ -30,6 +32,8 @@ export function normalizeSelfMemory(raw) {
       excerpt: String(row.excerpt || '').slice(0, SELF_MEMORY_LIMITS.maxExcerpt),
       at: Number(row.at) || Date.now(),
       confidence: clamp(row.confidence ?? 0.6, 0, 1),
+      contract:row.contract||externalEvidence({url:row.sourceUrl,excerpt:row.excerpt,at:row.at}),
+      sourceState:row.sourceState||'current',
     });
   }
   out.items = out.items.slice(-SELF_MEMORY_LIMITS.maxItems);
@@ -57,6 +61,7 @@ export function addSelfMemory(state, { text, kind = 'impression', topic = '', so
     excerpt: String(excerpt).slice(0, SELF_MEMORY_LIMITS.maxExcerpt),
     at,
     confidence: conf,
+    contract:externalEvidence({url:sourceUrl,excerpt,at}),
   }].slice(-SELF_MEMORY_LIMITS.maxItems);
   s.updatedAt = at;
   return { state: s, ok: true };
@@ -84,7 +89,7 @@ export function recallSelf(state, query, { limit = 2, minScore = 0.08, now = Dat
   if (!q) return [];
   return s.items
     .map((item) => ({ ...item, score: Math.max(overlap(q, item.topic), overlap(q, item.text)) }))
-    .filter((x) => x.score >= minScore)
+    .filter((x) => x.sourceState !== 'invalid' && x.score >= minScore)
     .sort((a, b) => b.score - a.score || b.at - a.at)
     .slice(0, limit);
 }

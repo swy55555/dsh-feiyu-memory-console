@@ -48,6 +48,7 @@ export function normalizeNarrativeState(raw) {
     .filter((v) => v && typeof v.id === 'string' && typeof v.text === 'string' && Number.isFinite(Number(v.generatedAt)))
     .map((v) => ({
       id: v.id,
+      sourceState:v.sourceState||'current',
       generatedAt: Number(v.generatedAt),
       coveredThroughAt: Number(v.coveredThroughAt) || Number(v.generatedAt),
       text: cleanText(v.text, 280),
@@ -63,6 +64,7 @@ export function normalizeNarrativeState(raw) {
   const currentId = versions.some((v) => v.id === requestedCurrent) ? requestedCurrent : (versions[0]?.id || '');
   return {
     version: 1,
+    _evidenceCursor:raw?._evidenceCursor||0,
     currentId,
     versions,
     lastAttemptAt: Number(raw?.lastAttemptAt) || 0,
@@ -73,12 +75,12 @@ export function normalizeNarrativeState(raw) {
 
 export function currentNarrative(state) {
   const s = normalizeNarrativeState(state);
-  return s.versions.find((v) => v.id === s.currentId) || null;
+  return s.versions.find((v) => v.id === s.currentId&&v.sourceState!=='invalid') || null;
 }
 
 export function narrativeSafeEpisodes(episodes, ownerKey) {
   return (Array.isArray(episodes) ? episodes : [])
-    .filter((e) => e && e.chatKey === ownerKey && !e.emotionRetracted && String(e.id || '') && Number.isFinite(Number(e.at)))
+    .filter((e) => e && e.chatKey === ownerKey && !e.emotionRetracted && e.sourceState!=='invalid' && String(e.id || '') && Number.isFinite(Number(e.at)))
     .sort((a, b) => Number(b.at) - Number(a.at))
     .map((e) => ({
       id: String(e.id),

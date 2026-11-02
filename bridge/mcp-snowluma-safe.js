@@ -1564,15 +1564,17 @@ server.tool(
     key: z.string().describe('会话 key'),
     token: z.string().describe('会话令牌'),
     query: z.string().describe('想找什么（自然语言）'),
-    k: z.number().int().min(1).max(20).optional().describe('兼容旧调用；当前检索最多 5 个候选，按完整记录与字符预算提供最多 3 条参考'),
+    anchors: z.array(z.string()).max(3).optional().describe('本轮搜索返回的临时 ref，最多三个，用于同一聊天的原话相邻上下文补查；不可跨轮使用'),
+    k: z.number().int().min(1).max(20).optional().describe('兼容旧调用；实际由每轮共享预算限制：默认 4 次、10 条、6000 字符，自动召回也占用预算'),
     scope: z.string().optional().describe('只能等于当前会话 key，省略时自动使用当前聊天')
   },
-  async ({ key, token, query, k, scope }) => {
+  async ({ key, token, query, k, scope, anchors }) => {
     try {
       if (!isOwnerKey(key) && !isAllowedGroupKey(key)) throw new Error('只有管理员私聊和白名单群能查记忆');
       await assertSessionToken(key, token);
       if (scope && scope !== key) throw new Error('不允许跨聊天查记忆');
       const params=new URLSearchParams({key,query});
+      if(anchors)params.set('anchors',JSON.stringify(anchors));
       const data=await agentApi('/api/socialV2/long-memory?'+params,{headers:{'x-agent-token':token}});
       return {content:[{type:'text',text:serializeModelData(data)}],...(['unavailable','busy','stale'].includes(data.memory?.status)?{isError:true}:{})};
     } catch (error) {

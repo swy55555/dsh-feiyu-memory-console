@@ -74,7 +74,7 @@ try {
   }
   const before = [row(info.old), row(info.new)]
   const confirmed = await confirmChoice(info.new)
-  assert.equal(confirmed.status, 200)
+  assert.equal(confirmed.status, 200, JSON.stringify(confirmed.data))
   assert.ok(confirmed.data.auditId)
   assert.equal(row(info.old).status, 'superseded')
   assert.equal(row(info.new).status, 'active')

@@ -1,13 +1,14 @@
 import {buildHumanContext,shouldRecallMemory} from './human-context.mjs';
 import {contextualRecall} from './reply-context.mjs';
+import {renderEvidence} from './retrieval-session.mjs';
 
 export const MEMORY_LOOKUP_GUIDE='长期记忆仅按当前查询检索有限候选，不是全库穷尽检查。无匹配不证明从未记录或已经丢失；工具失败、关闭、超时和未查询必须区分。qq_memory_query 只读轻量话题/印象，近期聊天也不是长期库；需要主动查长期记忆时使用 qq_vmem_search。不要把检索状态解释成用户在故意刁难你。';
 
 // Local, read-only retrieval for messages delivered inside an ongoing model turn.
 // A bounded cache coalesces wait/unread/recent reads of the same current message.
 export class FollowupMemory {
-  constructor({request,revision=()=>null,now=Date.now,maxChats=128,timeoutMs=2000}={}){
-    Object.assign(this,{request,revision,now,maxChats,timeoutMs});this.entries=new Map();this.busy=0;
+  constructor({request,retrieval=null,revision=()=>null,now=Date.now,maxChats=128,timeoutMs=2000}={}){
+    Object.assign(this,{request,retrieval,revision,now,maxChats,timeoutMs});this.entries=new Map();this.busy=0;
   }
   async get({key,messages=[],latestSeq,enabled=true,current=()=>true,options={},trace=()=>{}}={}){
     const last=messages.filter(m=>m&&!m.isSelf&&Number.isSafeInteger(m.seq)).sort((a,b)=>b.seq-a.seq)[0];
@@ -31,6 +32,10 @@ export class FollowupMemory {
     this.busy++;
     const entry={fingerprint,at:this.now()};
     const work=(async()=>{
+      if(this.retrieval){
+        const found=await this.retrieval.search({key,turn:last.seq,query,current:valid,maxChars:6000,maxItems:8});
+        return {...base,...found,records:undefined,ids:(found.records||[]).map(r=>r.id),context:renderEvidence(found)};
+      }
       const response=await this.request('/search',{query,scope:key,k:5,min_score:.4},Math.min(this.timeoutMs,1500));
       if(!Array.isArray(response?.results))throw Error('invalid-search-response');
       // Never accept another chat's source, even if the service labels it shared.

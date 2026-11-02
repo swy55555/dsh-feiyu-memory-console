@@ -10,7 +10,16 @@ export class SourceValidity {
       if(version!==this.version){
         const exists=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_corrections'").get();
         this.rows=exists?this.db.prepare("SELECT scope,event_id,source_version,revision FROM source_corrections WHERE state='revoked' ORDER BY scope,event_id,source_version").all():[];
-        this.signature=createHash('sha256').update(JSON.stringify(this.rows)).digest('hex');this.version=version;
+        const changes=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='evidence_changes'").get();
+        let changeRevision=0;
+        if(changes){
+          changeRevision=this.db.prepare('SELECT coalesce(max(sequence),0) AS revision FROM evidence_changes').get().revision;
+          const removed=this.db.prepare("SELECT DISTINCT scope,event_id,source_version FROM evidence_changes c WHERE kind='source-removed' AND NOT EXISTS(SELECT 1 FROM evidence_source_lookup s WHERE s.source_version=c.source_version)").all();
+          this.rows.push(...removed);
+          const inactive=this.db.prepare("SELECT DISTINCT scope,event_id,'' AS source_version FROM evidence_changes c WHERE kind LIKE 'memories-%' AND NOT EXISTS(SELECT 1 FROM memories m WHERE m.id=c.event_id AND m.scope=c.scope AND m.status='active' AND (m.expires_at=0 OR m.expires_at>unixepoch()))").all();
+          this.rows.push(...inactive);
+        }
+        this.signature=createHash('sha256').update(JSON.stringify([this.rows,changeRevision])).digest('hex');this.version=version;
       }
       return {ok:true,rows:this.rows,revision:this.signature};
     }catch{this.close();return {ok:false,rows:[],revision:'unavailable'};}
@@ -43,7 +52,7 @@ export class SourceValidity {
     const ids=evidence.map(e=>typeof e==='string'?e:e?.id).filter(Boolean);
     if(!ids.length)return false;
     const s=this.snapshot();
-    return !s.ok||s.rows.some(r=>r.scope===scope&&ids.includes(r.event_id));
+    return !s.ok||s.rows.some(r=>r.scope===scope&&(ids.includes(r.event_id)||ids.includes(r.source_version)));
   }
   close(){try{this.db?.close();}catch{}this.db=null;this.version=null;}
 }

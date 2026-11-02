@@ -11,6 +11,8 @@ import {ContextEfficiency,rotationBlockers} from './context-efficiency.mjs';
 import {ChatClarifications} from './chat-clarification.mjs';
 import {SourceValidity} from './source-validity.mjs';
 import {FollowupMemory} from './followup-memory.mjs';
+import {RetrievalSessions,renderEvidence} from './retrieval-session.mjs';
+import {EvidenceConsumer,applySourceChange} from './evidence-consumer.mjs';
 import {ExpressionGuard} from './expression-guard.mjs';
 import {replyReference,allowOptionalNudges,contextualRecall,recallForCurrentContext} from './reply-context.mjs';
 import {privateReplyGuard} from './reply-freshness.mjs';
@@ -1594,6 +1596,7 @@ async function main() {
       contactInFlight = true;
       const ownerQQ = Number(cfg.ownerQQ);
       const sendEpoch = initiativeEpoch;
+      const sendSourceRevision=sourceValidity.revision();
       const openConcern = concerns.find((x) => ['open', 'paused'].includes(x.status));
       const reasonText = decision.candidates.find((x) => x.type === 'contact')?.reason === 'concern'
         ? `有一件没放下的事${openConcern?.title ? `（${openConcern.title}）` : ''}`
@@ -1608,7 +1611,7 @@ async function main() {
           const raw = await runHeadlessPrompt(draftPrompt, 60000, [], 'contact_draft');
           let draft = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 60);
           if (!draft || /熬夜|催睡|通宵/.test(draft)) { log('[initiative] 草稿不合适，跳过发送'); return; }
-          if (!ownerQQ || Number(cfg.ownerQQ) !== ownerQQ || sendEpoch !== initiativeEpoch || !initiativeAvailable()
+          if (sendSourceRevision==='unavailable'||sourceValidity.revision()!==sendSourceRevision||!ownerQQ || Number(cfg.ownerQQ) !== ownerQQ || sendEpoch !== initiativeEpoch || !initiativeAvailable()
               || cfg.socialV2?.initiative?.dryRun !== false || cfg.socialV2?.initiative?.contactSend !== true
               || cfg.socialV2?.initiative?.allowContact !== true) return;
           const result = await bot.sendPrivateMessage(ownerQQ, draft);
@@ -3602,7 +3605,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     try {
       const taste = Array.isArray(overrides.taste) ? overrides.taste : normalizeTaste(readJsonSafe(path.join(STATE_DIR, 'taste.json'), null)).topics;
       const selfMemory = Array.isArray(overrides.selfMemory) ? overrides.selfMemory : normalizeSelfMemory(readJsonSafe(path.join(STATE_DIR, 'self-memory.json'), null)).items;
-      const gate = gateLinkage({ message, taste, selfMemory, boundaryAt });
+      const gate = gateLinkage({ message, taste:taste.filter(t=>t.sourceState!=='invalid'&&!t.evidence?.some(e=>e.sourceState==='invalid')), selfMemory:selfMemory.filter(m=>m.sourceState!=='invalid'), boundaryAt });
       return { text: gate.hit ? renderLinkage(gate, taste, selfMemory) : '', gate };
     } catch {
       return { text: '', gate: { available: false, hit: false, reason: 'error', matches: [] } };
@@ -3714,9 +3717,13 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     const traceSelected = [];
     let contextBundle={messages:[],summaries:[]};
     let assemblyReport = null;
+    let initialEvidence=null,initialEvidenceSeq=0,deliveredEvidence=[];
     const assembled=(parts)=>{
+      const roots=new Set((initialEvidence?.records||[]).flatMap(r=>r.contract.rootIds||[]));
+      if(roots.size)sessionBlock=buildSessionBlock(contextBundle.messages.filter(m=>!roots.has(m.source_version)),{maxChars:Number(cfg.socialV2?.context?.budgetChars)||6000});
       const blocks=[{id:'summary',scope:key,purpose:'summary',text:summaryBlock,priority:30,fit:n=>buildSummaryBlock(contextBundle.summaries,{maxChars:n})},
-        {id:'history',scope:key,purpose:'history',text:sessionBlock,priority:40,fit:n=>buildSessionBlock(contextBundle.messages,{maxChars:n})},
+        {id:'history',scope:key,purpose:'history',text:sessionBlock,priority:40,fit:n=>buildSessionBlock(contextBundle.messages.filter(m=>!roots.has(m.source_version)),{maxChars:n})},
+        ...(context.disableMemory===true||context.styleIntent==='feedback'?[]:(initialEvidence?.records||[])).map(r=>({id:'evidence:'+r.id,scope:key,purpose:'evidence',text:renderEvidence({records:[r]}),priority:90,rootIds:r.contract.rootIds})),
         ...parts.map(p=>({scope:key,...p}))];
       const enabled=cfg.socialV2?.context?.unifiedReferences!==false;
       const result=enabled&&typeof assembleReferences==='function'
@@ -3724,6 +3731,11 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
         :{text:blocks.map(b=>b.text).join(''),blocks,report:{enabled:false}};
       context.referenceBlocks=result.blocks.filter(b=>['summary','history'].includes(b.id));
       context.referenceAssembly=result.report;
+      if(initialEvidence){
+        const delivered=new Set(result.blocks.map(b=>b.id));
+        deliveredEvidence=initialEvidence.records.filter(r=>delivered.has('evidence:'+r.id));
+        retrievalSessions.releaseUndelivered(key,initialEvidenceSeq,initialEvidence.records.filter(r=>!delivered.has('evidence:'+r.id)).map(r=>r.id));
+      }
       assemblyReport=result.report||null;
       if(context.evalCapture) context.evalCapture.assembly=result.report||null;
       if(typeof contextEfficiency!=='undefined')contextEfficiency.record(key,'assembly',{...result.report,enabled});
@@ -3866,17 +3878,19 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
         return human ? compose() : finish();
       }
       const priority = await memoryRequest('/priority', { scope: memoryScope(key), subject_id: subjectId }, 1200).catch(() => ({ results: [] }));
-      const res = await fetch(`http://127.0.0.1:${cfg.socialV2?.memoryRecall?.port ?? 9881}/search`, {
-        method: 'POST',
-        headers: memvecHeaders({ 'content-type': 'application/json' }),
-        body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3), include_global: false }),
-        signal: AbortSignal.timeout(Number(cfg.socialV2?.memoryRecall?.timeoutMs ?? 1200))
-      });
-      if (!res.ok) throw new Error(`memory HTTP ${res.status}`);
-      const j = await res.json();
+      const recallSeq=st.lastUnreadSeq||0;
+      const recall=await retrievalSessions.search({key,turn:recallSeq,query,
+        current:()=>sourcesCurrent()&&isSessionAllowedInCurrentMode(key)&&!socialV2.paused&&(st.lastUnreadSeq||0)===recallSeq});
+      initialEvidence={...recall,records:recall.records||[]};initialEvidenceSeq=recallSeq;
+      // Evidence goes directly through the common assembler as whole records;
+      // do not shrink it a second time in the legacy 500-character workspace.
+      const j={results:[]};
+      priority.results=(priority.results||[]).filter(r=>!(recall.records||[]).some(e=>e.id===r.id||(e.contract.messageId&&e.contract.messageId===(r.evidence?.sourceId||r.source_id))));
+      context.retrievalBudget=recall.stats;context.retrievalDecision=recall.trace;
       if(context.styleIntent==='feedback')j.results = await contextualRecall(key, Array.isArray(j.results)?j.results:[], memoryRequest);
       // 普通记忆自动通过隐私审核后共享；保留目标授权和禁止覆盖。
-      if (context.allowIdleAssociation === true) idleBlock = await idleAssociations.take(key, j.results || [], context);
+      const evidenceSeeds=context.styleIntent==='feedback'?[]:(recall.records||[]).filter(r=>!r.id.startsWith('source:')||r.associationId).map(r=>({...r,id:r.associationId||r.id}));
+      if (context.allowIdleAssociation === true) idleBlock = await idleAssociations.take(key, evidenceSeeds, context);
       const shareCfg = cfg.socialV2?.memoryShare || {};
       let sharedRows = [];
       if (shareCfg.enabled === true) {
@@ -3898,10 +3912,10 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
       }
       const assocCfg = cfg.socialV2?.association || {};
       let associatedRows = [];
-      if (assocCfg.enabled === true && j.results?.[0]?.id) {
+      if (assocCfg.enabled === true && evidenceSeeds[0]?.id) {
         try {
           const ar = await memoryRequest('/associate', {
-            id: j.results[0].id,
+            id: evidenceSeeds[0].id,
             scope: memoryScope(key),
             limit: Math.max(1, Math.min(2, Number(assocCfg.maxExtra) || 1)),
             include_global: shareCfg.enabled === true,
@@ -3913,10 +3927,11 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
         const merged = [...(j.results || []), ...sharedRows.map((r) => ({ ...r, shared: true })), ...associatedRows];
         const composed = compose(priority.results, merged);
         recordTrace({
-          key, query, mode: 'human', reason: merged.length ? 'ok' : 'no-memory',
+          key, query, mode: 'human', reason: merged.length || deliveredEvidence.length ? 'ok' : 'no-memory',
           durationMs: Date.now() - traceStart,
-          candidates: [...(priority.results || []).map((r) => traceRow(r, 'priority')), ...merged.map((r) => traceRow(r, r.shared ? 'shared' : r.associated ? 'associated' : 'search'))],
-          injected: traceSelected.filter(r=>!workspaceOn||context.mindWorkspace?.ids.includes(String(r.id))).map((r) => traceRow(r, r.kind || 'search')),
+          candidates: [...(recall.records||[]).map(r=>traceRow(r,'evidence')), ...(priority.results || []).map((r) => traceRow(r, 'priority')), ...merged.map((r) => traceRow(r, r.shared ? 'shared' : r.associated ? 'associated' : 'search'))],
+          injected: context.sourceReferencesDiscarded?[]:[...deliveredEvidence.map(r=>traceRow(r,'evidence')), ...traceSelected.filter(r=>!workspaceOn||context.mindWorkspace?.ids.includes(String(r.id))).map((r) => traceRow(r, r.kind || 'search'))],
+          evidenceDecision:recall.trace,
         });
         return composed;
       }
@@ -3938,11 +3953,9 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
         candidates: [...(priority.results || []).map((r) => traceRow(r, 'priority')), ...(j.results || []).map((r) => traceRow(r, 'search')), ...sharedRows.map((r) => traceRow(r, 'shared')), ...associatedRows.map((r) => traceRow(r, 'associated'))],
         injected: [...rows.map(r=>traceRow(r,'search')), ...shared.map(r=>traceRow(r,'shared')), ...associatedRows.map(r=>traceRow(r,'associated'))],
       };
-      if (!workspaceOn) recordTrace(trace);
-      if (!rows.length && !shared.length && !associatedRows.length) { if(workspaceOn)recordTrace(trace);return finish(); }
-      log(`memory recall injected: ${rows.length} 条` + (shared.length ? ` + 共享 ${shared.length} 条` : ''));
       const result=finish(sharedBlock + assocBlock + recallBlock(rows), [...rows,...shared.map(r=>({...r,shared:true})),...associatedRows]);
-      if(workspaceOn)recordTrace({...trace,injected:trace.injected.filter(r=>context.mindWorkspace?.ids.includes(String(r.id)))});
+      const injected=context.sourceReferencesDiscarded?[]:[...deliveredEvidence.map(r=>traceRow(r,'evidence')),...trace.injected.filter(r=>!workspaceOn||context.mindWorkspace?.ids.includes(String(r.id)))];
+      recordTrace({...trace,reason:injected.length?'ok':'no-memory',candidates:[...(recall.records||[]).map(r=>traceRow(r,'evidence')),...trace.candidates],injected,evidenceDecision:recall.trace});
       return result;
     } catch (error) {
       recordTrace({ key, query: '', mode: human ? 'human' : 'classic', reason: 'error', error: String(error?.message || error).slice(0, 200), durationMs: Date.now() - traceStart, candidates: [], injected: [] });
@@ -3953,7 +3966,8 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
 
   const dailyRecallQueries = new Map();
   const dailyMemorySubjects = new Map();
-  const followupMemory = new FollowupMemory({request:memoryRequest,revision:()=>sourceValidity.revision()});
+  const retrievalSessions = new RetrievalSessions({request:memoryRequest,revision:()=>sourceValidity.revision()});
+  const followupMemory = new FollowupMemory({request:memoryRequest,retrieval:retrievalSessions,revision:()=>sourceValidity.revision()});
   async function memoryRequest(route, body, timeoutMs = 20000, extraHeaders = {}) {
     const res = await fetch(`http://127.0.0.1:${cfg.socialV2?.memoryRecall?.port ?? 9881}${route}`, {
       method: 'POST', headers: memvecHeaders({ 'content-type': 'application/json', ...(route.startsWith('/sources/clarification/')?{'x-source-correction':'1'}:{}), ...extraHeaders }), body: JSON.stringify(body),
@@ -4014,6 +4028,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
   }
   // P1 最近叙事：只处理 owner 私聊 episode，默认关闭；失败后持久化退避，避免定时重试烧 token。
   async function runNarrativeOnce({ manual = false } = {}) {
+      const narrativeSourceRevision=sourceValidity.revision();
       const conf = narrativeConfig(cfg.socialV2?.narrative);
       if ((!manual && (!conf.enabled || !conf.schedule)) || cfg.socialV2?.enabled === false || !dshReady || socialV2.paused || narrativeRunning || exploreRunning) {
         return { ok: false, reason: !dshReady ? 'dsh-offline' : (narrativeRunning || exploreRunning) ? 'busy' : 'disabled-or-paused' };
@@ -4051,6 +4066,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
       try {
         const raw = await runHeadlessPrompt(narrativePrompt(sources), 120000, [], 'narrative');
         cost = measureFeatureCost(startedAt, ':narrative');
+        if(narrativeSourceRevision==='unavailable'||sourceValidity.revision()!==narrativeSourceRevision||socialV2.paused)throw Error('叙事依据或运行状态已变化');
         const parsed = parseNarrativeOutput(raw, sources);
         if (!parsed.ok) throw new Error(`narrative validation: ${parsed.reason}${parsed.chars === undefined ? '' : `(${parsed.chars}字)`}`);
         const stored = storeNarrative(narrativeState, parsed, { now, maxVersions: conf.maxVersions });
@@ -4260,6 +4276,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     generate:prompt=>runHeadlessPrompt(prompt,60000,[],'expression_teacher'),
   });
   const growthClassroom=new GrowthClassroom({
+    sourceRevision:()=>sourceValidity.revision(),
     allowed:mindAllowed,generate:prompt=>runHeadlessPrompt(prompt,60000,[],'growth_classroom'),
     signature:()=>({provider:cfg.dsh?.provider,model:cfg.dsh?.model,effort:backgroundEffort(cfg,'growth_classroom')}),
     load:()=>readJsonSafe(path.join(STATE_DIR,'growth-classroom.json'),null),
@@ -4314,6 +4331,38 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     generate: (prompt, timeout) => runHeadlessPrompt(prompt, timeout, [], 'idle_association'),
   });
   const idleAssociationTimer = setInterval(() => { void idleAssociations.tick(); }, 30000);
+  // Acknowledgement follows each module's durable save. Replayed invalidations
+  // are harmless; they never replay an emotion delta or revive a cancelled task.
+  const evidenceConsumer=new EvidenceConsumer({request:memoryRequest,
+    load:()=>readJsonSafe(path.join(STATE_DIR,'evidence-consumer.json'),null),
+    save:data=>atomicWriteJson(path.join(STATE_DIR,'evidence-consumer.json'),data),
+    invalidate:event=>{
+      if(!/source_corrections|removed|delete|update|sharing/.test(event.kind))return;
+      retrievalSessions.invalidate();followupMemory.entries.clear();mindWorkspaces.invalidate();idleAssociations.reset();initiativeEpoch++;
+    },subscribers:[event=>{
+      if(!/source_corrections|removed|delete|update|sharing/.test(event.kind))return;
+      const invalid=sourceValidity.blocked(event.scope,[event.eventId]);
+      event={...event,aliasIds:episodes.filter(ep=>ep.emotionEventId===`${event.scope}/${event.speaker}/${event.messageId}`).map(ep=>ep.id)};
+      const apply=(name,state,commit)=>{const next=applySourceChange(state,event,{invalid,module:name});if(next!==state)commit(next);};
+      if(continuity.states.has(event.scope))apply('yuyin',{version:1,_evidenceCursor:continuity.evidenceCursor||0,chats:[...continuity.states]},next=>{
+        continuity.save(next);continuity.states=new Map(next.chats);continuity.evidenceCursor=next._evidenceCursor;continuity.live.delete(event.scope);
+      });
+      if(event.scope===`private:${String(cfg.ownerQQ||'')}`)apply('lunkuo',selfReference.state,next=>selfReference.commit(next));
+      for(const [name,file] of [['shiguang','self-memory.json'],['shiguang-taste','taste.json'],['huilang','diary-state.json']]){
+        const target=path.join(STATE_DIR,file);if(!fs.existsSync(target))continue;
+        const old=JSON.parse(fs.readFileSync(target,'utf8'));apply(name,old,next=>atomicWriteJson(target,next));
+      }
+      apply('chaoxi',{version:1,_evidenceCursor:emotionLanes.evidenceCursor||0,states:[...emotionLanes.states]},next=>{
+        emotionLanes.save(next);emotionLanes.states=new Map(next.states);emotionLanes.evidenceCursor=next._evidenceCursor;emotionState=emotionLanes.owner();
+      });
+      apply('narrative',narrativeState,next=>{atomicWriteJson(NARRATIVE_FILE,next);narrativeState=next;});
+      if(invalid&&event.aliasIds.length){
+        const affected=new Set(event.aliasIds);episodes=episodes.map(ep=>affected.has(ep.id)?{...ep,sourceState:'invalid'}:ep);saveEpisodes();
+      }
+      apply('classroom',growthClassroom.state,next=>{growthClassroom.save(next);growthClassroom.state=next;});
+    }]});
+  const evidenceTimer=setInterval(()=>{void evidenceConsumer.tick().catch(()=>log('[evidence] 来源通知待重试；读取与发送仍即时核验'));},5000);
+  evidenceTimer.unref?.();
   idleAssociationTimer.unref?.();
 
   // ── 性格状态（慢变量）────────────────────────────────────────────────────
@@ -4367,7 +4416,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     const query = String(dailyRecallQueries.get(key) || '');
     const now = Date.now();
     const candidates = episodes
-      .filter((e) => !e.emotionRetracted && e.chatKey === key && now - Number(e.at || 0) < 30 * 86400000)
+      .filter((e) => !e.emotionRetracted && e.sourceState !== 'invalid' && e.chatKey === key && now - Number(e.at || 0) < 30 * 86400000)
       .map((e) => {
         const text = `${e.summary || ''} ${e.quote || ''} ${e.outcome || ''}`;
         let overlap = 0;
@@ -6335,6 +6384,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
           // 手动测试可以绕过每日计划，但仍服从全局暂停。
           if (!initiativeAvailable(true)) { sendJson({ ok: false, error: 'AI 已暂停或尚未就绪' }, 409); return; }
           const sendEpoch = initiativeEpoch;
+          const sendSourceRevision=sourceValidity.revision();
           if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
             sendJson({ ok: false, error: '仅管理端可访问' }, 403);
             return;
@@ -6358,7 +6408,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
               sendJson({ ok: false, error: '草稿未通过安全闸', draft }, 422);
               return;
             }
-            if (!initiativeAvailable(true) || sendEpoch !== initiativeEpoch || Number(cfg.ownerQQ) !== ownerQQ) {
+            if (sendSourceRevision==='unavailable'||sourceValidity.revision()!==sendSourceRevision||!initiativeAvailable(true) || sendEpoch !== initiativeEpoch || Number(cfg.ownerQQ) !== ownerQQ) {
               sendJson({ ok: false, error: '主动发送已取消' }, 409); return;
             }
             const result = await bot.sendPrivateMessage(ownerQQ, draft);
@@ -10050,10 +10100,13 @@ ${roleText.slice(0, 9000)}`;
             &&currentMode==='reserved2'&&!socialV2.paused&&cfg.socialV2?.enabled!==false&&v2ToolEnabled('longMemory');
           if(!allowed()){sendJson({ok:false,error:'长期检索已关闭、会话暂停或令牌与聊天不匹配'},403);return;}
           const st=getSocialV2State(key),seq=st.lastUnreadSeq||0;
-          const memory=await followupMemory.get({key,latestSeq:seq,
-            messages:[{seq,messageId:'query:'+crypto.createHash('sha256').update(query).digest('hex').slice(0,16),text:query}],
-            current:()=>allowed()&&socialV2.conversations.get(canonicalV2Key(key))===st&&(st.lastUnreadSeq||0)===seq,
-            trace:data=>recordRetrievalTrace({traceId:crypto.randomUUID(),mode:'manual',...data})});
+          let anchors=[];
+          try{anchors=JSON.parse(url.searchParams.get('anchors')||'[]');if(!Array.isArray(anchors)||anchors.length>3||anchors.some(x=>typeof x!=='string'))throw Error();}
+          catch{sendJson({ok:false,error:'无效的临时记忆编号'},400);return;}
+          const found=await retrievalSessions.search({key,turn:seq,query,anchors,
+            current:()=>allowed()&&socialV2.conversations.get(canonicalV2Key(key))===st&&(st.lastUnreadSeq||0)===seq});
+          const memory={...found,records:undefined,ids:(found.records||[]).map(r=>r.id),context:renderEvidence(found)};
+          recordRetrievalTrace({traceId:crypto.randomUUID(),mode:'manual',key,query,status:found.status,ids:memory.ids,stats:found.stats,decisions:found.trace});
           if(!allowed()){sendJson({ok:false,error:'检索期间权限发生变化'},403);return;}
           sendJson({ok:true,memory});return;
         }

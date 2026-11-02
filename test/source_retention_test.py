@@ -113,11 +113,13 @@ class SourceRetentionTests(unittest.TestCase):
         before=self.f.row(mid)
         with m.db() as c:
             # Reconstruct an actual pre-source-schema database, including removing later guards.
-            for row in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND (name LIKE 'evidence_%' OR name LIKE 'correction_guard_%')").fetchall():
+            for row in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND (name LIKE 'evidence_%' OR name LIKE 'correction_guard_%' OR name LIKE 'search_%' OR name LIKE 'changes_%')").fetchall():
                 c.execute('DROP TRIGGER '+row[0])
+            c.execute('DELETE FROM evidence_index_meta')
             c.execute('DROP VIEW evidence_source_lookup')
             for table in ('evidence_links','evidence_sources','source_schema','source_corrections','source_correction_history'):c.execute('DROP TABLE '+table)
             c.execute('DROP INDEX idx_messages_event')
+            c.execute('DROP INDEX idx_messages_source_version')
             c.execute('ALTER TABLE messages DROP COLUMN source_version');c.execute('ALTER TABLE messages DROP COLUMN event_id')
         for _ in range(2):
             self.assertEqual(m.source_status(SCOPE,mid)['status'],'matched')

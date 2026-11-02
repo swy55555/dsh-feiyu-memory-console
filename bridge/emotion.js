@@ -38,6 +38,7 @@ export function visibleFeelings(feelings=[]){
 function dailyTone(s){
   let v=0,a=0;const active=[];
   for(const [kind,level] of Object.entries(s.dailyFeelings?.levels||{})){
+    if(s.dailyFeelings.sources?.[kind]?.sourceState==='invalid')continue;
     const shift=FEELING_SHIFTS[kind];if(!shift)continue;
     const guarded=s.dynamics.conflict>.1&&['warmth','joy','curiosity','relief'].includes(kind);if(guarded)continue;
     v+=level*shift[0];a+=level*shift[1];if(level>=.05)active.push({kind,label:FEELING_NAMES[kind],level,...(s.dailyFeelings.sources?.[kind]||{})});
@@ -100,7 +101,7 @@ export function normalizeEmotion(raw, now = Date.now()) {
   if (!raw || typeof raw !== "object") return s;
   Object.assign(s, clone(raw));
   s.dailyFeelings={levels:Object.fromEntries(Object.entries(s.dailyFeelings?.levels||{}).filter(([k])=>Object.hasOwn(FEELING_NAMES,k)).map(([k,v])=>[k,clamp(v,0,.7)])),updatedAt:Number(s.dailyFeelings?.updatedAt)||now,evidence:Array.isArray(s.dailyFeelings?.evidence)?s.dailyFeelings.evidence.slice(0,2):[]};
-  s.dailyFeelings.sources=Object.fromEntries(Object.entries(raw.dailyFeelings?.sources||{}).filter(([k,v])=>Object.hasOwn(FEELING_NAMES,k)&&v&&typeof v.evidence==='string'&&v.evidence.length<=200&&Number.isFinite(v.at)).map(([k,v])=>[k,{evidence:v.evidence,reason:String(v.reason||'').slice(0,100),eventId:String(v.eventId||'').slice(0,200),at:v.at}]));
+  s.dailyFeelings.sources=Object.fromEntries(Object.entries(raw.dailyFeelings?.sources||{}).filter(([k,v])=>Object.hasOwn(FEELING_NAMES,k)&&v&&typeof v.evidence==='string'&&v.evidence.length<=200&&Number.isFinite(v.at)).map(([k,v])=>[k,{evidence:v.evidence,reason:String(v.reason||'').slice(0,100),eventId:String(v.eventId||'').slice(0,200),at:v.at,sourceState:v.sourceState}]));
   s.dailyFeelings.seen=(Array.isArray(raw.dailyFeelings?.seen)?raw.dailyFeelings.seen:[]).filter(r=>r&&typeof r.proof==='string'&&Number.isFinite(r.at)&&now-r.at<86400000).slice(-64);
   s.baseline = { ...DEFAULT_BASELINE, ...s.baseline };
   s.mood = { ...s.baseline, ...s.mood };

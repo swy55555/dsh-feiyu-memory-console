@@ -1,5 +1,6 @@
 // 兴趣档案（P0.5）：爱好不能预设，只能从她实际看过的内容里长出来。
 // 每条兴趣必须有证据（来源 + 摘录 + 时间），强度会随时间衰减。
+import {externalEvidence} from './evidence-contract.mjs';
 export const TASTE_LIMITS = Object.freeze({
   maxTopics: 40,
   maxEvidence: 8,
@@ -16,6 +17,7 @@ export function emptyTaste() {
 
 export function normalizeTaste(raw) {
   const out = emptyTaste();
+  out._evidenceCursor=raw?._evidenceCursor||0;
   const list = Array.isArray(raw?.topics) ? raw.topics : [];
   for (const row of list) {
     const topic = String(row?.topic || '').trim().slice(0, 24);
@@ -23,6 +25,7 @@ export function normalizeTaste(raw) {
     out.topics.push({
       id: String(row.id || topic),
       topic,
+      sourceState:row.sourceState||'current',
       strength: clamp(row.strength ?? 0.2, 0, 1),
       evidence: Array.isArray(row.evidence) ? row.evidence.filter((e) => e && e.excerpt).slice(-TASTE_LIMITS.maxEvidence) : [],
       createdAt: Number(row.createdAt) || Date.now(),
@@ -38,6 +41,7 @@ export function normalizeTaste(raw) {
 export function tasteView(state, now = Date.now()) {
   const s = normalizeTaste(state);
   return s.topics
+    .filter(t=>t.sourceState!=='invalid' && !t.evidence.some(e=>e.sourceState==='invalid'))
     .map((t) => {
       const days = Math.max(0, (now - t.lastSeenAt) / 86400000);
       const keep = 0.5 ** (days / TASTE_LIMITS.halfLifeDays);
@@ -64,8 +68,10 @@ export function noteTaste(state, { topic, evidence, delta = 0.12, source = '' } 
     s.topics.push(row);
     s.topics = s.topics.slice(-TASTE_LIMITS.maxTopics);
   }
+  const contract=externalEvidence({url:evidence?.url,author:evidence?.author,excerpt,at:now,rootIds:evidence?.contract?.rootIds||[]});
+  if(row.evidence.some(e=>(e.contract?.rootIds||[]).some(id=>contract.rootIds.includes(id))||(e.url&&e.url===evidence?.url)))return {state:s,ok:true,reason:'same-evidence-root',topic:row.topic};
   row.strength = clamp(row.strength + clamp(delta, 0, 0.3), 0, 1);
-  row.evidence = [...row.evidence, { url: String(evidence?.url || ''), excerpt: excerpt.slice(0, 300), at: now }].slice(-TASTE_LIMITS.maxEvidence);
+  row.evidence = [...row.evidence, { url: String(evidence?.url || ''), excerpt: excerpt.slice(0, 300), at: now,contract }].slice(-TASTE_LIMITS.maxEvidence);
   row.updatedAt = now;
   row.lastSeenAt = now;
   if (source) row.source = source;
@@ -114,7 +120,7 @@ export function recordExploration(state, { topic, evidence, now = Date.now() } =
     row = { id: name, topic: name, strength: 0.2, evidence: [], createdAt: now, updatedAt: now, lastSeenAt: now, source: 'bilibili' };
     s.topics.push(row);
     s.topics = s.topics.slice(-TASTE_LIMITS.maxTopics);
-    row.evidence = [{ url, excerpt: excerpt.slice(0, 300), at: now, author }].slice(-TASTE_LIMITS.maxEvidence);
+    row.evidence = [{ url, excerpt: excerpt.slice(0, 300), at: now, author,contract:externalEvidence({url,author,excerpt,at:now}) }].slice(-TASTE_LIMITS.maxEvidence);
     s.updatedAt = now;
     return { state: s, ok: true, status: 'provisional', strength: row.strength };
   }
@@ -122,7 +128,7 @@ export function recordExploration(state, { topic, evidence, now = Date.now() } =
   if (seenUrl) return { state: s, ok: true, status: 'repeat', strength: row.strength };
   const otherContent = row.evidence.some((e) => (url && e.url !== url) || (!url && e.excerpt !== excerpt));
   const otherAuthor = author && row.evidence.some((e) => e.author && e.author !== author);
-  row.evidence = [...row.evidence, { url, excerpt: excerpt.slice(0, 300), at: now, author }].slice(-TASTE_LIMITS.maxEvidence);
+  row.evidence = [...row.evidence, { url, excerpt: excerpt.slice(0, 300), at: now, author,contract:externalEvidence({url,author,excerpt,at:now}) }].slice(-TASTE_LIMITS.maxEvidence);
   row.updatedAt = now;
   row.lastSeenAt = now;
   if (otherContent && (!author || otherAuthor || row.evidence.length === 1)) {

@@ -124,7 +124,8 @@ export function parseMemoryBatch(output, messages) {
   let value;
   try { value = JSON.parse(String(output).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')); }
   catch { throw new Error('记忆整理返回的 JSON 无效，待处理消息已保留'); }
-  if (!value || Array.isArray(value) || !Array.isArray(value.items) || value.items.length > 12 || !Array.isArray(value.completed_source_ids)) throw new Error('记忆整理缺少完整处理回执');
+  if (!value || Array.isArray(value) || !Array.isArray(value.items) || !Array.isArray(value.completed_source_ids)) throw new Error('记忆整理缺少完整处理回执');
+  if (value.items.length > 12) throw Object.assign(new Error(`记忆整理返回 ${value.items.length} 条，超过单批 12 条上限；原话保留待重试`), { code: 'MEMORY_BATCH_TOO_LARGE' });
   const ids = new Set(messages.map(m => String(m.id)));
   const completed = value.completed_source_ids;
   if (completed.some(id => typeof id !== 'string' || !ids.has(id)) || new Set(completed).size !== completed.length) throw new Error('记忆整理回执的消息 ID 无效');
@@ -314,12 +315,13 @@ export class DailyMemory {
     const [key, q] = item;
     const retry=this.state.retries[key],heldIds=new Set(force?[]:[...(retry?.outcomeUnknownIds||[]),...(retry?.nextAt>Date.now()?(retry.uncertainMessageIds||[]):[])]);
     if(!force&&retry?.nextAt>Date.now()&&!Array.isArray(retry.uncertainMessageIds)&&!retry?.outcomeUnknownIds?.length)return {ok:false,reason:'retry-backoff'};
+    const batchLimit=Math.max(1,Math.min(this.batchSize,Math.floor(Number(retry?.batchLimit)||this.batchSize)));
     const messages=[];let characters=0;
     for(const message of q) {
       if(this.sourceBlocked(key,message)){if(!this.state.processing.some(r=>r.key===key&&r.id===String(message.id)&&r.status==='source-paused'))this.mark(key,message,'source-paused',{reason:'来源已撤回或暂不可核验，暂停提取；原队列保留，撤销纠正后可继续'});continue;}
       if(heldIds.has(String(message.id))||message.text.length>12000)continue;
       if(messages.length && characters+message.text.length>this.batchMaxChars)break;
-      messages.push(message);characters+=message.text.length;if(messages.length>=this.batchSize)break;
+      messages.push(message);characters+=message.text.length;if(messages.length>=batchLimit)break;
     }
     if(!messages.length){this.flushSave();return {ok:false,reason:q.some(m=>this.sourceBlocked(key,m))?'source-paused':heldIds.size?'retry-backoff':'needs-review'};}
     const progress = this.state.progress[key] ||= {};
@@ -422,6 +424,7 @@ export class DailyMemory {
       }
       const heldUnknown=(previousRetry?.outcomeUnknownIds||[]).filter(id=>this.state.queues[key].some(m=>String(m.id)===id)&&!messages.some(m=>String(m.id)===id));
       if(heldUnknown.length)this.state.retries[key]={...(this.state.retries[key]||{attempts:0,nextAt:0}),outcomeUnknownIds:heldUnknown};
+      if(previousRetry?.batchLimit&&this.state.queues[key].length)this.state.retries[key]={...(this.state.retries[key]||{attempts:0,nextAt:0}),batchLimit:previousRetry.batchLimit};
       if (!this.state.queues[key].length) delete this.state.queues[key];
       this.state.okCalls = (Number(this.state.okCalls) || 0) + 1;
       if (key.startsWith('group:')) this.state.groupCalls[key] = (Number(this.state.groupCalls[key]) || 0) + 1;
@@ -442,9 +445,18 @@ export class DailyMemory {
     } catch (err) {
       // 失败的那次不算进每日上限：否则模型抽风/超时会把当天额度耗光，队列永远清不动。
       this.state.calls = Math.max(0, (Number(this.state.calls) || 0) - 1);
-      const attempts = Math.min(20, (this.state.retries[key]?.attempts || 0) + 1);
-      const outcomeUnknownIds=[...new Set([...(this.state.retries[key]?.outcomeUnknownIds||[]),...(err?.code==='ANALYSIS_OUTCOME_UNKNOWN'?messages.map(m=>String(m.id)):[])])];
-      this.state.retries[key] = { attempts, outcomeUnknownIds, uncertainMessageIds:messages.map(m=>String(m.id)), nextAt: Date.now() + Math.min(1800000, 30000 * 2 ** (attempts - 1)), error: String(err?.message || err).slice(0, 240) };
+      const previousRetry=this.state.retries[key];
+      const attempts = Math.min(20, (previousRetry?.attempts || 0) + 1);
+      const outcomeUnknownIds=[...new Set([...(previousRetry?.outcomeUnknownIds||[]),...(err?.code==='ANALYSIS_OUTCOME_UNKNOWN'?messages.map(m=>String(m.id)):[])])];
+      // A different failed batch must not release earlier sources that are still
+      // in backoff. The shared deadline may extend their wait, but fresh messages
+      // remain eligible; unknown-outcome sources retain their separate hold.
+      const pendingIds=new Set((this.state.queues[key]||[]).map(m=>String(m.id)));
+      const priorHeld=previousRetry?.nextAt>Date.now()?(previousRetry.uncertainMessageIds||[]).filter(id=>pendingIds.has(id)):[];
+      const uncertainMessageIds=[...new Set([...priorHeld,...messages.map(m=>String(m.id))])];
+      const nextAt=Math.max(priorHeld.length?previousRetry.nextAt:0,Date.now()+Math.min(1800000,30000*2**(attempts-1)));
+      const retryBatchLimit=err?.code==='MEMORY_BATCH_TOO_LARGE'?Math.max(1,Math.floor(messages.length/2)):previousRetry?.batchLimit;
+      this.state.retries[key] = { attempts, outcomeUnknownIds, uncertainMessageIds, nextAt, ...(retryBatchLimit?{batchLimit:retryBatchLimit}:{}), error: String(err?.message || err).slice(0, 240) };
       for(const message of messages)this.mark(key,message,err?.code==='ANALYSIS_OUTCOME_UNKNOWN'?'review-needed':'retrying',{reason:String(err?.message||err).slice(0,240)});
       this.log(`daily memory failed: ${err?.message || err}`);
       return { ok: false, reason: 'error', error: String(err?.message || err) };

@@ -97,6 +97,7 @@ export class Continuity {
     this.states=new Map();this.live=new Map();this.busy=0;this.storageError=false;
     try {
       const old=load();
+      this.evidenceCursor=old?._evidenceCursor||0;
       if(old?.version===1&&Array.isArray(old.chats))for(const [key,s] of old.chats.slice(0,2)){
         if(!this.allowed(key)||!s||!['concerns','beliefs','events','seen'].every(k=>Array.isArray(s[k])))continue;
         const clean=empty();
@@ -116,7 +117,7 @@ export class Continuity {
   permitted(key){return this.enabled()&&this.allowed(key);}
   state(key){if(!this.states.has(key))this.states.set(key,empty());return this.states.get(key);}
   usable(key,s){return {...s,concerns:s.concerns.filter(r=>!this.sourceBlocked(key,r.evidence)),beliefs:s.beliefs.filter(r=>!this.sourceBlocked(key,r.evidence))};}
-  persist(){try{this.save({version:1,chats:[...this.states].filter(([k])=>this.allowed(k))});this.storageError=false;}catch{this.storageError=true;}}
+  persist(){try{this.save({version:1,_evidenceCursor:this.evidenceCursor||0,chats:[...this.states].filter(([k])=>this.allowed(k))});this.storageError=false;}catch{this.storageError=true;}}
   record(s,event){s.events=[...s.events,{at:this.now(),...event}].slice(-60);}
   expire(s){
     let changed=false;

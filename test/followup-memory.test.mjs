@@ -69,7 +69,7 @@ test('actual manual endpoint rejects relay tokens and rechecks permissions after
  const ctx=vm.createContext({crypto,req:{method:'GET',headers:{'x-agent-token':'wrong'}},url:new URL('http://localhost/api/socialV2/long-memory?key='+key+'&query=food'),
  sendJson:(data,status=200)=>responses.push({data,status}),agentTokenOk:(k,t)=>k===key&&t==='own',v2SessionAllowed:()=>true,v2ToolEnabled:()=>allowed,
  currentMode:'reserved2',cfg:{socialV2:{}},socialV2:{paused:false,conversations:new Map([[key,st]])},canonicalV2Key:k=>k,
- getSocialV2State:()=>st,recordRetrievalTrace:()=>{},followupMemory:{get:()=>new Promise(r=>finish=r)}});
+ getSocialV2State:()=>st,recordRetrievalTrace:()=>{},renderEvidence:()=>'',retrievalSessions:{search:()=>new Promise(r=>finish=r)}});
  const route=vm.runInContext('(async()=>{'+block+'})',ctx);await route();assert.equal(responses.at(-1).status,403);
  ctx.req.headers['x-agent-token']='own';const pending=route();allowed=false;finish({status:'matched',context:'private fact'});await pending;
  assert.equal(responses.at(-1).status,403);assert.ok(!JSON.stringify(responses.at(-1)).includes('private fact'));

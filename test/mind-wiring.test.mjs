@@ -1,4 +1,4 @@
-import {extras} from './bridge-test-context.mjs';
+import {extras,wireEvidenceFixture} from './bridge-test-context.mjs';
 import * as replyContext from '../bridge/reply-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -34,6 +34,7 @@ test('actual composer preserves current request, bounded emotions and stale-mess
   humanContextEnabled:()=>false,noteSessionTurn:()=>{},scheduleRotationCheck:()=>{},dailyMemorySubjects:new Map(),dailyRecallQueries:new Map(),recordRetrievalTrace:()=>{},
   continuity:{prompt:(_k,c)=>{c.continuityItems=[{id:'c',type:'concern',score:.9,text:'相关事项'}];return '';}},
   emotionState:{},emotionViewFor:()=>({}),emotionRecoveryCfg:()=>({}),withSubjectiveFeeling:x=>x,emotionPromptLine:()=> '有一点好奇',episodeRecallBlock:()=> '过去的情景参考',idleAssociations:{feeling:()=>null},expressionTeacher:{candidates:()=>[],view:()=>({lessons:[]})},responsePatterns:{candidates:()=>[],view:()=>({adjustments:[],strategies:[]})}});
+ wireEvidenceFixture(ctx);
  const fn=vm.runInContext(between('  async function withMemoryContext(','  const dailyRecallQueries')+';withMemoryContext',ctx);
  const result=await fn(key,'请直接给我答案',{allowIdleAssociation:true,continuityMessageId:'m'});assert.ok(result.endsWith('请直接给我答案'));assert.equal(result.split('有一点好奇').length,2);assert.match(result,/过去的情景参考/);
  mind.begin(key,'new');assert.equal(await fn(key,'旧请求',{allowIdleAssociation:true,continuityMessageId:'m'}),'旧请求');
@@ -58,10 +59,11 @@ test('actual semantic recall retains subject, task and source-time markers; late
   noteSessionTurn:()=>{},scheduleRotationCheck:()=>{},dailyMemorySubjects:new Map([[key,'1']]),dailyRecallQueries:new Map([[key,'1 周日有什么计划']]),recordRetrievalTrace:x=>traces.push(x),
   continuity:{prompt:()=>''},getSocialV2State:()=>({}),recallQuery:()=>'',memoryScope:k=>k,memoryRequest:async()=>({results:[]}),fetch:async()=>({ok:true,json:async()=>({results:[row]})}),
   idleAssociations:{take:async()=>''},expressionTeacher:{candidates:()=>[],view:()=>({lessons:[]})},responsePatterns:{candidates:()=>[],view:()=>({adjustments:[],strategies:[]})},traceRow:r=>r,log:()=>{}});
+ wireEvidenceFixture(ctx);
  const fn=vm.runInContext(between('  async function withMemoryContext(','  const dailyRecallQueries')+';withMemoryContext',ctx);
  const result=await fn(key,'周日有什么计划',{allowIdleAssociation:true});
  for(const s of ['plan-not-known-complete','private:1','source','如果不下雨'])assert.ok(result.includes(s),s+' missing from '+result);assert.equal(traces.at(-1).injected.length,1);
- ctx.fetch=async()=>new Promise(r=>release=r);mind.begin(key,'pending');const pending=fn(key,'旧问题',{allowIdleAssociation:true});await new Promise(r=>setImmediate(r));mind.begin(key,'next');release({ok:true,json:async()=>({results:[row]})});assert.equal(await pending,'旧问题');assert.equal(traces.at(-1).injected.length,0);
+ ctx.retrievalSessions.reset();ctx.fetch=async()=>new Promise(r=>release=r);mind.begin(key,'pending');const pending=fn(key,'旧问题',{allowIdleAssociation:true});await new Promise(r=>setImmediate(r));mind.begin(key,'next');release({ok:true,json:async()=>({results:[row]})});assert.equal(await pending,'旧问题');assert.equal(traces.at(-1).injected.length,0);
 });
 
 test('pausing a concern in the existing route also invalidates captured workspace references',async()=>{

@@ -63,7 +63,7 @@ export function buildHumanContext({ key, subjectId = '', currentMessage = '', pr
       if (isPriority && (!subject || who !== subject || scope !== key)) continue;
       const text = typeof r.text === 'string' ? r.text.trim() : '';
       // Skip rather than truncate a statement that might lose a condition/negation.
-      if (!text || text.length > 500 || who.length > 64) continue;
+      if (!text || text.length > (r.memory_kind==='utterance'?2000:500) || who.length > 64) continue;
       const existing = byId.get(r.id);
       if (existing) {
         // Prefer the search provenance, but retain the core/task classification.
@@ -73,7 +73,7 @@ export function buildHumanContext({ key, subjectId = '', currentMessage = '', pr
       const hasSource = Boolean(r.evidence?.sourceId || r.source_id);
       const sourceAt = hasSource ? time(r.evidence?.sourceTime, true) || time(r.source_time) : null;
       byId.set(r.id, { id: r.id, memory_kind: r.memory_kind || 'fact', scope, who, subject_id: who, tags: r.tags || '', shared: r.shared === true, text, tier, score, related: !isPriority, associated: r.associated === true, kind: r.associated ? 'associated' : isPriority ? 'priority' : r.shared ? 'shared' : 'search',
-        sourceId: r.evidence?.sourceId || r.source_id || '',
+        sourceId: r.evidence?.sourceId || r.source_id || '',contract:r.contract,
         at: sourceAt || time(r.created_at), timeBasis: sourceAt ? 'source' : 'stored', sourceQuote: r.sourceQuote, sourceContext: r.sourceContext, sourceContextStatus: r.sourceContextStatus });
     }
   }
@@ -96,7 +96,7 @@ export function buildHumanContext({ key, subjectId = '', currentMessage = '', pr
     if (seen.has(r.id) || contentSeen.has(identity) || (r.tier === 'task' && tasks >= 1)) continue;
     const line = JSON.stringify({ id: r.id, scope: r.scope, who: r.who || 'unknown',
       at: r.at, timeBasis: r.timeBasis, sourceQuote:r.sourceQuote, sourceContext:r.sourceContext, sourceContextStatus:r.sourceContextStatus,
-      kind: r.memory_kind === 'experience' ? 'experience-not-fact' : r.associated ? 'association-not-fact' : r.tier === 'task' ? 'plan-not-known-complete' : r.tier === 'core' ? 'long-term' : 'past-statement', text: r.text });
+      kind: r.memory_kind === 'utterance' ? 'original-utterance-not-verified-fact' : r.memory_kind === 'experience' ? 'experience-not-fact' : r.associated ? 'association-not-fact' : r.tier === 'task' ? 'plan-not-known-complete' : r.tier === 'core' ? 'long-term' : 'past-statement', sourceType:r.contract?.sourceType,rootIds:r.contract?.rootIds,text: r.text });
     if (used + line.length + 1 > budget) continue;
     lines.push(line); used += line.length + 1;
     try { options.onSelect?.(r); } catch {}

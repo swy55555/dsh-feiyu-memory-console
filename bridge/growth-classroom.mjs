@@ -14,7 +14,7 @@ const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 export function renderCourseRules(courses, opts = {}) {
   const maxChars = Math.min(2000, Math.max(200, Number(opts.maxChars) || 900));
   const usable = (Array.isArray(courses) ? courses : [])
-    .filter((c) => c && c.active && c.draft && typeof c.draft.guidance === 'string');
+    .filter((c) => c && c.active && c.sourceState!=='invalid' && c.draft && c.draft.sourceState!=='invalid' && typeof c.draft.guidance === 'string');
   if (!usable.length) return '';
   const lines = usable.slice(0, 3).map((c) => {
     const parts = [`- 【${String(c.title || '课程').slice(0, 40)}】`];
@@ -107,8 +107,8 @@ function draftFrom(raw){
  return Object.fromEntries(['guidance','avoid','example','rationale','checks'].map(k=>[k,v[k]]));
 }
 export class GrowthClassroom {
- constructor({allowed,generate,signature=()=>({}),load=()=>null,save=()=>{},now=Date.now}){
-  Object.assign(this,{allowed,generate,signature,save,now});this.busy=false;this.job=null;this.storageError=false;
+ constructor({allowed,generate,signature=()=>({}),load=()=>null,save=()=>{},now=Date.now,sourceRevision=()=>null}){
+  Object.assign(this,{allowed,generate,signature,save,now,sourceRevision});this.busy=false;this.job=null;this.storageError=false;
   let old;try{old=load()}catch{this.storageError=true;}
   this.state={version:1,enabled:false,courses:[],...old};this.state.enabled=this.state.enabled===true;
   if(!Array.isArray(this.state.courses))this.state.courses=[];
@@ -169,7 +169,7 @@ export class GrowthClassroom {
   this.commit(s);return this.view(key);
  }
  view(key){return {enabled:this.state.enabled===true,busy:this.busy,storageError:this.storageError,courses:this.allowed(key)?clone(this.state.courses):[]};}
- catalog(key){if(!this.allowed(key)||!this.state.enabled)return [];return this.state.courses.filter(c=>c.active&&c.draft).slice(0,3).map(c=>({id:c.id,revision:c.revision,title:c.title,when:c.when}));}
+ catalog(key){if(!this.allowed(key)||!this.state.enabled)return [];return this.state.courses.filter(c=>c.active&&c.sourceState!=='invalid'&&c.draft&&c.draft.sourceState!=='invalid').slice(0,3).map(c=>({id:c.id,revision:c.revision,title:c.title,when:c.when}));}
  candidates(key,ref,{currentRequest=false,boundary='none'}={}){
   if(!ref||currentRequest||boundary!=='none'||!this.catalog(key).some(c=>c.id===ref.id&&c.revision===ref.revision))return [];
   const c=this.state.courses.find(c=>c.id===ref.id);
@@ -181,9 +181,11 @@ export class GrowthClassroom {
   if(!this.state.enabled)throw Error('请先开启成长课堂');
   if(this.busy)throw Error('已有课堂任务在运行，请等待完成');
   const revision=this.course(this.state,key,id).revision;
+  const sourceRevision=this.sourceRevision();
   this.busy=true;
   try{
    const result=parse(await this.generate(prompt));
+   if(sourceRevision==='unavailable'||sourceRevision!==this.sourceRevision())throw Error('课堂依据已变化');
    const s=clone(this.state),live=this.course(s,key,id);
    if(!s.enabled||live.revision!==revision)throw Error('课堂设置或课程已变化，已丢弃本次过时结果');
    const item={id:randomUUID(),at:this.now(),...result,score:null,comment:'',reference:''};
@@ -241,10 +243,11 @@ ${weak.length?`你最近被扣分的地方：${JSON.stringify(weak)}\n` : ''}只
   if(cached){c.draft=clone(cached.generatedDraft);c.generatedDraft=clone(cached.generatedDraft);c.generatedHash=signature;c.draftSource='model';c.active=false;c.status='review';c.revision++;this.commit(s);return {reused:true};}
   if(c.lastAttempt&&this.now()-c.lastAttempt<60000)throw Error('刚刚尝试过，请至少一分钟后重试');
   c.active=false;c.status='generating';c.error='';c.revision++;c.lastAttempt=this.now();c.attempts=(c.attempts||0)+1;
-  const revision=c.revision,course=clone(c);this.commit(s);this.busy=true;
+  const revision=c.revision,course=clone(c),sourceRevision=this.sourceRevision();this.commit(s);this.busy=true;
   this.job=(async()=>{
    try{
     const draft=draftFrom(await this.generate(classroomPrompt(course)));
+    if(sourceRevision==='unavailable'||sourceRevision!==this.sourceRevision())throw Error('课堂依据已变化');
     const next=clone(this.state),live=this.course(next,key,id);
     if(!this.state.enabled||live.revision!==revision)return;
     Object.assign(live,{draft,generatedDraft:clone(draft),generatedHash:signature,draftSource:'model',status:'review',updatedAt:this.now()});this.commit(next);

@@ -9,6 +9,7 @@ export class EmotionScopes {
   constructor({ownerKey,legacy,load=()=>null,save=()=>{},now=Date.now}){
     Object.assign(this,{ownerKey,save,now});this.baseline=normalizeEmotion(legacy,now()).baseline;this.states=new Map();this.migrated=false;
     const stored=load();
+    this.evidenceCursor=stored?._evidenceCursor||0;
     if(stored?.version===1&&Array.isArray(stored.states)){
       for(const [key,value] of stored.states)if(/^(private:\d+|group:\d+\/member:\d+)$/.test(key))this.states.set(key,normalizeEmotion(value,now()));
     }else{
@@ -38,7 +39,7 @@ export class EmotionScopes {
     if(!this.states.has(key)&&this.states.size>=256)return;
     this.states.set(key,state);
   }
-  persist(){this.save({version:1,states:[...this.states],migration:{legacyKept:true,attributableJournalOnly:true}});}
+  persist(){this.save({version:1,_evidenceCursor:this.evidenceCursor||0,states:[...this.states],migration:{legacyKept:true,attributableJournalOnly:true}});}
   owner(){return this.get(this.ownerKey);}
   sharedAt(now=this.now(),recovery={}){
     let v=0,a=0,mv=0,ma=0,conflictTone=0;const feelings=new Map();

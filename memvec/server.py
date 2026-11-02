@@ -24,6 +24,11 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock, Thread
 import threading as _threading
+import importlib.util as _module_util
+
+_evidence_spec = _module_util.spec_from_file_location('xinji_evidence_store', os.path.join(os.path.dirname(__file__), 'evidence_store.py'))
+evidence_store = _module_util.module_from_spec(_evidence_spec)
+_evidence_spec.loader.exec_module(evidence_store)
 
 # self 作用域只给桥接内部使用：请求必须带 x-memvec-self 头，值与本地令牌一致。
 _ctx = _threading.local()
@@ -352,6 +357,10 @@ def db() -> sqlite3.Connection:
     conn.execute('CREATE TABLE IF NOT EXISTS memory_organize_holds (memory_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL)')
     _ensure_source_schema(conn)
     _ensure_correction_schema(conn)
+    evidence_store.install(conn)
+    conn.execute('CREATE TABLE IF NOT EXISTS memory_vector_meta(singleton INTEGER PRIMARY KEY CHECK(singleton=1), model TEXT NOT NULL)')
+    if not conn.execute('SELECT 1 FROM memory_vector_meta WHERE singleton=1').fetchone():
+        conn.execute('INSERT INTO memory_vector_meta VALUES(1,?)', ('BAAI/bge-small-zh-v1.5' if conn.execute('SELECT 1 FROM memories LIMIT 1').fetchone() else MODEL,))
     return conn
 
 
@@ -1849,6 +1858,9 @@ def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: f
     if not isinstance(query, str) or not query.strip() or len(query) > 2000:
         return []
     k = max(1, min(20, int(k)))
+    with _lock,db() as check:
+        if check.execute('SELECT model FROM memory_vector_meta WHERE singleton=1').fetchone()[0]!=MODEL:
+            raise ValueError('memory embedding model differs; rebuild in isolation before switching')
     q = embed([query])[0]
     with _lock, db() as conn:
         rows, mat = _cached_memory_matrix(conn, scope, shared=shared, include_global=include_global)
@@ -1903,6 +1915,65 @@ def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: f
                 break
         # Search is read-only. Explicit adoption is acknowledged separately.
         return out
+
+
+def index_evidence(limit=32):
+    with _lock,db() as conn:
+        pending=evidence_store._rows(conn,'''SELECT s.* FROM evidence_source_lookup s WHERE s.source_truncated=0
+            AND NOT EXISTS(SELECT 1 FROM evidence_vectors v WHERE v.source_version=s.source_version AND v.model=?)
+            AND NOT EXISTS(SELECT 1 FROM source_corrections c WHERE c.source_version=s.source_version AND c.state='revoked')
+            GROUP BY s.source_version ORDER BY s.source_version LIMIT ?''',(MODEL,max(1,min(128,int(limit)))))
+    if not pending:return {'indexed':0,'model':MODEL}
+    vectors=embed([r['text'] for r in pending])
+    if len(vectors)!=len(pending):raise ValueError('embedding result count mismatch')
+    count=0
+    with _lock,db() as conn:
+        for row,vector in zip(pending,vectors):
+            if not evidence_store.source(conn,row['key'],row['source_version']):continue
+            value=np.asarray(vector,dtype=np.float32)
+            if value.ndim!=1 or not len(value) or not np.isfinite(value).all():raise ValueError('invalid source vector')
+            conn.execute('INSERT OR REPLACE INTO evidence_vectors VALUES(?,?,?,?)',(row['source_version'],MODEL,len(value),value.tobytes()));count+=1
+    return {'indexed':count,'model':MODEL}
+
+
+def _evidence_index_loop():
+    while True:
+        try:index_evidence()
+        except Exception as error:print('source index pending:',type(error).__name__,flush=True)
+        time.sleep(5)
+
+
+def search_evidence(body):
+    scope = valid_scope(body.get('scope'))
+    query = body.get('query')
+    if not isinstance(query,str) or not 1<=len(query.strip())<=2000:
+        raise ValueError('query must contain 1..2000 characters')
+    # Embed outside the final source snapshot. Failure leaves original-word lookup
+    # available and is explicitly reported, rather than pretending vector success.
+    vector_error = None
+    try:
+        vectors = search_memory(query, k=20, scope=scope, min_score=.35)
+        query_vector = embed([query])[0]
+    except (RuntimeError, ValueError, OSError) as error:
+        vectors = []; query_vector=None; vector_error = type(error).__name__
+    with _lock, db() as conn:
+        raw=[]
+        if not conn.in_transaction:conn.execute('BEGIN')
+        if query_vector is not None:
+            for version,dimensions,blob in conn.execute('''SELECT v.source_version,v.dimensions,v.embedding FROM evidence_vectors v
+                WHERE v.model=? AND EXISTS(SELECT 1 FROM evidence_source_lookup s WHERE s.source_version=v.source_version AND s.key=?)''',(MODEL,scope)):
+                value=np.frombuffer(blob,dtype=np.float32)
+                if dimensions!=len(query_vector) or len(value)!=dimensions:continue
+                raw.append((version,float(value@query_vector)))
+            raw=sorted(raw,key=lambda r:(-r[1],r[0]))[:80]
+        result = evidence_store.search(conn,scope,query,vectors,body.get('limit',8),
+            str(body.get('subject','')),body.get('at'),body.get('time'),raw,valid_at=now())
+        if body.get('anchors'):
+            neighbours=evidence_store.expand(conn,scope,body['anchors'],6)
+            seen={r['id'] for r in result['results']}
+            result['results'] += [r for r in neighbours if r['id'] not in seen]
+        result['vectorStatus'] = 'unavailable' if vector_error else 'ready'
+        return result
 
 
 def reinforce(scope, ids):
@@ -2445,7 +2516,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             _ctx.allow_self = bool(_self_token()) and self.headers.get('x-memvec-self') == _self_token()
-            if self.path in ('/sources/correction/prepare','/sources/correction/apply','/sources/correction/undo'):
+            if self.path == '/evidence/search':
+                self._send(200, {'ok':True, **search_evidence(self._body())})
+            elif self.path == '/evidence/index':
+                self._send(200, {'ok':True,**index_evidence(self._body().get('limit',32))})
+            elif self.path == '/evidence/expand':
+                b=self._body(); scope=valid_scope(b.get('scope'))
+                with _lock,db() as conn:
+                    result={'results':evidence_store.expand(conn,scope,b.get('anchors',[]),b.get('limit',6)),'revision':evidence_store.revision(conn)}
+                self._send(200,{'ok':True,**result})
+            elif self.path == '/evidence/changes':
+                b=self._body()
+                with _lock,db() as conn:
+                    result=evidence_store.changes(conn,b.get('after',0),b.get('limit',100))
+                self._send(200,{'ok':True,**result})
+            elif self.path in ('/sources/correction/prepare','/sources/correction/apply','/sources/correction/undo'):
                 if self.headers.get('x-source-correction') != '1' or self.headers.get('origin'):
                     self._send(403, {'ok':False,'error':'来源纠正只能通过本地控制台提交'})
                     return
@@ -2607,9 +2692,10 @@ def main():
     _ensure_api_token()
     _ensure_self_token()
     get_model()  # 先把模型加载好，避免第一个请求超时
-    conn = db()
-    conn.close()
+    with db() as conn:
+        pass
     Thread(target=_consolidate_loop, daemon=True).start()
+    Thread(target=_evidence_index_loop, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"memvec listening on 127.0.0.1:{PORT}, db={DB_PATH}", flush=True)
     srv.serve_forever()

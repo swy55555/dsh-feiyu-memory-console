@@ -45,3 +45,7 @@
 ## QQ 基础桥接
 
 首次安装分发纳入了 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) 的适配代码，参考上游 v0.2.0，保留 Copyright (c) 2026 Derpyu520 and qq-bridge / QSH contributors 及 MIT 许可。来源与修改前快照哈希记录于 `bridge/bootstrap/SOURCE-PROVENANCE.json`，许可文本为 `bridge/bootstrap/LICENSE.qq-bridge`。本地适配快照不保证与上游标签完全相同。DSH、MCP SDK、SnowLuma SDK 等第三方代码不属于本项目的原创成果，分别遵循原许可；本包不分发 SnowLuma 登录程序或原生组件。
+
+## 统一证据检索的机制参考
+
+本轮参考 [Suzu Memory](https://github.com/eryucheng/suzu-memory) 提交 `645c862470b1a207c9904e614083f8b77a8f15bf` 的原话节点、有界补查、分路检索、失败恢复和时间排序思路，结合本项目现有来源与权限机制独立实现，没有复制该项目代码。不将其公开 LoCoMo 成绩当成本插件独立验证结果。离线 LoCoMo 数据及原评测材料继续遵循各自许可，不随插件包分发个人数据或实验数据库。

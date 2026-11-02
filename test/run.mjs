@@ -18,6 +18,7 @@ function run(command, args) {
   if (result.status !== 0) { failures++; console.error('FAILED:', args.join(' '), result.error?.message || '') }
 }
 try {
+  run(process.execPath, ['--test','test/daily-memory-recovery.test.mjs','test/evidence-retrieval.test.mjs'])
   for (const name of ['host', 'diary', 'audit', 'features', 'integration', 'human-context', 'runtime-extras', 'emotion-v2', 'turn-traces', 'runtime-bundle', 'runtime-integration', 'emotion-context', 'daily-memory', 'idle-association', 'usage-features', 'continuity', 'continuity-wiring', 'candidate-auto', 'emotion-feelings', 'headless-snapshot', 'mind-workspace', 'response-patterns', 'mind-wiring', 'human-presence', 'light-profile', 'xinji-runtime', 'background-reasoning', 'confirmation-review', 'self-reference']) run(process.execPath, [`test/${name}.test.mjs`])
   run(process.execPath, ['test/shared-expression.test.mjs'])
   run(process.execPath, ['test/expression-guard.test.mjs'])
@@ -40,6 +41,7 @@ try {
   run(process.execPath, ['test/emotion-scopes.test.mjs'])
   run(process.execPath, ['test/fishtalk-boundary.test.mjs'])
   const python = findPython()
+  if (python) run(python.command, [...python.args, 'test/evidence_store_test.py'])
   run(process.execPath, ['test/onboarding.test.mjs'])
   run(process.execPath, ['test/interaction-context.test.mjs'])
   run(process.execPath, ['test/cost-control.test.mjs'])
