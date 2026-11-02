@@ -35,6 +35,7 @@ const server = http.createServer(async (req, res) => {
         {id:'demo1',at:Date.now()-10000,sender:'测试用户',text:'明天要面试，我想先确认一下路线。',is_self:0},
         {id:'demo2',at:Date.now(),sender:'角色',text:'好，我们先看看地址和出发时间，再留一点缓冲。',is_self:1}
       ], summaries: [{id:'s1',period_start:Date.now()-3600000,period_end:Date.now()-1800000,text:'测试用户计划明天面试，正在确认出行路线。面试结果尚未发生。',structured:JSON.stringify({topics:['面试准备'],open_loops:['确认出发时间'],tone:'平和'})}] };
+    if(route==='/api/context/efficiency')Object.assign(data,{assembly:{enabled:true,usedChars:2200,budgetChars:8000,omittedChars:1500},rotation:{reason:'active',at:Date.now(),inputTokens:120000,inputLimit:96000,blockers:['tool-wait']},analysisMemo:{retentionHours:24,states:[{state:'success',count:2,hits:3}]}});
     if (route === "/api/context/traces")
       data.traces = [
         {
@@ -83,6 +84,7 @@ let browser;
 try {
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   browser = await chromium.launch({
+    channel: process.env.FEIYU_BROWSER_CHANNEL || undefined,
     headless: true,
     ...(process.env.FEIYU_BROWSER_CHANNEL
       ? { channel: process.env.FEIYU_BROWSER_CHANNEL }
@@ -114,6 +116,9 @@ try {
     { op: "irrelevant", id: row.id, scope: key, key, traceId: "trace-1" },
   ]);
   await page.getByRole('region',{name:'上下文与记忆的关系'}).waitFor();
+  await page.getByRole('region',{name:'参考与调用诊断'}).waitFor();
+  assert.match(await page.locator('#efficiency').innerText(),/工具等待未结束/);
+  assert.match(await page.locator('#efficiency').innerText(),/字符不是 token/);
   await page.setViewportSize({width:390,height:844});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
   await page.setViewportSize({width:1365,height:1000});

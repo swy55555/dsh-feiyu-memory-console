@@ -22,6 +22,38 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock, Thread
+import threading as _threading
+
+# self 作用域只给桥接内部使用：请求必须带 x-memvec-self 头，值与本地令牌一致。
+_ctx = _threading.local()
+SELF_TOKEN_FILE = os.path.join(os.path.expanduser("~"), ".dsh", "memvec", "self-token")
+
+
+def _self_token() -> str:
+    try:
+        with open(SELF_TOKEN_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def _ensure_self_token() -> str:
+    token = _self_token()
+    if token:
+        return token
+    try:
+        os.makedirs(os.path.dirname(SELF_TOKEN_FILE), exist_ok=True)
+        token = uuid.uuid4().hex
+        with open(SELF_TOKEN_FILE, "w", encoding="utf-8") as f:
+            f.write(token)
+        try:
+            os.chmod(SELF_TOKEN_FILE, 0o600)
+        except Exception:
+            pass
+        return token
+    except Exception:
+        return ""
+
 
 # 后台常驻服务别一次抽走所有核：embedding 是主要 CPU 来源。
 # 默认 4 线程；单机想更快可设 MEMVEC_THREADS=8，想更省设 2。
@@ -249,6 +281,7 @@ def db() -> sqlite3.Connection:
         'tier': "TEXT NOT NULL DEFAULT 'normal'",
         'relation': "TEXT NOT NULL DEFAULT ''", 'related_id': "TEXT NOT NULL DEFAULT ''",
         'fact_meta': "TEXT NOT NULL DEFAULT '{}'",
+        'memory_kind': "TEXT NOT NULL DEFAULT 'fact'",
     }.items():
         if col not in existing:
             conn.execute(f'ALTER TABLE memories ADD COLUMN {col} {definition}')
@@ -282,7 +315,389 @@ def db() -> sqlite3.Connection:
                          (RETENTION_VERSION, now(), json.dumps([{'id': r[0], 'strength': r[4]} for r in old])))
         conn.commit()
         _strength_migrated = True
+    conn.execute('CREATE TABLE IF NOT EXISTS memory_organize_holds (memory_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL)')
+    _ensure_source_schema(conn)
+    _ensure_correction_schema(conn)
     return conn
+
+
+def _source_version(row):
+    # No normalization of negation, punctuation, conditions or quoted content.
+    values = ['source-v1', row['key'], str(row['message_id']), str(row['user_id']),
+              int(row['is_self']), float(row['at']), row['text'], int(row.get('source_truncated', 0))]
+    return hashlib.sha256(json.dumps(values, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+
+
+def _source_event_id(scope, message_id):
+    return hashlib.sha256((scope + '/' + str(message_id)).encode()).hexdigest()[:24] if message_id else ''
+
+
+def _ensure_source_schema(conn):
+    conn.execute('CREATE TABLE IF NOT EXISTS source_schema (version INTEGER PRIMARY KEY, installed_at REAL NOT NULL)')
+    if conn.execute('SELECT 1 FROM source_schema WHERE version=1').fetchone():
+        return
+    if not conn.in_transaction:
+        conn.execute('BEGIN IMMEDIATE')
+    if conn.execute('SELECT 1 FROM source_schema WHERE version=1').fetchone():
+        return
+    names = {r[1] for r in conn.execute('PRAGMA table_info(messages)')}
+    for name in ('source_version', 'event_id', 'source_truncated'):
+        if name not in names:
+            conn.execute(f"ALTER TABLE messages ADD COLUMN {name} " + ("INTEGER NOT NULL DEFAULT 0" if name=="source_truncated" else "TEXT NOT NULL DEFAULT ''"))
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_messages_event ON messages(key,event_id)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_source ON memories(scope,source_id,subject_id)')
+    cur = conn.execute('SELECT * FROM messages')
+    cols = [c[0] for c in cur.description]
+    for raw in cur.fetchall():
+        r = dict(zip(cols, raw))
+        r['source_truncated'] = int(bool(r.get('source_truncated')) or len(r['text'].encode('utf-16-le', errors='surrogatepass')) // 2 >= 2000)
+        conn.execute('UPDATE messages SET source_version=?,event_id=?,source_truncated=? WHERE id=?',
+                     (_source_version(r), _source_event_id(r['key'], r['message_id']), r['source_truncated'], r['id']))
+    conn.execute('''CREATE TABLE evidence_sources (
+        source_version TEXT PRIMARY KEY,id TEXT NOT NULL,key TEXT NOT NULL,message_id TEXT NOT NULL,
+        sender TEXT NOT NULL,user_id TEXT NOT NULL,text TEXT NOT NULL,at REAL NOT NULL,is_self INTEGER NOT NULL,
+        event_id TEXT NOT NULL,source_truncated INTEGER NOT NULL DEFAULT 0)''')
+    conn.execute('CREATE INDEX idx_evidence_message ON evidence_sources(key,message_id,user_id)')
+    conn.execute('CREATE INDEX idx_evidence_event ON evidence_sources(key,event_id)')
+    conn.execute('''CREATE TABLE evidence_links (
+        owner_kind TEXT NOT NULL,owner_scope TEXT NOT NULL,owner_id TEXT NOT NULL,
+        source_version TEXT NOT NULL,current INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY(owner_kind,owner_scope,owner_id,source_version))''')
+    conn.execute('CREATE INDEX idx_evidence_link_version ON evidence_links(source_version)')
+    columns = 'source_version,id,key,message_id,sender,user_id,text,at,is_self,event_id,source_truncated'
+    conn.execute(f'''CREATE VIEW evidence_source_lookup AS SELECT {columns} FROM messages UNION ALL
+        SELECT {','.join('e.'+c for c in columns.split(','))} FROM evidence_sources e
+        WHERE NOT EXISTS (SELECT 1 FROM messages m WHERE m.id=e.id)''')
+    matching = """m.status<>'deleted' AND m.source_id<>'' AND m.scope=s.key AND m.source_id=s.message_id
+        AND m.subject_id=s.user_id AND s.is_self=0 AND s.source_truncated=0 AND m.source_text=s.text AND m.source_time>0
+        AND abs(m.source_time*1000-s.at)<=1000 AND length(s.source_version)=64"""
+    coverage = """t.status<>'deleted' AND t.key=s.key AND s.id IN
+        (SELECT value FROM json_each(CASE WHEN json_valid(t.covered_ids) THEN t.covered_ids ELSE '[]' END))"""
+    select_source = ','.join('s.'+c for c in columns.split(','))
+    def pin_memory(extra=''):
+        return f'''INSERT OR IGNORE INTO evidence_sources SELECT {select_source}
+          FROM evidence_source_lookup s JOIN memories m ON {matching} {extra};
+          INSERT OR REPLACE INTO evidence_links SELECT 'memory',m.scope,m.id,s.source_version,1
+          FROM evidence_source_lookup s JOIN memories m ON {matching} {extra};'''
+    def pin_summary(extra=''):
+        return f'''INSERT OR IGNORE INTO evidence_sources SELECT {select_source}
+          FROM evidence_source_lookup s JOIN session_summaries t ON {coverage} {extra};
+          INSERT OR REPLACE INTO evidence_links SELECT 'summary',t.key,t.id,s.source_version,1
+          FROM evidence_source_lookup s JOIN session_summaries t ON {coverage} {extra};'''
+    gc = 'DELETE FROM evidence_sources WHERE NOT EXISTS (SELECT 1 FROM evidence_links l WHERE l.source_version=evidence_sources.source_version);'
+    # SQL-only triggers also protect writes made by the console's SQLite client.
+    for op, suffix in [('INSERT', 'insert'), ('UPDATE OF scope,subject_id,source_id,source_text,source_time,status', 'update')]:
+        conn.execute(f'''CREATE TRIGGER evidence_memory_{suffix} AFTER {op} ON memories BEGIN
+          UPDATE evidence_links SET current=0 WHERE owner_kind='memory' AND owner_id=NEW.id;
+          {pin_memory('WHERE m.id=NEW.id')}
+          {gc} END''')
+    for op, suffix in [('INSERT', 'insert'), ('UPDATE OF key,covered_ids,status', 'update')]:
+        conn.execute(f'''CREATE TRIGGER evidence_summary_{suffix} AFTER {op} ON session_summaries BEGIN
+          UPDATE evidence_links SET current=0 WHERE owner_kind='summary' AND owner_id=NEW.id;
+          {pin_summary('WHERE t.id=NEW.id')}
+          {gc} END''')
+    for table, kind in [('memories', 'memory'), ('session_summaries', 'summary')]:
+        conn.execute(f'''CREATE TRIGGER evidence_{kind}_delete AFTER DELETE ON {table} BEGIN
+          DELETE FROM evidence_links WHERE owner_kind='{kind}' AND owner_id=OLD.id; {gc} END''')
+    conn.execute(f'''CREATE TRIGGER evidence_message_insert AFTER INSERT ON messages BEGIN
+        {pin_memory('WHERE s.id=NEW.id')} {pin_summary('WHERE s.id=NEW.id')} END''')
+    # Backfill solely from surviving original rows, never from a stored summary/quote.
+    for sql in (pin_memory() + pin_summary()).split(';'):
+        if sql.strip():
+            conn.execute(sql)
+    conn.execute('INSERT INTO source_schema VALUES(1,?)', (now(),))
+
+
+def _source_lookup(conn, scope, identifier, namespace='message', subject=None):
+    field = {'message': 'message_id', 'record': 'id', 'event': 'event_id'}.get(namespace)
+    if field is None or not identifier:
+        return None
+    cur = conn.execute(f'SELECT * FROM evidence_source_lookup WHERE key=? AND {field}=?', (scope, str(identifier)))
+    columns = [c[0] for c in cur.description]
+    rows = [dict(zip(columns, r)) for r in cur.fetchall()]
+    if len(rows) != 1:
+        return None  # Ambiguous versions are not guessed.
+    row = rows[0]
+    if row['source_version'] != _source_version(row):
+        return None
+    if subject is not None and (row['user_id'] != str(subject) or row['is_self']):
+        return None
+    return row
+
+
+def retain_source_refs(scope, owners):
+    """Bridge-owned reference registration; quotes never create missing raw evidence."""
+    scope = valid_scope(scope)
+    kinds = {'concern', 'belief', 'self-reference', 'response-evidence', 'response-adjustment'}
+    if not isinstance(owners, list) or len(owners) > 128:
+        raise ValueError('invalid source owners')
+    # Validate the full batch before writing anything.
+    for owner in owners:
+        if not isinstance(owner, dict) or owner.get('kind') not in kinds or not isinstance(owner.get('id'), str) or not 1 <= len(owner['id']) <= 160 or not isinstance(owner.get('refs'), list) or len(owner['refs']) > 96:
+            raise ValueError('invalid source owner')
+        if owner.get('release') is True and owner['refs']:
+            raise ValueError('release must not contain references')
+        for ref in owner['refs']:
+            if not isinstance(ref, dict) or ref.get('namespace') not in ('message', 'event') or not isinstance(ref.get('id'), str) or not 1 <= len(ref['id']) <= 160 or not isinstance(ref.get('subject'), str) or not ref['subject'].isdigit() or not isinstance(ref.get('quote'), str) or not 1 <= len(ref['quote']) <= 2000:
+                raise ValueError('invalid source reference')
+    matched, unavailable, mismatch = 0, 0, 0
+    with _lock, db() as conn:
+        for owner in owners:
+            if owner.get('release') is True:
+                conn.execute('DELETE FROM evidence_links WHERE owner_kind=? AND owner_scope=? AND owner_id=?',
+                             ('bridge:'+owner['kind'], scope, owner['id']))
+                continue
+            for ref in owner['refs']:
+                source = _source_lookup(conn, scope, ref['id'], ref['namespace'], ref['subject'])
+                if source is None:
+                    unavailable += 1
+                    continue
+                if ref['quote'] not in source['text']:
+                    mismatch += 1
+                    continue
+                keys = 'source_version,id,key,message_id,sender,user_id,text,at,is_self,event_id,source_truncated'.split(',')
+                conn.execute('INSERT OR IGNORE INTO evidence_sources VALUES(?,?,?,?,?,?,?,?,?,?,?)', tuple(source[k] for k in keys))
+                conn.execute('INSERT OR IGNORE INTO evidence_links VALUES(?,?,?,?,1)',
+                             ('bridge:'+owner['kind'], scope, owner['id'], source['source_version']))
+                matched += 1
+        conn.execute('DELETE FROM evidence_sources WHERE NOT EXISTS (SELECT 1 FROM evidence_links l WHERE l.source_version=evidence_sources.source_version)')
+    return {'matched': matched, 'unavailable': unavailable, 'mismatch': mismatch, 'modelCalls': 0}
+
+
+def source_status(scope, memory_id):
+    scope = valid_scope(scope)
+    with _lock, db() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM memories WHERE scope=? AND id=? AND status<>'deleted'", (scope, str(memory_id))).fetchone()
+        if row is None:
+            raise ValueError('memory not found in scope')
+        base = {'modelCalls': 0, 'semanticVerified': False}
+        if not row['source_id'] or not row['subject_id'] or not row['source_text']:
+            return {**base, 'status': 'incomplete'}
+        source = _source_lookup(conn, scope, row['source_id'], subject=row['subject_id'])
+        if source is None:
+            return {**base, 'status': 'unavailable'}
+        if source['source_truncated']:
+            return {**base, 'status': 'partial'}
+        if source['text'] != row['source_text'] or abs(source['at']-row['source_time']*1000)>1000:
+            return {**base, 'status': 'mismatch'}
+        retained = conn.execute('SELECT 1 FROM evidence_sources WHERE source_version=?', (source['source_version'],)).fetchone() is not None
+        in_window = conn.execute('SELECT 1 FROM messages WHERE id=?', (source['id'],)).fetchone() is not None
+        correction=conn.execute('SELECT state FROM source_corrections WHERE source_version=?',(source['source_version'],)).fetchone()
+        return {**base, 'status': 'matched', 'validity': 'revoked' if correction and correction[0]=='revoked' else 'valid', 'version': source['source_version'], 'retained': retained,
+                'inRecentWindow': in_window, 'author': 'user'}
+
+
+def memory_provenance(conn, row):
+    fields = ('id','scope','subject_id','text','source_id','source_text','source_time','status','expires_at','memory_kind')
+    version = hashlib.sha256(json.dumps(['memory-v1']+[row[k] for k in fields], ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+    source = _source_lookup(conn, row['scope'], row['source_id'], subject=row['subject_id']) if row['subject_id'] else None
+    verified = source and not source['source_truncated'] and source['text']==row['source_text'] and abs(source['at']-row['source_time']*1000)<=1000
+    return {'version': 1, 'scope': row['scope'], 'memoryVersion': version, 'sourceVersion': source['source_version'] if verified else None}
+
+
+def source_impact(scope, memory_id):
+    """Read-only, same-scope dependency preview. Never infers semantic dependencies."""
+    scope = valid_scope(scope)
+    if not isinstance(memory_id, str) or not 1 <= len(memory_id) <= 160:
+        raise ValueError('invalid memory id')
+    from pathlib import Path
+    from contextlib import closing
+    with _lock, closing(sqlite3.connect(Path(DB_PATH).resolve().as_uri()+'?mode=ro', uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute('BEGIN')
+        memory = conn.execute("SELECT * FROM memories WHERE scope=? AND id=? AND status<>'deleted'", (scope, memory_id)).fetchone()
+        if memory is None:
+            raise ValueError('memory not found in scope')
+        base = {'modelCalls': 0, 'readOnly': True, 'items': [], 'coverage': 'recorded-direct-only'}
+        if not memory['source_id'] or not memory['subject_id'] or not memory['source_text']:
+            return {**base, 'status': 'incomplete'}
+        source = _source_lookup(conn, scope, memory['source_id'], subject=memory['subject_id'])
+        if source is None:
+            return {**base, 'status': 'unavailable'}
+        quote_matches = source['text'] == memory['source_text'] or (source['source_truncated'] and source['text'].startswith(memory['source_text']))
+        if not quote_matches or abs(source['at']-memory['source_time']*1000)>1000:
+            return {**base, 'status': 'mismatch'}
+        rows = conn.execute('''SELECT l.owner_kind kind,l.owner_id id,l.current,
+            CASE WHEN l.owner_kind='memory' THEN m.text WHEN l.owner_kind='summary' THEN s.text ELSE '' END text,
+            CASE WHEN l.owner_kind='memory' THEN m.status WHEN l.owner_kind='summary' THEN s.status ELSE '' END status
+            FROM evidence_links l
+            LEFT JOIN memories m ON l.owner_kind='memory' AND m.scope=l.owner_scope AND m.id=l.owner_id
+            LEFT JOIN session_summaries s ON l.owner_kind='summary' AND s.key=l.owner_scope AND s.id=l.owner_id
+            WHERE l.owner_scope=? AND l.source_version=? ORDER BY l.owner_kind,l.owner_id''',
+            (scope, source['source_version'])).fetchall()
+        items = []
+        for r in rows:
+            bridge = r['kind'].startswith('bridge:')
+            items.append({'kind': r['kind'], 'id': r['id'], 'text': (r['text'] or '')[:240],
+                          'status': r['status'] or 'unknown',
+                          'reference': 'registered' if bridge else ('unavailable' if r['status'] is None else ('current' if r['current'] else 'historical'))})
+            if r['kind']=='memory' and r['status'] is not None:
+                parent = conn.execute('SELECT * FROM memories WHERE scope=? AND id=?', (scope, r['id'])).fetchone()
+                items[-1]['memoryVersion'] = memory_provenance(conn, parent)['memoryVersion']
+        return {**base, 'status': 'partial' if source['source_truncated'] else 'matched', 'items': items,
+                'source': {'version': source['source_version'], 'scope': scope, 'eventId': source['event_id'],
+                           'subject': source['user_id'], 'text': source['text']}}
+
+
+def _ensure_correction_schema(conn):
+    conn.execute('''CREATE TABLE IF NOT EXISTS source_corrections (
+        source_version TEXT PRIMARY KEY, scope TEXT NOT NULL, event_id TEXT NOT NULL,
+        message_id TEXT NOT NULL, subject TEXT NOT NULL, state TEXT NOT NULL,
+        revision INTEGER NOT NULL, reason TEXT NOT NULL, changed_at REAL NOT NULL, changes TEXT NOT NULL)''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_source_correction_scope ON source_corrections(scope,state)')
+    conn.execute('''CREATE TABLE IF NOT EXISTS source_correction_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, source_version TEXT NOT NULL, revision INTEGER NOT NULL,
+        action TEXT NOT NULL, reason TEXT NOT NULL, at REAL NOT NULL, result TEXT NOT NULL)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS source_clarifications (
+        current_version TEXT PRIMARY KEY,scope TEXT NOT NULL,target_version TEXT NOT NULL,
+        request_hash TEXT NOT NULL,created_at REAL NOT NULL,result TEXT NOT NULL)''')
+    # Prevent ordinary confirmation/restore and late writes reviving revoked evidence.
+    # These are SQL triggers so console-side SQLite updates obey the same boundary.
+    revoked_memory = """EXISTS(SELECT 1 FROM source_corrections c JOIN evidence_sources s
+        ON s.source_version=c.source_version WHERE c.state='revoked' AND c.scope=NEW.scope
+        AND s.message_id=NEW.source_id AND s.user_id=NEW.subject_id AND s.text=NEW.source_text
+        AND abs(s.at-NEW.source_time*1000)<=1000)"""
+    revoked_summary = """EXISTS(SELECT 1 FROM source_corrections c JOIN evidence_sources s
+        ON s.source_version=c.source_version WHERE c.state='revoked' AND c.scope=NEW.key
+        AND s.id IN (SELECT value FROM json_each(CASE WHEN json_valid(NEW.covered_ids) THEN NEW.covered_ids ELSE '[]' END)))"""
+    for table, condition, statuses in [('memories', revoked_memory, "('active','candidate')"),
+                                       ('session_summaries', revoked_summary, "('active')")]:
+        for action in ('INSERT','UPDATE'):
+            conn.execute(f"""CREATE TRIGGER IF NOT EXISTS correction_guard_{table}_{action.lower()}
+                BEFORE {action} ON {table} WHEN NEW.status IN {statuses} AND {condition}
+                BEGIN SELECT RAISE(ABORT,'来源已被撤回，请先核对新依据；不能直接确认或恢复'); END""")
+
+
+def _correction_snapshot(conn, scope, memory_id):
+    memory=conn.execute("SELECT * FROM memories WHERE scope=? AND id=? AND status<>'deleted'",(scope,memory_id)).fetchone()
+    if memory is None: raise ValueError('memory not found in scope')
+    source=_source_lookup(conn,scope,memory['source_id'],subject=memory['subject_id']) if memory['subject_id'] else None
+    if not source or source['source_truncated'] or source['text']!=memory['source_text'] or abs(source['at']-memory['source_time']*1000)>1000:
+        raise ValueError('原话不完整或版本不能核验，不能提交来源纠正')
+    return _correction_source_snapshot(conn,scope,source)
+
+
+def _correction_source_snapshot(conn,scope,source):
+    prior=conn.execute('SELECT * FROM source_corrections WHERE source_version=?',(source['source_version'],)).fetchone()
+    targets=[]
+    for kind,table,scope_field in [('memory','memories','scope'),('summary','session_summaries','key')]:
+        rows=conn.execute(f"""SELECT t.* FROM {table} t JOIN evidence_links l ON l.owner_id=t.id
+            AND l.owner_scope=t.{scope_field} WHERE l.owner_kind=? AND l.owner_scope=?
+            AND l.source_version=? AND l.current=1 AND t.status IN ('active','candidate') ORDER BY t.id""",
+            (kind,scope,source['source_version'])).fetchall()
+        targets.extend({'kind':kind,'id':r['id'],'status':r['status'],'version':_fingerprint(r),'text':r['text'][:240]} for r in rows)
+    payload={'sourceVersion':source['source_version'],'revision':prior['revision'] if prior else 0,
+             'state':prior['state'] if prior else 'valid','targets':targets}
+    revision=hashlib.sha256(json.dumps(payload,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    return source,prior,targets,revision
+
+
+def prepare_source_correction(scope, memory_id):
+    scope=valid_scope(scope)
+    with _lock,db() as conn:
+        conn.row_factory=sqlite3.Row
+        source,prior,targets,revision=_correction_snapshot(conn,scope,str(memory_id))
+        return {'modelCalls':0,'sourceVersion':source['source_version'],'revision':revision,
+                'correctionRevision':prior['revision'] if prior else 0,'state':prior['state'] if prior else 'valid',
+                'reason':prior['reason'] if prior else '', 'targets':targets,'count':len(targets)}
+
+
+def apply_source_correction(scope, memory_id, source_version, revision, reason):
+    scope=valid_scope(scope)
+    if not isinstance(reason,str) or not 1<=len(reason.strip())<=300: raise ValueError('请用 1–300 字说明为什么撤回整句原话的依据资格')
+    with _lock,db() as conn:
+        conn.commit();conn.execute('BEGIN IMMEDIATE');conn.row_factory=sqlite3.Row
+        source,prior,targets,current=_correction_snapshot(conn,scope,str(memory_id))
+        if source_version!=source['source_version'] or revision!=current: raise ValueError('来源或相关记忆已变化，请重新预览')
+        return _revoke_source(conn,scope,source,prior,targets,reason)
+
+
+def _revoke_source(conn,scope,source,prior,targets,reason):
+    if prior and prior['state']=='revoked': return {'duplicate':True,'paused':0,'modelCalls':0,'correctionRevision':prior['revision']}
+    keys='source_version,id,key,message_id,sender,user_id,text,at,is_self,event_id,source_truncated'.split(',')
+    conn.execute('INSERT OR IGNORE INTO evidence_sources VALUES(?,?,?,?,?,?,?,?,?,?,?)',tuple(source[k] for k in keys))
+    conn.execute('INSERT OR IGNORE INTO evidence_links VALUES(?,?,?,?,1)',('correction',scope,source['source_version'],source['source_version']))
+    changes=[]
+    for item in targets:
+        table='memories' if item['kind']=='memory' else 'session_summaries'
+        conn.execute(f"UPDATE {table} SET status='archived' WHERE id=?",(item['id'],))
+        after=conn.execute(f'SELECT * FROM {table} WHERE id=?',(item['id'],)).fetchone()
+        changes.append({'kind':item['kind'],'id':item['id'],'beforeStatus':item['status'],'after':_fingerprint(after)})
+    rev=(prior['revision'] if prior else 0)+1
+    conn.execute('INSERT OR REPLACE INTO source_corrections VALUES(?,?,?,?,?,?,?,?,?,?)',
+        (source['source_version'],scope,source['event_id'],source['message_id'],source['user_id'],'revoked',rev,reason.strip(),now(),json.dumps(changes)))
+    conn.execute('INSERT INTO source_correction_history(source_version,revision,action,reason,at,result) VALUES(?,?,?,?,?,?)',
+        (source['source_version'],rev,'revoke',reason.strip(),now(),json.dumps({'paused':len(changes)})))
+    _matrix_cache_clear()
+    return {'paused':len(changes),'modelCalls':0,'correctionRevision':rev,'sourceVersion':source['source_version']}
+
+
+def apply_chat_clarification(body):
+    """Single same-author whole-utterance withdrawal; semantic judgement is not proof by itself."""
+    scope=valid_scope(body.get('scope'))
+    if scope!=owner_scope() or not scope.startswith('private:'): raise ValueError('仅支持已配置主人的私聊澄清')
+    p=body.get('proposal')
+    if not isinstance(p,dict) or p.get('kind')!='whole_retraction' or p.get('explicit') is not True or p.get('speaker')!='self' or p.get('mode')!='asserted' or p.get('coverage')!='entire':
+        raise ValueError('不是本人明确的整句撤回，保留原依据')
+    confidence=p.get('confidence')
+    if type(confidence) not in (int,float) or not .98<=confidence<=1: raise ValueError('澄清判断把握不足')
+    if p.get('targetId')!=body.get('targetId'): raise ValueError('目标不一致')
+    for key in ('currentId','currentVersion','targetId','targetVersion'):
+        if not isinstance(body.get(key),str) or not 1<=len(body[key])<=160: raise ValueError('来源标识无效')
+    if type(body.get('targetRevision')) is not int: raise ValueError('缺少本地版本')
+    request_hash=hashlib.sha256(json.dumps(body,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    with _lock,db() as conn:
+        conn.commit();conn.execute('BEGIN IMMEDIATE');conn.row_factory=sqlite3.Row
+        receipt=conn.execute('SELECT * FROM source_clarifications WHERE current_version=? AND scope=?',(body['currentVersion'],scope)).fetchone()
+        if receipt:
+            if receipt['request_hash']!=request_hash: raise ValueError('同一条澄清不能再次扩展或改换目标')
+            return {'status':'already-processed','paused':0,'modelCalls':0}
+        subject=scope[8:]
+        current=_source_lookup(conn,scope,body['currentId'],subject=subject)
+        target=_source_lookup(conn,scope,body['targetId'],subject=subject)
+        if not current or not target or current['source_truncated'] or target['source_truncated']: raise ValueError('完整原话不可核验')
+        if current['source_version']!=body['currentVersion'] or target['source_version']!=body['targetVersion']: raise ValueError('原话版本已变化')
+        if p.get('quote')!=current['text'] or p.get('oldQuote')!=target['text'] or len(target['text'])>1000: raise ValueError('必须提供本轮与旧话的完整原文')
+        if not 0<current['at']-target['at']<=45*60000 or not -5000<=now()*1000-current['at']<=10*60000: raise ValueError('不在可核验的近期澄清范围')
+        if conn.execute('SELECT 1 FROM messages WHERE key=? AND user_id=? AND is_self=0 AND at>? LIMIT 1',(scope,subject,current['at'])).fetchone(): raise ValueError('已有更新的本人消息，旧判断不提交')
+        if conn.execute("SELECT 1 FROM source_corrections WHERE source_version=? AND state='revoked'",(current['source_version'],)).fetchone(): raise ValueError('澄清依据本身已撤回')
+        _,prior,targets,_=_correction_source_snapshot(conn,scope,target)
+        if (prior['revision'] if prior else 0)!=body['targetRevision'] or (prior and prior['state']=='revoked'): raise ValueError('目标已被其他操作修改')
+        result=_revoke_source(conn,scope,target,prior,targets,'聊天中明确撤回此前整句原话；澄清依据已保留')
+        columns='source_version,id,key,message_id,sender,user_id,text,at,is_self,event_id,source_truncated'.split(',')
+        conn.execute('INSERT OR IGNORE INTO evidence_sources VALUES(?,?,?,?,?,?,?,?,?,?,?)',tuple(current[k] for k in columns))
+        conn.execute('INSERT OR IGNORE INTO evidence_links VALUES(?,?,?,?,1)',('clarification',scope,current['source_version'],current['source_version']))
+        result={**result,'status':'applied'}
+        conn.execute('INSERT INTO source_clarifications VALUES(?,?,?,?,?,?)',(current['source_version'],scope,target['source_version'],request_hash,now(),json.dumps(result)))
+        return result
+
+
+def undo_source_correction(scope, source_version, revision):
+    scope=valid_scope(scope)
+    with _lock,db() as conn:
+        conn.commit();conn.execute('BEGIN IMMEDIATE');conn.row_factory=sqlite3.Row
+        prior=conn.execute('SELECT * FROM source_corrections WHERE source_version=? AND scope=?',(source_version,scope)).fetchone()
+        if not prior or prior['revision']!=revision: raise ValueError('纠正记录已变化，请重新加载')
+        if prior['state']!='revoked': return {'duplicate':True,'restored':0,'skipped':0,'modelCalls':0}
+        rev=prior['revision']+1
+        conn.execute("UPDATE source_corrections SET state='restored',revision=?,changed_at=? WHERE source_version=?",(rev,now(),source_version))
+        restored=skipped=0
+        for item in json.loads(prior['changes']):
+            table='memories' if item['kind']=='memory' else 'session_summaries'
+            row=conn.execute(f'SELECT * FROM {table} WHERE id=?',(item['id'],)).fetchone()
+            if row is None or row['status']!='archived' or _fingerprint(row)!=item['after']:
+                skipped+=1;continue
+            # A summary may still depend on a different revoked source.
+            other=conn.execute('''SELECT 1 FROM evidence_links l JOIN source_corrections c ON c.source_version=l.source_version
+                WHERE l.owner_kind=? AND l.owner_scope=? AND l.owner_id=? AND l.current=1 AND c.state='revoked' LIMIT 1''',
+                (item['kind'],scope,item['id'])).fetchone()
+            if other: skipped+=1;continue
+            conn.execute(f'UPDATE {table} SET status=? WHERE id=?',(item['beforeStatus'],item['id']));restored+=1
+        conn.execute('INSERT INTO source_correction_history(source_version,revision,action,reason,at,result) VALUES(?,?,?,?,?,?)',
+            (source_version,rev,'undo',prior['reason'],now(),json.dumps({'restored':restored,'skipped':skipped})))
+        _matrix_cache_clear()
+        return {'restored':restored,'skipped':skipped,'modelCalls':0,'correctionRevision':rev}
 
 
 def embed(texts: list[str]) -> np.ndarray:
@@ -301,6 +716,10 @@ def recall_prob(strength_days: float, last_access: float, importance: float) -> 
 def valid_scope(scope):
     if scope is None or str(scope).strip() == '':
         return 'global'
+    if str(scope).strip() == 'self':
+        if not getattr(_ctx, 'allow_self', False):
+            raise ValueError('self 作用域仅限桥接内部使用')
+        return 'self'
     import re
     if not isinstance(scope, str) or not re.fullmatch(r'(group|private):[0-9]+', scope):
         raise ValueError('必须提供当前聊天的 group:ID 或 private:ID；旧 global 记忆仅保留归档')
@@ -337,6 +756,8 @@ def stored_fact(row):
 
 def fact_relation(a, b):
     a, b = dict(a), dict(b)
+    if a.get('memory_kind') == 'experience' or b.get('memory_kind') == 'experience':
+        return 'coexist'  # Reports about different moments are not competing current facts.
     if a.get('scope') != b.get('scope') or a.get('subject_id') != b.get('subject_id'):
         return 'coexist'
     left, right = stored_fact(a), stored_fact(b)
@@ -429,8 +850,10 @@ def _related_rows(candidate, rows, similarity):
 
 
 def _review_context(conn, candidate, offset=0, all_rows=False):
-    rows = conn.execute("SELECT * FROM memories WHERE scope=? AND subject_id=? AND status='active' AND id<>? AND (expires_at=0 OR expires_at>?) ORDER BY id",
+    rows = conn.execute("SELECT * FROM memories WHERE scope=? AND subject_id=? AND status='active' AND memory_kind='fact' AND id<>? AND (expires_at=0 OR expires_at>?) ORDER BY id",
                         (candidate['scope'], candidate['subject_id'], candidate['id'], now())).fetchall()
+    if dict(candidate).get('memory_kind') == 'experience':
+        rows = []  # Restoring a sourced utterance does not assert a current fact.
     q = np.frombuffer(candidate['embedding'], dtype=np.float32)
     def similarity(row):
         v = np.frombuffer(row['embedding'], dtype=np.float32)
@@ -649,6 +1072,57 @@ def _fact_peers(conn, row):
             if fact_relation(row, r) in ('conflict', 'equivalent')]
 
 
+def _experience_source(conn, row):
+    """Verify an utterance against the raw-message ledger, never against its own summary."""
+    r = dict(row)
+    if r.get('tags') not in ('episode', 'preference', 'habit', 'plan') or r.get('tier', 'normal') != 'normal':
+        return None
+    if r.get('relation') in ('replace', 'conflict'):
+        return None
+    match = re.fullmatch(r'.{1,80}（QQ (\d+)）曾说：([\s\S]{1,200})', r.get('text', ''))
+    if not match or match[1] != r.get('subject_id') or not r.get('source_id'):
+        return None
+    source = _source_lookup(conn, r.get('scope'), r['source_id'], subject=r['subject_id'])
+    if source is None or source['source_truncated']:
+        return None
+    source = dict(source)
+    if source['text'] != r.get('source_text') or match[2] not in source['text']:
+        return None
+    # A personal statement is usable as a sourced utterance, not verified truth.
+    # Require the whole message here: a locally matched fragment cannot prove
+    # that a negation, condition, quotation or joke outside it was preserved.
+    if r.get('tags') != 'episode' and match[2] != source['text']:
+        return None
+    at = float(r.get('source_time') or 0)
+    if not math.isfinite(at) or at <= 0 or abs(source['at'] / 1000 - at) > 1 or at > now() + 60:
+        return None
+    return source
+
+
+def _add_experience(text, tags, scope, importance, meta):
+    row = {**meta, 'text': text, 'tags': tags, 'scope': scope}
+    with _lock, db() as conn:
+        conn.row_factory = sqlite3.Row
+        if _experience_source(conn, row) is None:
+            return None  # Raw delivery may be delayed; retain a candidate until it arrives.
+        old = conn.execute('SELECT * FROM memories WHERE scope=? AND subject_id=? AND source_id=? AND text=? ORDER BY created_at LIMIT 1',
+                           (scope, meta['subject_id'], meta['source_id'], text)).fetchone()
+        if old:
+            return {'id': old['id'], 'status': old['status'], 'memory_kind': old['memory_kind'], 'duplicate': True}
+        mid, ts = uuid.uuid4().hex, now()
+        expires = float(meta.get('expires_at') or 0)
+        if not math.isfinite(expires) or expires < 0:
+            raise ValueError('invalid experience expiry')
+        vec = embed([text])[0]
+        conn.execute("""INSERT INTO memories
+            (id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,
+             status,memory_kind,subject_id,source_id,source_text,source_time,confidence,expires_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?, 'active','experience',?,?,?,?,0,?)""",
+            (mid,text,tags,scope,importance,ts,ts,initial_strength(scope,tags,importance),0,vec.tobytes(),
+             meta['subject_id'],meta['source_id'],meta['source_text'],meta['source_time'],expires))
+        return {'id': mid, 'text': text, 'scope': scope, 'status': 'active', 'memory_kind': 'experience'}
+
+
 def add_memory(text: str, tags: str = "", scope: str = None, importance: float = 0.5, **meta) -> dict:
     _matrix_cache_clear()
     scope = valid_scope(scope)
@@ -659,6 +1133,11 @@ def add_memory(text: str, tags: str = "", scope: str = None, importance: float =
     confidence = float(meta.get('confidence', 1))
     if not 0 <= importance <= 1 or not 0 <= confidence <= 1:
         raise ValueError('importance/confidence 必须为 0..1')
+    if meta.get('memory_kind') == 'experience':
+        result = _add_experience(text, tags, scope, importance, meta)
+        if result is not None:
+            return result
+        meta = {**meta, 'confirmed': False, 'semantic_checked': False}
     subject = str(meta.get('subject_id', ''))[:80]
     fact_key = str(meta.get('fact_key', ''))[:100]
     source_id = str(meta.get('source_id', ''))[:120]
@@ -679,10 +1158,10 @@ def add_memory(text: str, tags: str = "", scope: str = None, importance: float =
         semantic = meta.get('semantic_checked') is True
         conn.row_factory = sqlite3.Row
         incoming = {'id': mid, 'text': text, 'scope': scope, 'subject_id': subject, 'fact_meta': json.dumps(validated_fact(meta.get('fact'), text), ensure_ascii=False)}
-        prior = conn.execute('SELECT id,status,source_id,source_time FROM memories WHERE scope=? AND subject_id=? AND text=? ORDER BY created_at DESC LIMIT 1',
+        prior = conn.execute("SELECT id,status,source_id,source_time FROM memories WHERE scope=? AND subject_id=? AND text=? AND (memory_kind='fact' OR status='deleted') ORDER BY created_at DESC LIMIT 1",
                              (scope, subject, text)).fetchone()
         if semantic:
-            prior = conn.execute('SELECT id,status,source_id,source_time FROM memories WHERE scope=? AND subject_id=? AND text=? ORDER BY created_at DESC LIMIT 1',(scope,subject,text)).fetchone()
+            prior = conn.execute("SELECT id,status,source_id,source_time FROM memories WHERE scope=? AND subject_id=? AND text=? AND (memory_kind='fact' OR status='deleted') ORDER BY created_at DESC LIMIT 1",(scope,subject,text)).fetchone()
         if prior:
             # Only fresh evidence from the same speaker strengthens an active memory.
             if prior[1] == 'active' and status == 'active' and subject and source_id and source_id != prior[2] and source_time > prior[3]:
@@ -703,7 +1182,7 @@ def add_memory(text: str, tags: str = "", scope: str = None, importance: float =
         if semantic:
             if target_id:
                 conn.row_factory = sqlite3.Row
-                target = conn.execute("SELECT * FROM memories WHERE id=? AND scope=? AND subject_id=? AND status='active' AND (expires_at=0 OR expires_at>?)", (target_id,scope,subject,ts)).fetchone()
+                target = conn.execute("SELECT * FROM memories WHERE id=? AND scope=? AND subject_id=? AND status='active' AND memory_kind='fact' AND (expires_at=0 OR expires_at>?)", (target_id,scope,subject,ts)).fetchone()
             valid_target = target is not None and target['source_time'] == meta.get('related_time')
             if target is not None:
                 comparison_target = dict(target)
@@ -818,7 +1297,7 @@ def _try_merge_dated(conn, scope, subject, text, importance, tier, source_id, so
         return None
     rows = conn.execute(
         "SELECT id,text,importance,strength_days,tier,source_text,source_time,created_at"
-        " FROM memories WHERE scope=? AND subject_id=? AND status='active' ORDER BY created_at ASC LIMIT 500",
+        " FROM memories WHERE scope=? AND subject_id=? AND status='active' AND memory_kind='fact' ORDER BY created_at ASC LIMIT 500",
         (scope, subject),
     ).fetchall()
     for row in rows:
@@ -852,7 +1331,7 @@ def consolidate_scope(scope: str, dry: bool = False) -> dict:
     with _lock, db() as conn:
         rows = conn.execute(
             "SELECT id,text,importance,strength_days,tier,created_at,subject_id,source_text FROM memories"
-            " WHERE scope=? AND status='active' ORDER BY created_at ASC LIMIT 2000",
+            " WHERE scope=? AND status='active' AND memory_kind='fact' ORDER BY created_at ASC LIMIT 2000",
             (scope,),
         ).fetchall()
         for row in rows:
@@ -930,21 +1409,33 @@ def _consolidate_loop():
 
 
 def add_message(key: str, message_id: str = '', sender: str = '', user_id: str = '',
-                text: str = '', at: float | None = None, is_self: bool = False, meta: str = '') -> dict:
+                text: str = '', at: float | None = None, is_self: bool = False, meta: str = '', truncated: bool | None = None) -> dict:
     """原文层写入。幂等：同一 key+messageId 重复投递只保留一条。"""
     key = valid_scope(key)
     text = (text or '').strip()
     if not text or len(text) > 2000:
         raise ValueError('text 长度必须为 1..2000')
     ts = float(at) if at else now() * 1000
+    if not math.isfinite(ts) or ts <= 0:
+        raise ValueError('invalid message time')
     mid = f'{key}:{message_id}' if message_id else f'{key}:{int(ts)}:{uuid.uuid4().hex[:8]}'
+    message_id, user_id = str(message_id or ''), str(user_id or '')
+    source = {'key': key, 'message_id': message_id, 'user_id': user_id, 'text': text,
+              'at': ts, 'is_self': 1 if is_self else 0,
+              'source_truncated': int(truncated is not False and (truncated is True or len(text.encode('utf-16-le', errors='surrogatepass')) // 2 >= 2000))}
+    version = _source_version(source)
     with _lock, db() as conn:
+        previous = _source_lookup(conn, key, message_id) if message_id else None
+        if previous is not None:
+            # A redelivery is not an authorized correction, even after window eviction.
+            conflict = previous['text'] != text or previous['user_id'] != user_id or previous['is_self'] != source['is_self']
+            return {'id': previous['id'], 'sourceVersion': previous['source_version'], 'duplicate': True, 'sourceConflict': conflict}
         conn.execute(
-            'INSERT OR IGNORE INTO messages (id,key,message_id,sender,user_id,text,at,is_self,meta) VALUES (?,?,?,?,?,?,?,?,?)',
-            (mid, key, str(message_id or ''), str(sender or ''), str(user_id or ''), text, ts, 1 if is_self else 0, str(meta or '')))
-        # 每个聊天保留最近 5000 条；原文不参与遗忘曲线，只按条数淘汰。
+            'INSERT OR IGNORE INTO messages (id,key,message_id,sender,user_id,text,at,is_self,meta,source_version,event_id,source_truncated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+            (mid, key, message_id, str(sender or ''), user_id, text, ts, source['is_self'], str(meta or ''), version, _source_event_id(key, message_id), source['source_truncated']))
+        # The recent window is bounded; cited originals remain in evidence_sources.
         conn.execute('DELETE FROM messages WHERE key=? AND id NOT IN (SELECT id FROM messages WHERE key=? ORDER BY at DESC LIMIT 5000)', (key, key))
-    return {'id': mid}
+    return {'id': mid, 'sourceVersion': version}
 
 
 def context_messages(key: str, limit: int = 200, budget_chars: int = 8000,
@@ -1103,11 +1594,14 @@ def _share_hash(row):
     # entire conversation. A later correction requires a new grant.
     import hashlib
     fields = ('id', 'text', 'tags', 'scope', 'subject_id', 'source_id', 'source_text', 'source_time', 'expires_at', 'fact_key')
-    return hashlib.sha256(json.dumps({k: row[k] for k in fields}, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+    values = {k: row[k] for k in fields}
+    if dict(row).get('memory_kind') == 'experience':
+        values['memory_kind'] = 'experience'
+    return hashlib.sha256(json.dumps(values, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
 
 
 def _granted_memory_ids(conn, target_scope):
-    cols = 'm.id,m.text,m.tags,m.scope,m.subject_id,m.source_id,m.source_text,m.source_time,m.expires_at,m.fact_key,g.content_hash'
+    cols = 'm.id,m.text,m.tags,m.scope,m.subject_id,m.source_id,m.source_text,m.source_time,m.expires_at,m.fact_key,m.memory_kind,g.content_hash'
     cur = conn.execute(f"SELECT {cols} FROM memories m JOIN memory_share_grants g ON g.memory_id=m.id WHERE g.target_scope=? AND m.status='active' AND (m.expires_at=0 OR m.expires_at>?)", (target_scope, now()))
     names = [d[0] for d in cur.description]
     rows = [dict(zip(names, r)) for r in cur.fetchall()]
@@ -1248,7 +1742,7 @@ def _cached_memory_matrix(conn, scope: str, shared: bool = False, include_global
     hit = _matrix_cache.get(cache_key)
     if hit and (now() - hit[0]) < _MATRIX_CACHE_TTL:
         return hit[1], hit[2]
-    cols = "SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at FROM memories"
+    cols = "SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at,memory_kind FROM memories"
     if shared or include_global:
         permitted = _granted_memory_ids(conn, scope)
         rows = conn.execute(cols + " WHERE status='active'").fetchall()
@@ -1274,7 +1768,7 @@ def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2, i
     limit = max(1, min(2, int(limit)))
     with _lock, db() as conn:
         row = conn.execute(
-            "SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at,fact_key,status FROM memories WHERE id=? AND status='active'",
+            "SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at,fact_key,status,memory_kind FROM memories WHERE id=? AND status='active'",
             (mid,),
         ).fetchone()
         if not row or (row[16] and row[16] <= time.time()):
@@ -1295,7 +1789,7 @@ def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2, i
         if not clauses:
             return []
         scope_sql = "(scope=? OR scope='global')" if include_global else "scope=?"
-        sql = ("SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at,fact_key FROM memories "
+        sql = ("SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at,fact_key,memory_kind FROM memories "
                "WHERE status='active' AND id <> ? AND " + scope_sql + " AND (expires_at=0 OR expires_at > ?) AND (" + " OR ".join(clauses) + ") LIMIT 12")
         rows = conn.execute(sql, [*params[:2], time.time(), *params[2:]]).fetchall()
         out = []
@@ -1308,7 +1802,7 @@ def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2, i
                 'importance': r[4], 'created_at': r[5], 'last_access': r[6],
                 'tier': r[10], 'source_id': r[11], 'source_time': r[13],
                 'subject_id': r[14], 'confidence': r[15], 'expires_at': r[16],
-                'status': 'active', 'score': 0.5, 'reason': reason,
+                'status': 'active', 'score': 0.5, 'reason': reason, 'memory_kind': r[18],
                 'shareAuthorizedFor': scope if r[3] != scope else '',
             })
             if len(out) >= limit:
@@ -1362,7 +1856,7 @@ def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: f
                 kept_bodies.add(body)
             kept_vecs.append(vec)
             out.append({
-                "id": r[0], "text": r[1], "tags": r[2], "scope": r[3],
+                "id": r[0], "text": r[1], "tags": r[2], "scope": r[3], "memory_kind": r[17],
                 'shareAuthorizedFor': scope if r[3] != scope else '',
                 "importance": r[4], "sim": round(sim, 4), "score": round(score, 4),
                 "recall": round(rp, 3), "access_count": r[8],
@@ -1388,16 +1882,37 @@ def reinforce(scope, ids):
     return {'changed': 0, 'reason': '需要新的本人原话证据；检索或采用本身不加固'}
 
 
-def related_memories(scope, subject_id, query):
+def related_memories(scope, subject_id, query, include_provenance=False):
     scope = valid_scope(scope)
     if not str(subject_id or '').isdigit() or not isinstance(query,str) or not query.strip():
         return []
     q = embed([query[:2000]])[0]
     with _lock, db() as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT id,text,source_time,subject_id,tier,embedding FROM memories WHERE scope=? AND subject_id=? AND status='active' AND (expires_at=0 OR expires_at>?)",(scope,str(subject_id),now())).fetchall()
-    scored = sorted(((float(np.frombuffer(r['embedding'],dtype=np.float32) @ q), r) for r in rows),key=lambda x:-x[0])
-    return [{k:r[k] for k in ('id','text','source_time','subject_id','tier')} for score,r in scored[:8] if score >= .35]
+        rows = conn.execute("SELECT id,text,source_time,subject_id,tier,embedding FROM memories WHERE scope=? AND subject_id=? AND status='active' AND memory_kind='fact' AND (expires_at=0 OR expires_at>?)",(scope,str(subject_id),now())).fetchall()
+        scored = sorted(((float(np.frombuffer(r['embedding'],dtype=np.float32) @ q), r) for r in rows),key=lambda x:-x[0])
+        results = []
+        for score, r in scored[:8]:
+            if score < .35:
+                continue
+            item = {k:r[k] for k in ('id','text','source_time','subject_id','tier')}
+            if include_provenance is True:
+                parent = conn.execute('SELECT * FROM memories WHERE scope=? AND id=?', (scope, r['id'])).fetchone()
+                item['provenance'] = memory_provenance(conn, parent)
+            results.append(item)
+        return results
+
+
+def lookup_memories(scope, ids, include_provenance=False):
+    """Revalidate a bounded set of original facts without embedding or recall side effects."""
+    scope = valid_scope(scope)
+    if not isinstance(ids, list) or not 1 <= len(ids) <= 3 or any(not isinstance(i, str) or len(i) > 100 for i in ids):
+        raise ValueError('lookup requires 1..3 memory IDs')
+    with _lock, db() as conn:
+        conn.row_factory = sqlite3.Row
+        marks = ','.join('?' for _ in ids)
+        rows = conn.execute(f"SELECT * FROM memories WHERE scope=? AND status='active' AND (expires_at=0 OR expires_at>?) AND id IN ({marks})", (scope, now(), *ids)).fetchall()
+        return [{**{k:r[k] for k in ('id','text','source_time','subject_id')},**({'provenance':memory_provenance(conn,r)} if include_provenance is True else {})} for r in rows]
 
 
 def lookup_memories(scope, ids):
@@ -1419,7 +1934,7 @@ def priority_memories(scope, subject_id):
         return []
     with _lock, db() as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT id,text,created_at,tier,scope,subject_id,source_id,source_time,expires_at,status FROM memories WHERE scope=? AND subject_id=? AND status='active' AND tier IN ('core','task') AND (expires_at=0 OR expires_at>?) ORDER BY CASE tier WHEN 'core' THEN 0 ELSE 1 END,source_time DESC LIMIT 8", (scope, str(subject_id), now())).fetchall()
+        rows = conn.execute("SELECT id,text,created_at,tier,scope,subject_id,source_id,source_time,expires_at,status,memory_kind FROM memories WHERE scope=? AND subject_id=? AND status='active' AND tier IN ('core','task') AND (expires_at=0 OR expires_at>?) ORDER BY CASE tier WHEN 'core' THEN 0 ELSE 1 END,source_time DESC LIMIT 8", (scope, str(subject_id), now())).fetchall()
     return [{**dict(r), 'score': 1.0,
              'evidence': {'sourceId': r['source_id'], 'subjectId': r['subject_id'],
                           'sourceTime': r['source_time'] * 1000}} for r in rows]
@@ -1504,6 +2019,8 @@ def _fingerprint(row):
               for k, v in dict(row).items()}
     if values.get('fact_meta') in (None, '', '{}'):
         values.pop('fact_meta', None)  # Preserve pre-migration undo fingerprints.
+    if values.get('memory_kind') in (None, '', 'fact'):
+        values.pop('memory_kind', None)
     return hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
 
 
@@ -1556,7 +2073,7 @@ def _record_confirmation(conn, scope, before):
         row = conn.execute('SELECT * FROM memories WHERE id=?', (row_id,)).fetchone()
         if _fingerprint(old) != _fingerprint(row):
             changes.append({'id': row['id'], 'after': _fingerprint(row),
-                            'restore': {k: old[k] for k in ('status', 'superseded_by', 'tier', 'expires_at')}})
+                            'restore': {k: old[k] for k in ('status', 'superseded_by', 'tier', 'expires_at', 'memory_kind', 'confidence', 'fact_key', 'fact_meta', 'relation', 'related_id')}})
     operation_id = uuid.uuid4().hex
     conn.execute('INSERT INTO memory_operations (id,scope,created_at,changes) VALUES (?,?,?,?)',
                  (operation_id, scope, now(), json.dumps(changes)))
@@ -1672,8 +2189,12 @@ def undo_confirm(scope, operation_id):
                     raise MemoryConflict('已有后续事实，不能恢复成互相冲突的记忆')
         for change in changes:
             old = change['restore']
-            conn.execute('UPDATE memories SET status=?,superseded_by=?,tier=?,expires_at=? WHERE id=?',
-                         (old['status'], old['superseded_by'], old['tier'], old['expires_at'], change['id']))
+            keys = [k for k in ('status','superseded_by','tier','expires_at','memory_kind','confidence','fact_key','fact_meta','relation','related_id') if k in old]
+            conn.execute('UPDATE memories SET '+','.join(k+'=?' for k in keys)+' WHERE id=?',
+                         [*[old[k] for k in keys], change['id']])
+            restored = conn.execute('SELECT * FROM memories WHERE id=?', (change['id'],)).fetchone()
+            conn.execute('INSERT OR REPLACE INTO memory_organize_holds VALUES (?,?)',
+                         (change['id'], _review_fingerprint(restored)))
         conn.execute('UPDATE memory_operations SET undone=1 WHERE id=?', (operation_id,))
         return {'changed': len(changes), 'operationId': operation_id}
 
@@ -1700,6 +2221,13 @@ ORGANIZE_TTL = 15 * 60
 
 
 def _organize_decision(conn, row, grace_until):
+    held = conn.execute('SELECT fingerprint FROM memory_organize_holds WHERE memory_id=?', (row['id'],)).fetchone()
+    if held and held[0] == _review_fingerprint(row):
+        return {'action': 'hold', 'reason': '已撤销自动处理；内容未变时不重复执行，可手动核对或归档'}
+    if (row['status'] == 'candidate' and row['relation'] not in ('replace', 'conflict')
+            and not (row['expires_at'] and row['expires_at'] <= now())
+            and _experience_source(conn, row) is not None):
+        return {'action': 'experience', 'reason': '已核对说话人、原话和时间，自动记下有来源的记录；仅证明当时说过，不确认长期事实或计划已完成'}
     expired = bool(row['expires_at'] and row['expires_at'] <= now())
     faded = (row['status'] == 'active' and (now() - row['last_access']) / 86400 > MIN_AGE_DAYS
              and recall_prob(row['strength_days'], row['last_access'], row['importance']) < PRUNE_R)
@@ -1794,6 +2322,9 @@ def organize_apply(scope, token, ids, action='recommended', acknowledge=False):
                     continue
                 if decision['action'] == 'confirm':
                     _confirm_one(conn, scope, mid, before)
+                elif decision['action'] == 'experience':
+                    before[mid] = dict(row)
+                    conn.execute("UPDATE memories SET status='active',memory_kind='experience',confidence=0,fact_key='',fact_meta='{}',relation='',related_id='' WHERE id=?", (mid,))
                 else:
                     before[mid] = dict(row)
                     conn.execute("UPDATE memories SET status='archived' WHERE id=? AND scope=?", (mid, scope))
@@ -1836,7 +2367,7 @@ def stats() -> dict:
         'version': '0.10.1',
         'retentionPolicy': policy,
         'reviewScope': review_scope(),
-        'capabilities': ['local-memory-organizer', 'content-retention-v2', 'combined-confirm-review', 'confirmation-relation-groups', 'auto-confirm-guard', 'source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
+        'capabilities': ['source-clarification-v1', 'source-correction-v1', 'versioned-association-sources-v1', 'source-impact-v1', 'source-retention-v1', 'sourced-experiences-v1', 'local-memory-organizer', 'content-retention-v2', 'combined-confirm-review', 'confirmation-relation-groups', 'auto-confirm-guard', 'source-lookup', 'transactional-confirm', 'confirmation-conflicts', 'fact-relations', 'unified-fact-review', 'paged-fact-review', 'context-window', 'event-merge'],
         'embed_threads': EMBED_THREADS,
         'index': 'exact-cache',
         'ann_threshold': ANN_MIN,
@@ -1878,7 +2409,31 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            if self.path == '/sharing/context':
+            _ctx.allow_self = bool(_self_token()) and self.headers.get('x-memvec-self') == _self_token()
+            if self.path in ('/sources/correction/prepare','/sources/correction/apply','/sources/correction/undo'):
+                if self.headers.get('x-source-correction') != '1' or self.headers.get('origin'):
+                    self._send(403, {'ok':False,'error':'来源纠正只能通过本地控制台提交'})
+                    return
+                b=self._body()
+                if self.path.endswith('/prepare'): result=prepare_source_correction(b.get('scope'),b.get('id'))
+                elif self.path.endswith('/apply'): result=apply_source_correction(b.get('scope'),b.get('id'),b.get('sourceVersion'),b.get('revision'),b.get('reason'))
+                else: result=undo_source_correction(b.get('scope'),b.get('sourceVersion'),b.get('correctionRevision'))
+                self._send(200,{'ok':True,**result})
+            elif self.path == '/sources/clarification/apply':
+                if self.headers.get('x-source-correction') != '1' or self.headers.get('origin'):
+                    self._send(403, {'ok':False,'error':'澄清只能通过本地桥接提交'})
+                    return
+                self._send(200,{'ok':True,**apply_chat_clarification(self._body())})
+            elif self.path == '/sources/impact':
+                b = self._body()
+                self._send(200, {'ok': True, **source_impact(b.get('scope'), b.get('id'))})
+            elif self.path == '/sources/status':
+                b = self._body()
+                self._send(200, {'ok': True, **source_status(b.get('scope'), b.get('id'))})
+            elif self.path == '/sources/retain':
+                b = self._body()
+                self._send(200, {'ok': True, **retain_source_refs(b.get('scope'), b.get('owners'))})
+            elif self.path == '/sharing/context':
                 b=self._body()
                 self._send(200,{'ok':True,**sharing_context(b.get('scope'),b.get('query',''),b.get('include_summaries') is True)})
             elif self.path == '/sharing/reviews':
@@ -1890,6 +2445,14 @@ class Handler(BaseHTTPRequestHandler):
                 b = self._body()
                 r = add_memory(**b)
                 self._send(200, {"ok": True, "memory": r})
+            elif self.path == '/self/reset':
+                if not getattr(_ctx, 'allow_self', False):
+                    self._send(403, {'ok': False, 'error': 'self 作用域仅限桥接内部使用'})
+                    return
+                with _lock, db() as conn:
+                    deleted = conn.execute("DELETE FROM memories WHERE scope='self'").rowcount
+                _matrix_cache_clear()
+                self._send(200, {'ok': True, 'deleted': deleted})
             elif self.path == "/message":
                 b = self._body()
                 # 桥接用 camelCase（messageId/userId/isSelf），控制台用 snake_case；两边都收。
@@ -1902,6 +2465,7 @@ class Handler(BaseHTTPRequestHandler):
                     at=b.get("at"),
                     is_self=b.get("is_self", b.get("isSelf", False)),
                     meta=b.get("meta", ""),
+                    truncated=b.get("truncated") if type(b.get("truncated")) is bool else None,
                 )
                 self._send(200, {"ok": True, "message": r})
             elif self.path == "/context":
@@ -1952,7 +2516,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {'ok': True, **manage_memory(**self._body())})
             elif self.path == '/lookup':
                 b = self._body()
-                self._send(200, {'ok': True, 'results': lookup_memories(b.get('scope'), b.get('ids'))})
+                self._send(200, {'ok': True, 'results': lookup_memories(b.get('scope'), b.get('ids'), b.get('include_provenance') is True)})
             elif self.path == '/related':
                 self._send(200, {'ok': True, 'results': related_memories(**self._body())})
             elif self.path == '/finish':

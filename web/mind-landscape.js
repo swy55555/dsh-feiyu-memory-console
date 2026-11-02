@@ -9,7 +9,7 @@ export function mindLandscape(el, ui, types) {
   const known = s && Number.isFinite(s.valence) && Number.isFinite(s.arousal);
   const label = known ? s.displayLabel || [s.label,s.nuance].filter(Boolean).join(' · ') || '当前状态' : '等待心绪';
   const intensity = known && Number.isFinite(s.intensity) ? Math.max(0, Math.min(1, s.intensity)) : null;
-  const palette = !known ? 'unknown' : s.valence < -.12 ? (s.arousal > .55 ? 'restless' : 'quiet') : s.valence > .3 ? 'warm' : 'calm';
+  const palette = !known ? 'unknown' : s.key==='tense' ? 'restless' : s.key==='frustrated' ? 'quiet' : s.valence < -.12 ? (s.arousal > .55 ? 'restless' : 'quiet') : s.valence > .3 ? 'warm' : 'calm';
   const root = el('div', {class: `hub-landscape palette-${palette}`});
   const board = el('div', {class:'hub-scene', 'aria-label':'柔和心境图'});
   const detail = el('aside', {class:'hub-inspect', 'aria-label':'心境与参考详情'});

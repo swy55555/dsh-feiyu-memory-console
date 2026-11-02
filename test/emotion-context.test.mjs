@@ -8,6 +8,8 @@ import {
   applyEmotionEvent,
   tickEmotion,
   refineEmotionEvent,
+  emotionAttribution,
+  emotionPromptLine,
 } from "../bridge/emotion.js";
 import {
   contextIdentity,
@@ -31,6 +33,17 @@ const say = (s, text, i, extra = {}) =>
     },
     start + i * 60000,
   );
+test('negative mood without local conflict cannot supply an attribution; real conflict stays distinguishable',()=>{
+ const mood=emptyEmotion(start);mood.state.label='生气';mood.state.displayLabel='生气';mood.state.intensity=.6;
+ const before=structuredClone(mood);
+ assert.match(emotionAttribution(mood),/没有可归给当前对象的有效冲突依据/);
+ for(const compact of [false,true]){const line=emotionPromptLine(mood,{isOwner:true,compact});assert.match(line,/生气/);assert.match(line,/没有可归给当前对象/);}
+ assert.deepEqual(mood,before);
+ const conflict=say(emptyEmotion(start),'你是废物',0);
+ assert.match(emotionAttribution(conflict),/存在尚未淡化的冲突记录/);
+ const settled=structuredClone(conflict);settled.dynamics.conflict=0;assert.match(emotionAttribution(settled),/没有可归给当前对象/);
+ const other=structuredClone(mood);other.sharedMood={mode:'shared'};other.dynamics.conflict=0;assert.match(emotionAttribution(other),/没有可归给当前对象/);
+});
 test("affectionate teasing and roleplay are not counted as attacks; explicit seriousness exits frame", () => {
   let s = say(emptyEmotion(start), "你这个笨蛋，终于回来啦😂", 0);
   near(s.state.valence, 0.12);

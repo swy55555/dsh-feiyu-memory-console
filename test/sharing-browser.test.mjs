@@ -12,7 +12,7 @@ try{
   const api=new URL(route.request().url()).pathname.replace(/^.*\/api/,'');let data={ok:true};
   if(api==='/overview')data={ok:true,total:1,active:1,scopes,recent:[],fading:[],memoryShare:true,health:{ok:true,capabilities:[],bridge:{ok:true}}};
   if(api==='/library')data={ok:true,rows:[row],total:1,scopes,counts:{active:1}};
-  if(api==='/version')data={ok:true,version:'0.10.1'};
+  if(api==='/version')data={ok:true,version:'0.10.1-dev.1'};
   if(api==='/memory-sharing'){
    const body=route.request().postDataJSON();posts.push(body);
    data={ok:true,id:'m',scope:row.scope,text:row.text,revision:'rev',privacy:{level:'public',origin:'semantic',revision:'rev'},grants:[],blocked:[]};

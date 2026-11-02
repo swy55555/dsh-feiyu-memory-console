@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {SelfReference,SELF_FOUNDATION,selfReferencePrompt} from '../bridge/self-reference.mjs';
-import {seedTemperament,growTemperament} from '../bridge/self-temperament.mjs';
+import {seedTemperament,growTemperament,sharedTemperamentLine} from '../bridge/self-temperament.mjs';
 const DAY=86400000,now=1800000000000;
 function setup(){let time=now,saved;const ref=new SelfReference({allowed:k=>k==='private:1',enabled:()=>true,now:()=>time,save:s=>saved=s,generate:async()=>'{"changes":[]}'});return {ref,setTime:v=>time=v,saved:()=>saved};}
 const row={id:'u1',at:now,text:'你认真听我说话的时候很好，不用总是嘴硬。'};
@@ -31,7 +31,7 @@ test('joint persistence failure is atomic; edits invalidate pending model result
  let fail=false;const ref=new SelfReference({enabled:()=>true,allowed:k=>k==='private:1',initialPersona:initial,save:()=>{if(fail)throw Error('disk');},now:()=>now});
  const proposal={changes:[op('',{dimensionDeltas:{warm:1}})]};fail=true;
  assert.throws(()=>ref.apply(proposal,[row]),/disk/);assert.equal(ref.state.claims.length,0);assert.equal(ref.state.temperament.receipts.length,0);
- fail=false;ref.apply(proposal,[row]);assert.match(ref.render('private:1'),/缓慢变化的性格/);assert.doesNotMatch(ref.render('group:1'),/缓慢变化的性格/);
+ fail=false;ref.apply(proposal,[row]);assert.match(ref.render('private:1'),/缓慢变化的性格/);assert.match(ref.render('group:1'),/共同的性格倾向/);
  ref.editTemperament([{key:'warm',current:50,baseline:48,band:10}],'修正起点',1);
  assert.throws(()=>ref.apply(proposal,[row],1),/过期/);assert.equal(ref.state.temperament.current.warm,50);
  ref.restore(1);assert.equal(ref.state.temperament.current.warm,42);assert.equal(ref.state.temperament.receipts.length,1);
@@ -40,4 +40,14 @@ test('joint persistence failure is atomic; edits invalidate pending model result
 test('malformed dimension proposal cannot partially save valid text',()=>{
  const ref=new SelfReference({enabled:()=>true,allowed:()=>true,initialPersona:initial});
  assert.throws(()=>ref.apply({changes:[op('',{dimensionDeltas:{warm:99}})]},[row]),/无效/);assert.equal(ref.state.claims.length,0);
+});
+
+
+test('interaction feedback is retained without becoming persona text or temperament evidence',()=>{
+ const {ref}=setup();ref.state.temperament=seedTemperament(initial);
+ ref.apply({changes:[op('',{referenceKind:'interaction_feedback',dimensionDeltas:{warm:1}})]},[row]);
+ assert.equal(ref.state.claims.length,1);assert.equal(ref.state.claims[0].evidence.length,1);
+ assert.equal(ref.render('private:1').includes('我正在学着认真倾听'),false);
+ assert.equal(ref.state.temperament.receipts.length,0);assert.equal(ref.state.temperament.current.warm,42);
+ assert.throws(()=>ref.apply({changes:[op('',{referenceKind:'invented'})]},[row]));
 });

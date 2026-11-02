@@ -6,6 +6,17 @@ import path from 'node:path';
 import {EmotionScopes,emotionScope} from '../bridge/emotion-scopes.mjs';
 import * as emotion from '../bridge/emotion.js';
 const now=Date.now();
+
+test('shared tension is displayed consistently without exporting its private cause or assigning blame',()=>{
+ const lanes=new EmotionScopes({ownerKey:'private:1',now:()=>now});const text='这个分歧还没谈完';
+ const value=emotion.applyEmotionEvent(lanes.owner(),{source:'owner',chatKey:'private:1',speakerId:'1',eventId:'tense',text,appraisal:{kind:'conflict',target:'character',confidence:.8,intensity:.6,evidence:[text],feelings:[]}},now);
+ lanes.set('private:1',value);
+ const other=lanes.view('private:2','2',now);
+ assert.equal(other.state.label,'紧绷');assert.equal(other.localState.label,'平静');assert.equal(other.dynamics.conflict,0);assert.equal(other.lastCause,null);
+ assert.ok(!JSON.stringify(other.sharedMood).includes(text));assert.ok(!emotion.emotionPromptLine(other,{isOwner:false,compact:true}).includes(text));
+ assert.deepEqual(emotion.tickEmotion(other,now).state,other.state);
+ assert.equal(lanes.owner().relationshipSamples,0);
+});
 const source=fs.readFileSync(new URL('../bridge/bridge-v09.js',import.meta.url),'utf8');
 const fragment=(a,b)=>source.slice(source.indexOf(a),source.indexOf(b,source.indexOf(a)));
 function event(key,id,text='你是废物',speaker='2'){

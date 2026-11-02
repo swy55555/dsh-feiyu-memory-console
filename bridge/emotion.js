@@ -22,10 +22,19 @@ export const EMOTION_PROTOTYPES = [
 const clamp = (n, lo, hi) =>
   Math.max(lo, Math.min(hi, Number.isFinite(Number(n)) ? Number(n) : lo));
 const clone = (x) => JSON.parse(JSON.stringify(x));
-const FEELING_NAMES={warmth:'温暖',joy:'轻快',curiosity:'好奇',relief:'安心',concern:'牵挂',disappointment:'有点失落'};
-const FEELING_HALF_LIVES={warmth:30,joy:15,curiosity:12,relief:20,concern:25,disappointment:20};
+const FEELING_NAMES={warmth:'温暖',joy:'轻快',curiosity:'好奇',relief:'安心',concern:'牵挂',disappointment:'失落',tension:'紧绷',frustration:'挫败'};
+const FEELING_HALF_LIVES={warmth:30,joy:15,curiosity:12,relief:20,concern:25,disappointment:20,tension:15,frustration:20};
 const feelingProof=s=>String(s||'').normalize('NFKC').replace(/[\s\p{P}\p{S}]+/gu,'').toLowerCase();
-const FEELING_SHIFTS={warmth:[.22,.08],joy:[.35,.22],curiosity:[.08,.24],relief:[.18,-.10],concern:[-.06,.14],disappointment:[-.18,.08]};
+const FEELING_SHIFTS={warmth:[.22,.08],joy:[.35,.22],curiosity:[.08,.24],relief:[.18,-.10],concern:[-.06,.14],disappointment:[-.18,.08],tension:[-.24,.28],frustration:[-.28,.16]};
+export function visibleFeelings(feelings=[]){
+  const sorted=[...feelings].sort((a,b)=>b.level-a.level);
+  // Mixed affect must not hide current distress behind two stronger positive
+  // remnants. Keep one evidenced negative feeling visible, without erasing warmth.
+  const negative=sorted.find(f=>['tension','frustration'].includes(f.kind)&&f.level>=.12)||sorted.find(f=>f.kind==='disappointment'&&f.level>=.12);
+  const selected=sorted.slice(0,2);
+  if(negative&&!selected.includes(negative))selected[1]=negative;
+  return selected;
+}
 function dailyTone(s){
   let v=0,a=0;const active=[];
   for(const [kind,level] of Object.entries(s.dailyFeelings?.levels||{})){
@@ -33,7 +42,7 @@ function dailyTone(s){
     const guarded=s.dynamics.conflict>.1&&['warmth','joy','curiosity','relief'].includes(kind);if(guarded)continue;
     v+=level*shift[0];a+=level*shift[1];if(level>=.05)active.push({kind,label:FEELING_NAMES[kind],level,...(s.dailyFeelings.sources?.[kind]||{})});
   }
-  return {v:clamp(v,-.12,.26),a:clamp(a,-.09,.18),active:active.sort((a,b)=>b.level-a.level).slice(0,2)};
+  return {v:clamp(v,-.26,.26),a:clamp(a,-.09,.26),active:visibleFeelings(active)};
 }
 
 export function emptyEmotion(now = Date.now()) {
@@ -159,15 +168,22 @@ function options(raw = {}) {
     moodHalfLifeMinutes: n("moodHalfLifeMinutes", 360, 10, 10080),
   };
 }
-export function labelFor(s) {
+export function labelFor(s, feelings=dailyTone(s).active) {
   const v = s.state.valence,
     old = s.state.label,
     c = s.dynamics?.conflict || 0;
+  const level=kind=>feelings?.find(f=>f.kind===kind)?.level||0;
   let label = "平静",
     key = "calm";
   if ((v < -0.25 && c >= 0.5) || (old === "生气" && v < -0.15 && c > 0.4)) {
     label = "生气";
     key = "angry";
+  } else if (level('tension')>=.12) {
+    label = "紧绷";
+    key = "tense";
+  } else if (level('frustration')>=.15) {
+    label = "烦闷";
+    key = "frustrated";
   } else if (v < -0.04 || (old === "不快" && v < 0)) {
     label = "不快";
     key = "sad";
@@ -249,7 +265,7 @@ export function tickEmotion(raw, now = Date.now(), recovery = {}) {
   if(s.sharedMood?.mode==='shared'){
     const g=s.sharedMood;s.localState=clone(s.state);s.localMood=clone(s.mood);
     s.state.valence=clamp(g.valence,-1,1);s.state.arousal=clamp(g.arousal,0,1);
-    Object.assign(s.state,labelFor({...s,state:{...s.state,label:'平静'},dynamics:{...s.dynamics,conflict:g.conflictTone}}));
+    Object.assign(s.state,labelFor({...s,state:{...s.state,label:'平静'},dynamics:{...s.dynamics,conflict:g.conflictTone}},g.feelings||[]));
     s.state.feelings=clone(g.feelings||[]);s.state.nuance=s.state.feelings.map(f=>f.label).join(' / ');
     s.state.displayLabel=s.state.nuance?`${s.state.label} · ${s.state.nuance}`:s.state.label;
     s.state.feelingStrength=Math.max(0,...s.state.feelings.map(f=>f.level));
@@ -291,6 +307,9 @@ function applyEmotionCore(raw, input = {}, now = Date.now(), recovery = {}) {
     beforeA = s.state.arousal;
   const d = s.dynamics;
   const weight = clamp(ap.weight, 0.5, 1.25);
+  // A short-lived response needs less certainty than blaming a person or
+  // updating relationship/personality. Keep the existing .85 attribution gate.
+  const transient=semantic&&semantic.confidence>=.65&&input.directed!==false&&!['neglect','bedtime'].includes(input.kind)?semantic:null;
   let changed = false;
   const appliedFeelings=[];
   if (input.kind === "neglect" && !input.expectedAbsence) {
@@ -328,15 +347,27 @@ function applyEmotionCore(raw, input = {}, now = Date.now(), recovery = {}) {
     } else d.v = clamp(d.v + .18 * response, 0, 0.18);
     d.a = clamp(d.a + .08 * response, 0, 0.55);
     changed = response > 0;
-  } else if (ap.kind === "criticism") {
-    if (d.v > -0.05) d.v = Math.max(-0.05, d.v - 0.025);
+  } else if (transient?.kind === 'conflict') {
+    const response=transient.intensity*transient.confidence*weight;
+    if(d.v>-.22)d.v=Math.max(-.22,d.v-.14*response);
+    d.a=clamp(d.a+.1*response,0,.55);
+    changed=response>0;
+  } else if (ap.kind === "criticism" || transient?.kind === 'criticism') {
+    const assessment=transient||ap;
+    const floor=transient?-.12:-.05;
+    if (d.v > floor) d.v = Math.max(floor, d.v - (transient ? .06*assessment.intensity*assessment.confidence*weight : .025));
     changed = true;
   }
 
   // Mild, evidenced feelings are independent of relationship judgments and personality training.
   // A model can be uncertain about a relationship while observing a small everyday feeling.
   if(semantic&&input.source==='owner'&&!['neglect','bedtime'].includes(input.kind)){
-    const feelings=(semantic.feelings||[]).filter(f=>f.confidence>=.65&&(f.kind!=='disappointment'||['neutral','criticism','conflict','user_distress'].includes(semantic.kind)));
+    const feelings=(semantic.feelings||[]).filter(f=>f.confidence>=.65);
+    // Moderate evidence of a disagreement can mean transient tension; it is
+    // not sufficient evidence of hostility, anger or damaged trust.
+    if(transient?.kind==='conflict'&&ap.kind==='uncertain'&&!feelings.some(f=>['tension','frustration'].includes(f.kind))){
+      feelings.push({kind:'tension',intensity:transient.intensity,confidence:transient.confidence,evidence:transient.evidence[0],reason:'本轮判断可能存在分歧，暂时紧绷；不据此认定敌意或降低关系。',action:'evoke'});
+    }
     const accepted=[];
     for(const f of feelings){
       const proof=f.kind+':'+f.action+':'+feelingProof(f.evidence);
@@ -373,6 +404,8 @@ function applyEmotionCore(raw, input = {}, now = Date.now(), recovery = {}) {
     target: ap.target,
     confidence: ap.confidence,
     evidence: ap.evidence,
+    assessedKind: semantic?.kind || ap.kind,
+    transientOnly: !!transient && ap.kind === 'uncertain' && ['criticism','conflict'].includes(transient.kind),
     at: now,
   };
   s.latestEventId = eventId || null;
@@ -421,8 +454,10 @@ function applyEmotionCore(raw, input = {}, now = Date.now(), recovery = {}) {
     summary: text.slice(0, 80),
     label: s.state.label,
     displayLabel:s.state.displayLabel,
+    assessedKind: semantic?.kind || ap.kind,
+    transientOnly: !!transient && ap.kind === 'uncertain' && ['criticism','conflict'].includes(transient.kind),
     feelings:appliedFeelings,
-    dynamicsVersion:3,
+    dynamicsVersion:4,
     valence: s.state.valence,
     arousal: s.state.arousal,
     deltaV: s.state.valence - before,
@@ -435,7 +470,7 @@ function applyEmotionCore(raw, input = {}, now = Date.now(), recovery = {}) {
 }
 
 const journalGuard = (s) =>
-  JSON.stringify([s.baseline, s.lastDriftAt, s.drifts]);
+  JSON.stringify([4, s.baseline, s.lastDriftAt, s.drifts]);
 function snapshot(s) {
   const copy = clone(s);
   delete copy.journal;
@@ -537,7 +572,7 @@ export function applyEmotionEvent(
       .reverse()
       .find(
         (e) =>
-          e.kind === "conflict" &&
+          (e.kind === "conflict" || (e.input?.appraisal?.kind==='conflict'&&e.input.appraisal.confidence>=.65)) &&
           contextIdentity(e.input) === contextIdentity(input) &&
           now - e.at <= 10 * 60000 &&
           (!input.replyToId ||
@@ -622,10 +657,16 @@ export function withSubjectiveFeeling(raw, impression, now = Date.now(), recover
   s.subjective = {...impression, uncertain:true};
   return s;
 }
+export function emotionAttribution(raw) {
+  const cause=raw?.lastCause;
+  const supported=cause?.kind==='conflict'&&Number(raw?.dynamics?.conflict)>.1&&Array.isArray(cause.evidence)&&cause.evidence.some(q=>typeof q==='string'&&q.trim());
+  return (supported?'本聊天存在尚未淡化的冲突记录，但不证明当前这句话有敌意。':'目前没有可归给当前对象的有效冲突依据；共同心境或来源不明的不快不等于对他的不满。')+'心情是状态，不是原因证据。可以语气直接、少些玩笑；不拿忙碌、晚来、纠正措辞编造轻视、伤害或失约，不审问对方值不值得花时间。';
+}
 export function emotionPromptLine(raw, { isOwner = false, compact = false } = {}) {
   const s = normalizeEmotion(raw),
     cause = s.lastCause;
   const overall=raw?.sharedMood?.mode==='shared'?`\n这是所有交流共同形成的当前心情，可以自然影响语气、耐心和节奏，不必在换人时装作立即开心。回应态度只针对当前对象：不把他人的冲突归罪于当前说话人，不凭心情降低对他的信任。若已提供通过隐私过滤的相关经历，可自行选择是否讲述，不要求汇报，也不编造原因。`:'';
+  const attribution = emotionAttribution(s);
   const reason =
     isOwner && cause?.source === "owner" && (s.localState||s.state).intensity >= 0.1
       ? `；相关事件：${JSON.stringify(cause.evidence || []).slice(0, 120)}`
@@ -635,10 +676,10 @@ export function emotionPromptLine(raw, { isOwner = false, compact = false } = {}
   const texture=isOwner?((s.localState||s.state).feelings||[]).map(f=>({feeling:f.label,strength:f.level>=.4?'明显':f.level>=.18?'适中':'轻微',reason:f.reason||'',quote:f.evidence||'',at:f.at})):[];
   if(compact){
     const brief=texture.map(f=>({...f,reason:f.reason.slice(0,60),quote:f.quote.slice(0,80)}));
-    return `当前表达基调：${s.state.displayLabel||s.state.label}；回应态度：${s.stance}。整体偏离基线 ${s.state.intensity.toFixed(2)}，不等于每项感受强度。${brief.length?'感受来源（历史输入，不是本轮新事实）：'+JSON.stringify(brief)+'。':''}按本轮语境自然影响语气和关注点，不机械报数、不表演、不替用户认定隐藏意图；当前纠正和拒谈优先。${subjective}${overall}`;
+    return `当前表达基调：${s.state.displayLabel||s.state.label}；回应态度：${s.stance}。整体偏离基线 ${s.state.intensity.toFixed(2)}，不等于每项感受强度。${brief.length?'感受来源（历史输入，不是本轮新事实）：'+JSON.stringify(brief)+'。':''}按本轮语境自然影响语气和关注点，不机械报数、不表演、不替用户认定隐藏意图；当前纠正和拒谈优先。${attribution}${subjective}${overall}`;
   }
   const continuity=texture.length?'\n【当前感受的来源】'+JSON.stringify(texture)+'。这是此前输入引发的短暂感受，不是当前用户的新事实。相关时自然接住具体细节；话题变化时先回应新话题，不强行追问，不把自己的反应当作新证据。':'';
-  return `现在情绪：${s.state.label}（相对平常的波动 ${s.state.intensity.toFixed(2)}）；细微感受：${s.state.nuance||"无额外感受"}；回应态度：${s.stance}${reason}。用户诉苦时关切用户；普通请求和纠错正常处理，不要求对方安抚。有依据的感受可具体影响措辞、分享欲、关注点和回应节奏：好奇可以追一处细节，轻快可自然接梗，温暖可亲近一点，牵挂先关心具体事情，安心可放松收尾；根据当前话题选择，不必逐项表现。感受，不机械报数、不夸大成事实，不要求每轮表演情绪。${subjective}${continuity}${overall}`;
+  return `现在情绪：${s.state.label}（相对平常的波动 ${s.state.intensity.toFixed(2)}）；细微感受：${s.state.nuance||"无额外感受"}；回应态度：${s.stance}${reason}。用户诉苦时关切用户；普通请求和纠错正常处理，不要求对方安抚。有依据的感受可具体影响措辞、分享欲、关注点和回应节奏：好奇可以追一处细节，轻快可自然接梗，温暖可亲近一点，牵挂先关心具体事情，安心可放松收尾；根据当前话题选择，不必逐项表现。感受，不机械报数、不夸大成事实，不要求每轮表演情绪。${attribution}${subjective}${continuity}${overall}`;
 }
 function updateClimate(c, s, ap, now) {
   const n = Number(c.samples || 0);

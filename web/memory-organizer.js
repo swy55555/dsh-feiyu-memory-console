@@ -6,8 +6,13 @@ export function organizerPanel(el, { api, confirmDialog, scopes, ownerQQ, onAppl
   if (owner && !choices.some(s => s.scope === owner)) choices.unshift({scope:owner,label:'主人的私聊'})
   let scope = choices.some(s => s.scope === owner) ? owner : choices[0]?.scope || ''
   let plan = null, busy = false, error = '', result = null, selected = new Set(), cursor = ''
-  const labels = {archive:'可归档',confirm:'可确认',hold:'保留待处理'}
+  let automatic=null, automaticError=''
+  const labels = {archive:'可归档',confirm:'可确认',experience:'可自动记下原话',hold:'后台暂存'}
   const post = (route, body) => api(route, {method:'POST',body})
+  async function loadAutomatic(body){
+    try{automatic=body?await post('/organize/automatic',body):await api('/organize/automatic');automaticError=''}
+    catch(e){automaticError=e.message}finally{draw()}
+  }
   async function preview(after = '') {
     busy = true; error = ''; result = null; draw()
     try { plan = await post('/organize/preview', {scope,after}); cursor=after; selected = new Set() }
@@ -33,8 +38,14 @@ export function organizerPanel(el, { api, confirmDialog, scopes, ownerQQ, onAppl
   function draw() {
     const heldOpen=root.querySelector('[data-held]')?.open || false
     root.replaceChildren(
-      el('div',{class:'section-head'},el('h2',{class:'h2',text:'省心整理'}),el('span',{class:'pill',text:'本地处理 · 0 新增模型调用'})),
-      el('p',{class:'note',text:'所有记录都可勾选。按建议处理会复用完整审核确认，或归档符合规则的记忆；主动归档则由你决定收起所选记录。两种操作都不调用模型，归档不会把候选变成已确认事实。'}),
+      el('div',{class:'section-head'},el('h2',{class:'h2',text:'自动记忆维护'}),el('span',{class:'pill',text:'本地处理 · 0 新增模型调用'})),
+      el('p',{class:'note',text:'完整自述、普通计划与经历核对原始消息后自动记下，只作为有来源的参考；已审妥的事实复用审核；符合规则的过期、淡化记录归档。后台每分钟轮转一个聊天、最多 50 条，不需要逐条点击，也不新增模型调用。原有效期不延长，核心及高重要记录不自动归档。'}),
+      el('div',{class:'local-maintenance'},
+        automatic?el('label',{},el('input',{type:'checkbox',checked:automatic.enabled,'aria-label':'开启本地自动整理',on:{change:e=>loadAutomatic({enabled:e.target.checked})}}),' 本地自动整理（不调用模型）'):null,
+        el('button',{class:'btn sm',on:{click:()=>loadAutomatic()}},'刷新后台状态'),
+        automaticError?el('p',{role:'alert',text:automaticError}):null,
+        automatic?.error?el('p',{role:'alert',text:automatic.error}):null,
+        automatic?.records?.length?el('p',{class:'note',text:`最近一批：检查 ${automatic.records[0].scanned} 条，处理 ${automatic.records[0].changed} 条。修改可在“最近改了什么”撤销；撤销后内容未变，不会再自动处理。`}):null),
       el('div',{class:'row',style:{flexWrap:'wrap'}},
         el('label',{},'选择聊天 ',el('select',{class:'input','aria-label':'整理哪个聊天',disabled:busy,on:{change:e=>{scope=e.target.value;plan=null;result=null;error='';selected.clear();draw()}}},
           ...choices.map(s=>el('option',{value:s.scope,selected:s.scope===scope,text:s.label || s.scope})))),
@@ -66,8 +77,8 @@ export function organizerPanel(el, { api, confirmDialog, scopes, ownerQQ, onAppl
     if(eligible.length) root.append(el('div',{style:{maxHeight:'480px',overflowY:'auto'}},...eligible.map(itemRow)))
     const held=plan.items.filter(r=>r.action==='hold')
     if(held.length) root.append(el('details',{'data-held':'1',open:heldOpen,style:{marginTop:'14px'}},
-      el('summary',{text:`保留待处理 ${held.length} 条 · 展开查看原因`}),
-      el('p',{class:'note',text:'默认保留，不自动补做模型审核。如你决定不再使用，可以勾选后主动归档；想正式记住的请继续保留待审核。'}),
+      el('summary',{text:`后台暂存 ${held.length} 条 · 无需逐条处理`}),
+      el('p',{class:'note',text:'这些内容尚不能作为事实使用，保留等待新的依据；不是必须完成的任务。原消息缺失或有真实冲突时才需要进一步核对。可选择另行开启付费语义审核，或主动归档。'}),
       el('div',{style:{maxHeight:'480px',overflowY:'auto'}},...held.map(itemRow))))
     root.append(el('p',{class:'note',text:'批内确认一条后，其他候选的相关事实可能改变，会跳过而非强行确认。核心、待办及高重要记忆不建议归档；未过期候选不会因等得久被归档。'}),
       el('div',{class:'row',style:{flexWrap:'wrap'}},
@@ -75,5 +86,6 @@ export function organizerPanel(el, { api, confirmDialog, scopes, ownerQQ, onAppl
         el('button',{class:'btn sm',disabled:busy || !plan.next,on:{click:()=>preview(plan.next)}},'下一页')))
   }
   draw()
+  void loadAutomatic()
   return root
 }

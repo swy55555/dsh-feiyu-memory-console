@@ -9,11 +9,25 @@ const temp = fs.mkdtempSync(path.join(tempParent, 'feiyu-suite-'))
 const env = { ...process.env, TEMP: temp, TMP: temp, DSH_HOME: path.join(temp, 'empty-home'), FEIYU_MEMVEC_URL: 'http://127.0.0.1:1' }
 let failures = 0
 function run(command, args) {
-  const result = spawnSync(command, args, { cwd: root, env, stdio: 'inherit', timeout: 60000, windowsHide: true })
+  const timeout=Math.max(60000,Math.min(300000,Number(process.env.FEIYU_TEST_TIMEOUT_MS)||60000))
+  const result = spawnSync(command, args, { cwd: root, env, stdio: 'inherit', timeout, windowsHide: true })
   if (result.status !== 0) { failures++; console.error('FAILED:', args.join(' '), result.error?.message || '') }
 }
 try {
   for (const name of ['host', 'diary', 'audit', 'features', 'integration', 'human-context', 'runtime-extras', 'emotion-v2', 'turn-traces', 'runtime-bundle', 'runtime-integration', 'emotion-context', 'daily-memory', 'idle-association', 'usage-features', 'continuity', 'continuity-wiring', 'candidate-auto', 'emotion-feelings', 'headless-snapshot', 'mind-workspace', 'response-patterns', 'mind-wiring', 'human-presence', 'light-profile', 'xinji-runtime', 'background-reasoning', 'confirmation-review', 'self-reference']) run(process.execPath, [`test/${name}.test.mjs`])
+  run(process.execPath, ['test/shared-expression.test.mjs'])
+  run(process.execPath, ['test/expression-guard.test.mjs'])
+  run(process.execPath, ['test/source-retention.test.mjs'])
+  run(process.execPath, ['test/source-validity.test.mjs'])
+  run(process.execPath, ['test/chat-clarification.test.mjs'])
+  run(process.execPath, ['test/source-impact.test.mjs'])
+  run(process.execPath, ['test/indirect-impact.test.mjs'])
+  run(process.execPath, ['test/reply-freshness.test.mjs'])
+  run(process.execPath, ['test/reply-context.test.mjs'])
+  run(process.execPath, ['test/reference-reuse.test.mjs'])
+  run(process.execPath, ['test/context-efficiency.test.mjs'])
+  run(process.execPath, ['test/analysis-receipts.test.mjs'])
+  run(process.execPath, ['test/local-maintenance.test.mjs'])
   run(process.execPath, ['test/expression-teacher.test.mjs'])
   run(process.execPath, ['test/sharing-privacy.test.mjs'])
   run(process.execPath, ['test/growth-classroom.test.mjs'])
@@ -24,11 +38,12 @@ try {
   run(process.execPath, ['test/interaction-context.test.mjs'])
   run(process.execPath, ['test/cost-control.test.mjs'])
   run(process.execPath, ['test/preset-sync.test.mjs'])
-  if (python) {run(python.command, [...python.args, 'test/memvec_test.py']);run(python.command, [...python.args, 'test/retention_test.py']);run(python.command, [...python.args, 'test/organizer_test.py']);run(python.command, [...python.args, 'test/review_scope_test.py'])}
+  if (python) {run(python.command, [...python.args, 'test/memvec_test.py']);run(python.command, [...python.args, 'test/retention_test.py']);run(python.command, [...python.args, 'test/organizer_test.py']);run(python.command, [...python.args, 'test/review_scope_test.py']);run(python.command, [...python.args, 'test/experience_memory_test.py'])}
+  if (python) {run(python.command, [...python.args, 'test/source_retention_test.py']);run(python.command, [...python.args, 'test/source_impact_test.py']);run(python.command, [...python.args, 'test/source_correction_test.py']);run(python.command, [...python.args, 'test/chat_clarification_test.py']);run(python.command, [...python.args, 'test/provenance_audit_test.py'])}
   else { failures++; console.error('Python 3.10+ with numpy is required for memory regression tests.') }
 } finally {
   const relative = path.relative(tempParent, path.resolve(temp))
   if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) fs.rmSync(temp, { recursive: true, force: true })
 }
-console.log(`Regression suites: ${42 - failures}/42 passed`)
+console.log(`Regression suites: ${61 - failures}/61 passed`)
 process.exitCode = failures ? 1 : 0

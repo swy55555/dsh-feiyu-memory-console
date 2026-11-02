@@ -44,3 +44,40 @@
  .ctx-card { padding:18px; }
  .ctx-actions { flex-wrap:wrap; }
 }
+
+/* ---- 会话上下文：同主站一套语言（2026-11） ----
+   目标：左侧列表更像导航（名字为主、编号退后），右侧卡片节奏统一。 */
+
+.ctx-shell { grid-template-columns: 248px minmax(0, 1fr); gap: 0; }
+.ctx-side { padding: 22px 14px; }
+.ctx-main { padding: 28px 32px 80px; }
+
+/* 聊天项：名字是主角，编号缩小并降低对比 */
+.ctx-chat { padding: 11px 12px; border-radius: 12px; border: 1px solid transparent; transition: background .16s ease, border-color .16s ease; }
+.ctx-chat:hover { background: var(--panel-soft); border-color: var(--hairline, rgba(150,205,220,.14)); }
+.ctx-chat.active { background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.ctx-chat strong, .ctx-chat b { font-weight: 600; font-size: 13.5px; }
+.ctx-key { font-size: 10.5px; letter-spacing: .04em; opacity: .45; font-family: var(--mono, Consolas, monospace); }
+
+/* 顶部标题区 */
+.ctx-top h1 { font-size: 26px; letter-spacing: -.02em; }
+.ctx-top { margin-bottom: 22px; }
+
+/* 说明三栏：更像引导，不像卡片 */
+.ctx-guide { gap: 14px; }
+.ctx-guide > * { padding: 16px 18px; border-radius: 14px; }
+
+/* 统计卡：数值大、标签小 */
+.ctx-stat { border-radius: 14px; border: 1px solid var(--hairline, rgba(150,205,220,.14)); padding: 14px 16px; }
+.ctx-stat b, .ctx-stat strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+
+/* 条形：和主站一致 */
+.ctx-track, .ctx-bar { border-radius: 999px; }
+.ctx-fill { border-radius: 999px; }
+
+@media (max-width: 900px) {
+  .ctx-shell { grid-template-columns: 1fr; }
+  .ctx-side { position: static; max-height: 220px; overflow: auto; }
+  .ctx-main { padding: 20px 16px 64px; }
+  .ctx-guide { grid-template-columns: 1fr; }
+}

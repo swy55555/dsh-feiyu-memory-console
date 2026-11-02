@@ -113,10 +113,13 @@ async function load(showToast = false) {
   state.busy = true
   $('#refresh').disabled = true
   try {
-    const [ctx, traceData] = await Promise.all([
+    const [ctx, traceData, efficiency] = await Promise.all([
       api(`/api/context?key=${encodeURIComponent(state.key)}`),
       api(`/api/context/traces?key=${encodeURIComponent(state.key)}&limit=20`).catch(() => ({ traces: [] })),
+      api(`/api/context/efficiency?key=${encodeURIComponent(state.key)}`).catch(() => ({unavailable:true})),
     ])
+    state.efficiency=efficiency
+    renderEfficiency()
     state.ctx = ctx
     state.traces = Array.isArray(traceData.traces) ? traceData.traces : []
     renderHeader()
@@ -132,6 +135,32 @@ async function load(showToast = false) {
     state.busy = false
     $('#refresh').disabled = false
   }
+}
+
+function renderEfficiency() {
+  const box=$('#efficiency');if(!box)return
+  const data=state.efficiency||{},a=data.assembly,r=data.rotation,m=data.analysisMemo
+  const lines=[]
+  if(data.unavailable)lines.push('桥接诊断暂不可用，未触发后台处理。')
+  if(a){
+    lines.push(a.enabled?`最近一次组装：可选参考 ${a.usedChars} / ${a.budgetChars} 字符，未重复发送或未选入 ${a.omittedChars} 字符。`:'统一参考预算已关闭，使用原组装路径。')
+    if(a.protectedOverflow)lines.push('必要参考超过预算，已完整保留；没有截断当前纠正。')
+    lines.push('仅统计新组装的参考，不含当前原话、完整人格规则、工具及已有会话历史；字符不是 token。')
+    if(data.delivery)lines.push(data.delivery.accepted?`最近一次投递已接受；摘要/原文复用减少 ${data.delivery.savedChars||0} 字符，不代表模型确实采用。`:'最近一次投递未被接受。')
+  }
+  const reasons={'not-enough':'尚未达到轮换条件',active:'等待安全空闲',busy:'已有摘要或轮换在处理',backoff:'摘要失败后退避',interrupted:'出现新活动，暂缓轮换',error:'摘要未完成，保留当前会话','too-few':'可摘要消息不足',disabled:'自动轮换未启用','no-session':'当前没有模型会话'}
+  const blockers={'prompt-queue':'消息队列未清空','model-turn':'模型仍在处理','reply-collector':'回复尚未收集完','tool-wait':'工具等待未结束','pending-wake':'有待处理唤醒','unread-messages':'还有未读消息','recent-activity':'最近一分钟仍有互动'}
+  if(r){lines.push(`轮换检查（${fmt(r.at)}）：${r.ok?'已完成轮换':reasons[r.reason]||'等待检查'}。`)
+    if(r.inputTokens!==undefined)lines.push(`检查时单次输入 ${r.inputTokens} token；触发参考值 ${r.inputLimit||'已关闭'}。达到阈值也不会中断正在进行的对话。`)
+    if(r.blockers?.length)lines.push('等待原因：'+r.blockers.map(x=>blockers[x]||x).join('、')+'。')
+  }
+  if(m){if(m.unavailable)lines.push('后台回执不可用，相关后台任务暂停，聊天继续。')
+    else{const rows=m.states||[];lines.push(`后台成功结果复用有效期 ${m.retentionHours} 小时：当前保存 ${rows.filter(x=>x.state==='success').reduce((n,x)=>n+x.count,0)} 项，保留回执累计复用 ${rows.reduce((n,x)=>n+(x.hits||0),0)} 次。`)
+      if(rows.some(x=>['unknown','pending-or-unknown'].includes(x.state)))lines.push('存在运行中或结果不明的回执。结果不明会暂停对应原话的自动重试；手动重试可能再次计费。')
+    }
+  }
+  if(!lines.length)lines.push('还没有本次启动后的诊断记录，正常聊天后会显示。')
+  box.replaceChildren(...lines.map(text=>el('p',{text})))
 }
 
 function renderTraces() {

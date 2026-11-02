@@ -1,8 +1,8 @@
 {
   "name": "dsh-feiyu-memory-console",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "private": false,
-  "description": "心迹：基于经历、可塑记忆与当前心绪的陪伴系统，保留 QQ 通信和二代仿真兼容能力。",
+  "description": "回响：基于经历、可塑记忆与当前心绪的陪伴系统，保留 QQ 通信和二代仿真兼容能力。",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -60,8 +60,7 @@
     "LICENSE",
     "test",
     "UPGRADE.md",
-    "manual/USER_GUIDE-0.10.1.md",
-    "manual/USER_GUIDE-0.10.1.pdf"
+    "manual/USER_GUIDE-0.11.0.md"
   ],
   "dsh": {
     "bundle": {

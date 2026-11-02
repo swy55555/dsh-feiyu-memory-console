@@ -7,6 +7,16 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const RUNTIME_VERSION = "0.10.1";
 const templates = {
+  "reference-assembly.mjs": "reference-assembly.mjs",
+  "context-efficiency.mjs": "context-efficiency.mjs",
+  "analysis-receipts.mjs": "analysis-receipts.mjs",
+  "expression-guard.mjs": "expression-guard.mjs",
+  "source-validity.mjs": "source-validity.mjs",
+  "chat-clarification.mjs": "chat-clarification.mjs",
+  "reply-context.mjs": "reply-context.mjs",
+  "reply-freshness.mjs": "reply-freshness.mjs",
+  "source-retention.mjs": "source-retention.mjs",
+  "reference-reuse.mjs": "reference-reuse.mjs",
   "growth-classroom.mjs": "growth-classroom.mjs",
   "sharing-privacy.mjs": "sharing-privacy.mjs",
   "emotion-scopes.mjs": "emotion-scopes.mjs",

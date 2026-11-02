@@ -1,3 +1,4 @@
+import {sourceCorrectionPanel} from './source-correction.js'
 import { classroomPanel } from './growth-classroom.js'
 import { organizerPanel } from './memory-organizer.js'
 import { mindWorkspacePanel } from './mind-workspace.js'
@@ -128,6 +129,7 @@ const mark = () => el('div', { class: 'mark', html: ICONS.whale.replace('<svg ',
 
 const S = {
   tab: 'overview',
+  memoryView: 'timeline',
   overview: null,
   loading: 0,
   labels: {},
@@ -425,8 +427,8 @@ function buildTopbar() {
   return el('header', { class: 'topbar' },
     el('div', { class: 'brand' }, mark(),
       el('div', null,
-        el('h1', { text: '心迹 · 可塑性记忆' }),
-        el('p', { text: '她记得的，都在这里。' }),
+        el('h1', { text: '回响' }),
+        el('p', { text: '记忆是过去留下的声音，情绪是当下的共振，性格是声音的底色——最后都在回复里回响。' }),
       ),
     ),
     health,
@@ -440,19 +442,17 @@ function buildTopbar() {
 }
 
 function buildTabs() {
+  // 扁平导航：顺序本身表达分组，不再插入组标签。
   const tabs = [
     { id: 'overview', label: '总览' },
-    { id: 'graph', label: '记忆图', count: S.graph.data?.count },
-    { id: 'persona', label: '性格', count: S.persona?.pending },
-    { id: 'emotion', label: '情绪' },
-    { id: 'continuity', label: '当前心绪' },
-    { id: 'classroom', label: '成长课堂' },
-    { id: 'memes', label: '玩梗' },
-    { id: 'cost', label: '花费' },
-    { id: 'library', label: '长期记忆', count: S.overview?.active },
-    { id: 'light', label: '轻量记忆', count: S.overview?.light?.total },
-    { id: 'diary', label: '日记', count: S.overview?.diary?.count },
-    { id: 'upkeep', label: '整理', count: S.overview?.queue?.total },
+    { id: 'evidence', label: '拾光' },
+    { id: 'persona', label: '轮廓', count: S.persona?.pending },
+    { id: 'emotion', label: '潮汐' },
+    { id: 'continuity', label: '余音' },
+    { id: 'classroom', label: '年轮' },
+    { id: 'memory', label: '回廊', count: S.overview?.active },
+    { id: 'memes', label: '梗库' },
+    { id: 'cost', label: '账本' },
   ]
   const bar = el('nav', { class: 'tabs', 'aria-label': '分区' })
   for (const tab of tabs) {
@@ -460,7 +460,7 @@ function buildTabs() {
       class: `tab ${S.tab === tab.id ? 'active' : ''}`,
       dataset: { tab: tab.id },
       on: { click: () => go(tab.id) },
-    }, tab.label, (tab.id === 'overview' || tab.id === 'emotion' || tab.id === 'continuity' || tab.id === 'classroom') ? null : el('span', { class: 'n', text: tab.count == null ? '…' : String(tab.count) })))
+    }, tab.label, (tab.id === 'overview' || tab.id === 'evidence' || tab.id === 'emotion' || tab.id === 'continuity' || tab.id === 'classroom' || tab.count == null) ? null : el('span', { class: 'n', text: String(tab.count) })))
   }
   // 会话上下文是独立页（原文层 + 摘要层），不在 SPA 里，单独挂一个入口。
   bar.appendChild(el('a', {
@@ -498,7 +498,10 @@ function updateTabs() {
     // Keep navigation stable during startup, outage or an older host handshake.
     btn.style.display = ''
     const n = btn.querySelector('.n')
-    if (n && counts[id] !== undefined && counts[id] !== null) n.textContent = String(counts[id])
+    if (counts[id] !== undefined && counts[id] !== null) {
+      if (n) n.textContent = String(counts[id])
+      else if (!['overview', 'evidence', 'emotion', 'continuity', 'classroom'].includes(id)) btn.appendChild(el('span', { class: 'n', text: String(counts[id]) }))
+    }
   }
 }
 
@@ -542,7 +545,7 @@ function route(force = false) {
     if (params.get('book') === 'private' || params.get('book') === 'public') S.diary.book = params.get('book')
     if (params.get('date')) { S.diary.wantDate = params.get('date'); S.diary.showIntro = false }
   }
-  if (!['overview', 'graph', 'persona', 'emotion', 'continuity', 'classroom', 'memes', 'cost', 'library', 'light', 'diary', 'upkeep'].includes(tab)) { go('overview', { replace: true }); return }
+  if (!['overview', 'evidence', 'memory', 'graph', 'persona', 'emotion', 'continuity', 'classroom', 'memes', 'cost', 'library', 'light', 'diary', 'upkeep'].includes(tab)) { go('overview', { replace: true }); return }
   if (tab !== S.tab || force) {
     const changed = tab !== S.tab
     S.tab = tab
@@ -556,7 +559,7 @@ function route(force = false) {
 function paintCurrent() {
   if (!mainEl) return
   if (S.tab !== 'classroom' && S.classroom.timer) {clearInterval(S.classroom.timer);S.classroom.timer=0}
-  if (S.tab !== 'graph') stopGraphLoop()
+  if (S.tab !== 'graph' && !(S.tab === 'memory' && S.memoryView === 'graph')) stopGraphLoop()
   if (S.tab !== 'library' && S.candidateAuto.timer) {clearInterval(S.candidateAuto.timer);S.candidateAuto.timer=0}
   if (S.tab !== 'continuity' && S.continuity.timer) {clearInterval(S.continuity.timer);S.continuity.timer=0}
   if (S.tab !== 'emotion' && S.emotionTimer) { clearInterval(S.emotionTimer); S.emotionTimer = 0 }
@@ -585,6 +588,8 @@ function paintCurrent() {
     }))
   }
   if (S.tab === 'overview') mainEl.appendChild(renderOverview())
+  else if (S.tab === 'evidence') mainEl.appendChild(renderEvidenceFrame())
+  else if (S.tab === 'memory') mainEl.appendChild(renderMemoryBook())
   else if (S.tab === 'graph') { mainEl.appendChild(renderGraphTab()); startGraphLoop() }
   else if (S.tab === 'persona') { mainEl.appendChild(renderPersona()); if (!S.persona && !S.personaLoading) void loadPersona(); if (S.chatProfiles === null) void loadChatProfiles() }
   else if (S.tab === 'emotion') { mainEl.appendChild(renderEmotion()); if (!S.emotion && !S.emotionLoading) void loadEmotion() }
@@ -714,6 +719,46 @@ function memoryEvidence(row, semantic) {
     el('p', { class: 'note', text: String(row.sourceId || '').startsWith('diary:') ? '来源为角色日记，应与用户原话区分。' : '以下是保存的来源片段；可能经过截断，不等于完整聊天记录。' }),
     el('blockquote', { text: row.sourceText || '这条旧记忆未保存来源片段。' }),
   )
+  const sourceResult=el('p',{class:'note',role:'status'});
+  detail.appendChild(el('button',{class:'btn ghost',text:'核对完整原话（本地）',on:{click:async event=>{
+    event.stopPropagation();const button=event.currentTarget;button.disabled=true;
+    try{
+      const r=await api(`/source-status?scope=${encodeURIComponent(row.scope)}&id=${encodeURIComponent(row.id)}`);
+      const labels={partial:'这条原话经过截断，或旧记录正好达到截断上限，不能核对完整语境。',incomplete:'这条记录缺少必要的来源标识，不能完整核验。',unavailable:'现存原话和保留证据中未找到来源；不代表这条记忆一定错误。',mismatch:'保存片段或时间与来源不一致，不能标为已核对。'};
+      sourceResult.textContent=r.status==='matched'
+        ?`原话、说话人和时间匹配。${r.validity==='revoked'?'但该来源的依据资格已撤回，相关参考暂停使用。':''}${r.retained?'依据已独立保留，不随近期聊天窗口淘汰。':'依据目前仍在近期聊天窗口。'}来源版本 ${String(r.version||'').slice(0,12)}。仅核对来源，不证明内容属实；没有调用模型。`
+        :(labels[r.status]||'暂时无法核验来源。');
+    }catch(error){sourceResult.textContent=error.message;}finally{button.disabled=false;}
+  }}}));
+  detail.appendChild(sourceResult);
+  const impactResult=el('div',{class:'source-impact',role:'status','aria-live':'polite'});
+  detail.appendChild(el('button',{class:'btn ghost',text:'查看纠正影响（只读）',on:{click:async event=>{
+    event.stopPropagation();const button=event.currentTarget;button.disabled=true;impactResult.replaceChildren(el('p',{class:'note',text:'正在核对已记录的来源关系…'}));
+    try{
+      const r=await api(`/source-impact?scope=${encodeURIComponent(row.scope)}&id=${encodeURIComponent(row.id)}`);
+      if(!['matched','partial'].includes(r.status)){
+        const reasons={incomplete:'来源标识不完整',unavailable:'原话不可用',mismatch:'来源片段或时间不一致'};
+        impactResult.replaceChildren(el('p',{class:'note',text:`${reasons[r.status]||'暂时无法核验来源'}，不能可靠列出影响范围。这不表示没有影响，也不会因此删除或确认记忆。`}));return;
+      }
+      const kinds={memory:'记忆',summary:'摘要','bridge:concern':'挂念','bridge:belief':'可修正的认识','bridge:self-reference':'自我参考','bridge:response-evidence':'回应反馈','bridge:response-adjustment':'表达要求','bridge:association':'曾生成的联想','bridge:association-feeling':'当时的主观感受'};
+      const refs={current:'当前引用',historical:'历史引用',unavailable:'暂不能核验'};
+      const states={active:'有效',candidate:'待核实',archived:'已归档',deleted:'已删除，可撤销',superseded:'已被替代',retracted:'已撤回',dormant:'已淡化',fading:'淡化中',tentative:'待验证',supported:'有重复依据',recorded:'已记录',open:'进行中',resolved:'已结束',snoozed:'暂不聊','past-generated':'生成记录，不代表已表达','past-impression':'当时的感受，不代表当前心情','legacy-unversioned':'缺少旧来源版本'};
+      impactResult.replaceChildren(...[
+        el('h4',{text:`这句原话关联了 ${r.total} 条记录`}),
+        el('p',{class:'note',text:`当前引用 ${r.counts?.current||0} · 历史引用 ${r.counts?.historical||0} · 暂不能核验 ${r.counts?.unavailable||0}。当前引用不代表聊天时一定采用；历史引用不表示仍在生效。`}),
+        r.status==='partial'?el('p',{class:'note',text:'原话经过截断，以下仅是已保存片段的关联，不能代表完整语境。'}):null,
+        el('ul',{},(r.items||[]).map(x=>el('li',{},el('strong',{text:`${kinds[x.kind]||'关联记录'} · ${refs[x.reference]||'暂不能核验'}`}),el('p',{text:x.text||'未取得这条记录的正文；不能按无影响处理。'}),el('small',{class:'note',text:states[x.status]||'请到对应模块核对当前状态'}),x.indirect?el('p',{class:'note',text:`间接路径：原话 → ${[...new Set((x.via||[]).map(v=>v.kind))].map(kind=>(x.via||[]).filter(v=>v.kind===kind).map(v=>`${kinds[v.kind]||'记录'} ${String(v.id).slice(0,12)}${v.parentState==='changed-version'?'（已是另一版本）':v.parentState==='not-present'?'（现记录不可用）':''}`).join(' + ')).join(' → ')} → ${kinds[x.kind]||'生成内容'}。${x.reference==='unavailable'?'路径缺少版本依据，不能确认为影响。':'这是历史生成路径，不代表现在仍在生效。'}`}):null))),
+        !r.total?el('p',{class:'note',text:'尚未找到已登记的直接引用，不能据此判断这句话没有产生其他影响。'}):null,
+        r.truncated?el('p',{class:'note',text:`这里只展示前 ${r.shown} 条，共 ${r.total} 条；数量统计包含未展示项。`}):null,
+        r.indirectCoverage==='unavailable'?el('p',{class:'note',text:'联想记录暂不可用，不能据此判断没有间接影响。'}):null,
+        r.bridgeCoverage==='partial'?el('p',{class:'note',text:'部分心迹状态暂不可读，跨模块清单可能不完整。'}):null,
+        el('p',{class:'note',text:'已覆盖直接引用及有版本依据的“记忆 → 联想 → 当时感受”；摘要再影响认识等间接关系尚未完整记录。数据库与心迹按先后快照读取，聊天继续发生后应重新查看。仅预览，不改动记忆、不回退性格或情绪，也不调用模型。'}),
+        el('small',{class:'note',text:`来源版本 ${String(r.source?.version||'').slice(0,12)} · ${new Date(r.checkedAt).toLocaleString()}`})
+      ].filter(Boolean));
+    }catch(error){impactResult.replaceChildren(el('p',{class:'note',text:`预览未完成：${error.message}。不能据此判断没有影响。`}));}finally{button.disabled=false;}
+  }}}));
+  detail.appendChild(impactResult);
+  detail.appendChild(sourceCorrectionPanel(row,{el,api}));
   if (semantic) {
     const r = row.retrieval
     detail.appendChild(el('p', { class: 'note', text: r
@@ -725,23 +770,89 @@ function memoryEvidence(row, semantic) {
   return detail
 }
 
+// 证据脉络：只读聚合页，独立成页，避免和现有 tab 的加载/写入逻辑纠缠。
+// 回廊：记忆类入口合并成一个页面，内部二级视图复用现有渲染。
+function renderMemoryBook() {
+  const views = [
+    ['timeline', '时间线', S.overview?.active],
+    ['graph', '图谱', S.graph.data?.count],
+    ['light', '短期', S.overview?.light?.total],
+    ['diary', '日记', S.overview?.diary?.count],
+    ['upkeep', '整理', S.overview?.queue?.total],
+    ['context', '上下文', null],
+  ]
+  const current = views.some(([id]) => id === S.memoryView) ? S.memoryView : 'timeline'
+  const wrap = el('div', { class: 'memory-book' })
+  const nav = el('div', { class: 'subtabs', role: 'tablist' })
+  for (const [id, label, count] of views) {
+    nav.appendChild(el('button', {
+      class: `subtab ${current === id ? 'active' : ''}`,
+      role: 'tab',
+      'aria-selected': current === id ? 'true' : 'false',
+      on: { click: () => { if (S.memoryView === 'graph' && id !== 'graph') stopGraphLoop(); S.memoryView = id; paintCurrent() } },
+    }, label, count == null ? null : el('span', { class: 'n', text: String(count) })))
+  }
+  wrap.appendChild(nav)
+  wrap.appendChild(el('div', { class: 'row', style: 'margin:-8px 0 14px' },
+    el('a', { class: 'btn sm', href: '#/evidence', text: '在拾光看相关证据' })))
+  const body = el('div', { class: 'memory-body' })
+  if (current === 'timeline') { body.appendChild(renderLibrary()); if (!S.library.loaded) void loadLibrary() }
+  else if (current === 'graph') {
+    body.appendChild(renderGraphTab()); startGraphLoop(); if (!S.graph.data) void loadGraph()
+    // 切入时容器可能还没完成布局：下一帧按真实尺寸重建，否则力导向图会画在 0×0 画布上。
+    const fitGraph = () => {
+      try {
+        const el = S.graph.fgEl; const fg = S.graph.fg
+        if (!el || !fg || !el.clientWidth) return false
+        fg.width(el.clientWidth); fg.height(el.clientHeight)
+        S.graph.fitted = false
+        drawGraphBackdrop(); buildGraphNodes(); fg.resumeAnimation?.()
+        return true
+      } catch { return false }
+    }
+    requestAnimationFrame(() => { if (!fitGraph()) setTimeout(fitGraph, 160) })
+  }
+  else if (current === 'light') { body.appendChild(renderLight()); if (S.light.scopes === null) void loadLightScopes() }
+  else if (current === 'diary') { body.appendChild(renderDiary()); if (!S.diary.books) void loadDiary() }
+  else if (current === 'upkeep') { body.appendChild(renderUpkeep()) }
+  else if (current === 'context') {
+    body.appendChild(el('iframe', {
+      src: 'context.html',
+      title: '会话上下文',
+      style: 'display:block;width:100%;height:76vh;border:0;background:transparent',
+    }))
+  }
+  wrap.appendChild(body)
+  return wrap
+}
+
+function renderEvidenceFrame() {
+  return el('div', { style: 'overflow:hidden;min-height:78vh' },
+    el('iframe', {
+      src: './evidence.html?embed=1',
+      title: '证据脉络',
+      style: 'display:block;width:100%;height:78vh;border:0;background:transparent',
+    }))
+}
+
 function renderOverview() {
   const o = S.overview
   if (!o) return el('div', { class: 'empty', text: '还没读到数据…' })
 
   const heroText = o.unavailable ? '记忆库还没有就绪，先完成下面的启动检查。' : o.candidate > 0
-    ? frag('她记得 ', el('em', { text: String(o.active) }), ' 件事，还有 ', el('em', { text: String(o.candidate) }), ' 件拿不准，等你点个头。')
+    ? frag('她记得 ', el('em', { text: String(o.active) }), ' 件事，还有 ', el('em', { text: String(o.candidate) }), ' 条线索正在后台保留，不用逐条确认。')
     : frag('她记得 ', el('em', { text: String(o.active) }), ' 件事，都还清清楚楚。')
 
   const hero = el('section', { class: 'hero' },
     el('div', { class: 'kicker', text: 'memory console' }),
     el('h2', null, heroText),
     el('p', { text: '这条鱼会淡忘 —— 不常被想起来的，会慢慢沉下去。这里能看见哪些还浮着、哪些快沉了，也能亲手把重要的那条捞回来。' }),
+    el('div', { class: 'row' }, el('button', { class: 'btn sm', text: '同步群名昵称', on: { click: async (e) => { const b = e.currentTarget; b.disabled = true; try { const resp = await fetch('http://127.0.0.1:3100/api/labels/sync', { cache: 'no-store' }); const r = await resp.json(); toast(r && r.added ? '补了 ' + r.added + ' 个名字' : '没有新名字', 'ok'); if (typeof refreshOverview === 'function') await refreshOverview() } catch (err) { toast(err.message, 'error') } finally { b.disabled = false } } } })),
   )
 
   const stats = el('section', { class: 'stats' },
     statCard(o.active, '还活着', `一共 ${o.total} 条记录`, 'accent'),
-    statCard(o.candidate, '等你确认', o.candidate ? '拿不准的会先搁着' : '没有悬着的事', o.candidate ? 'amber' : ''),
+    statCard(o.candidate, '暂存线索', o.candidate ? '拿不准的会先搁着' : '没有悬着的事', o.candidate ? 'amber' : ''),
     statCard(o.fadingCount ?? 0, '正在淡出', '鲜活度低于 35%', (o.fadingCount ?? 0) ? 'rose' : ''),
     statCard((o.core || 0) + (o.task || 0), '核心与待办', `${o.core || 0} 核心 · ${o.task || 0} 待办`, 'green'),
   )
@@ -857,8 +968,8 @@ function renderOverview() {
         on: { click: () => toggleAssociation(o.association !== true) },
       }, o.association ? '关闭补充' : '开启补充'),
     ),
-    el('p',{class:'note',text:'空闲时想到的话题与主观感受，已集中到“当前心绪”。'}),
-    el('a',{class:'btn sm',href:'#/continuity',text:'查看当前心绪'}),
+    el('p',{class:'note',text:'空闲时想到的话题与主观感受，已集中到“余音”。'}),
+    el('a',{class:'btn sm',href:'#/continuity',text:'查看余音'}),
   )
   return frag(
     hero,
@@ -1008,7 +1119,7 @@ function renderLibrary() {
   )
 
   const seg = el('div', { class: 'segmented' })
-  for (const [value, label] of [['active', '活着'], ['candidate', '待确认'], ['superseded', '被取代'], ['deleted', '已删'], ['archived', '已归档'], ['all', '全部']]) {
+  for (const [value, label] of [['active', '活着'], ['candidate', '暂存与疑问'], ['superseded', '被取代'], ['deleted', '已删'], ['archived', '已归档'], ['all', '全部']]) {
     seg.appendChild(el('button', {
       class: f.status === value ? 'active' : '', type: 'button', text: label,
       on: { click: () => reloadLibraryWith({ status: value }) },
@@ -1046,8 +1157,8 @@ function renderLibrary() {
   rail.appendChild(addBtn)
 
   const pendingHelp = f.status === 'candidate' ? el('section',{class:'candidate-guide card pad'},
-    el('div',{},el('span',{class:'eyebrow',text:'待确认 ≠ 已丢失'}),el('h2',{text:'先核对，再决定是否记住'}),
-      el('p',{text:'候选不会仅因久未确认而自动删除，但不会作为已确认事实参与正常检索。带有效期的记录到期后，确认不会自动续期。'})),
+    el('div',{},el('span',{class:'eyebrow',text:'待确认 ≠ 已丢失'}),el('h2',{text:'这里只保留还拿不准的内容'}),
+      el('p',{text:'普通经历由本地后台核对来源并自动保存，不必逐条确认。剩余候选等待新的依据，不作为已确认事实检索；明确到期的普通记录可归档，保留原文且可撤销。'})),
     el('div',{class:'candidate-options'},
       el('div',{},el('strong',{text:'暂不处理'}),el('span',{text:'留在待确认，稍后再看'})),
       el('div',{},el('strong',{text:'归档候选'}),el('span',{text:'保留已有事实；候选可在已归档找到'})),
@@ -1208,9 +1319,10 @@ function memRow(row, { semantic = false } = {}) {
 
   const text = el('p', { class: 'text', text: row.text })
   const body = el('div', { class: 'body' }, text)
+  if(row.memoryKind==='experience')body.appendChild(el('p',{class:'note',text:'仅表示当时说过这句话；不作为当前事实或长期性格结论。'}))
 
   const meta = el('div', { class: 'meta' })
-  meta.appendChild(el('span', { class: `pill ${row.status}`, text: statusLabel(row.status) }))
+  meta.appendChild(el('span', { class: `pill ${row.status}`, text: row.status==='active'&&row.memoryKind==='experience'?'原话记录':row.status==='candidate'?(['conflict','replace'].includes(row.relation)?'关系需要核对':'后台暂存'):statusLabel(row.status) }))
   meta.appendChild(el('span', { class: `pill ${scope?.kind || ''}`, text: scopeLabel }))
   const day = dateKey(row.sourceTime || row.createdAt)
   const dayBooks = S.library.diaryDates?.[day]
@@ -1793,12 +1905,12 @@ function renderCost() {
       ),
     ),
     el('section', {class:'card pad'},
-      el('h2', {class:'h2',text:'累计 · 功能花费'}),
+      
       el('p', {class:'note',text:'“历史未分项”指旧版未记录具体功能的内部调用，不是新增收费。能核实原始调用模板的历史已重新归类；证据不足的继续保留，不凭词语猜测。计费用量记录含重试；已压缩历史可能只剩累计 token 和金额。'}),
       pluginRows.map(f=>el('div',{class:'mini'},el('span',{class:'t',text:f.label||'历史未分项'}),el('span',{class:'r',text:`${cur0(f.cost)} · ${fmtNum(bucketTotal(f.buckets))} tokens · ${f.steps||0} 条留存计费用量记录`}))),
     ),
     t.historyAudit ? el('section', {class:'card pad', id:'usage-history-audit'},
-      el('h2', {class:'h2', text:'历史费用核对'}),
+      
       el('p', {class:'note', text:'下列是历史记录的核对结果，是上方功能费用的历史子集，不能再相加。已剔除项不计入统计总额、比例、趋势图或聊天明细；原始账本保留，模型服务商已收费用不会退回。'}),
       t.historyAudit.error ? el('p', {class:'note', text:t.historyAudit.error}) : null,
       (t.historyAudit.groups || []).map(f => el('div', {class:'mini'},
@@ -2708,9 +2820,7 @@ function renderUpkeep() {
   const canFlush = Array.isArray(h?.capabilities) && h.capabilities.includes('queue-flush')
   const tasks = []
 
-  if (candidates > 0) {
-    tasks.push(todoItem(tasks.length + 1, '确认拿不准的记忆', `有 ${candidates} 条候选还没生效。确认后才会正式记住；不确认也不会丢，只是先搁着。`, el('button', { class: 'btn sm primary', on: { click: () => goCandidate() } }, '去确认')))
-  }
+  // Background uncertainty is not an action item for the user to clear.
   if (queue.total > 0) {
     const capText = unlimited
       ? `每天不限次数，今天已自动提炼 ${calls} 批。`
@@ -2733,7 +2843,7 @@ function renderUpkeep() {
       el('span', { class: 'spacer' }),
       el('span', { class: 'muted small', text: '按顺序来，不用一次做完' }),
     ),
-    el('p', { class: 'note', style: { margin: '0 0 10px' } }, '上方「省心整理」在本地复用审核、批量归档，不调用模型。下方聊天队列会分批调用模型提炼，可能不产生候选；待确认有歧义时仍需审核，已审妥的可以批量处理。'),
+    el('p', { class: 'note', style: { margin: '0 0 10px' } }, '上方自动维护在后台核对来源并记下完整自述、普通计划与经历，不调用模型；记录当时说过，不把计划当成完成或把自述当成已证实事实。下方提取队列仍可能调用模型。暂存线索无需逐条确认，确有需要时再查看、纠正或审核。'),
     el('div', { class: 'todo-list' }, tasks.length ? tasks : el('div', { class: 'empty', text: '现在没有需要你处理的。' })),
   )
 
@@ -3053,35 +3163,51 @@ function renderJointTemperament(data) {
   if(!p)return el('p',{class:'muted',text:'六维状态尚未迁入，请检查桥接运行状态。'})
   const dims=p.spec.dimensions,values=Object.fromEntries(dims.map(d=>[d.key,{key:d.key,current:p.current[d.key],baseline:p.baseline[d.key],band:d.band}]))
   const reason=el('input',{class:'input',style:{maxWidth:'480px',margin:'12px 8px 12px 0'},placeholder:'说明这次修正的原因',maxlength:160,'aria-label':'六维修正原因'})
-  const editor=el('details',{},el('summary',{text:'修正当前值、参考起点和变化边界'}),
-    el('p',{class:'muted small',text:'修正会记录原因并清空待积累的变化。当前值须在参考起点 ± 边界内；原始值保留用于对照。'}),
-    ...dims.map(d=>el('div',{class:'card pad',style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:'12px',marginTop:'12px'}},el('strong',{text:d.label,style:{gridColumn:'1 / -1'}}),...['current','baseline','band'].map(field=>{
-      const names={current:'当前值',baseline:'参考起点',band:'变化边界'}
+  const editor=el('details',{},el('summary',{text:'修正当前值、参考起点'}),
+    el('p',{class:'muted small',text:'修正会记录原因并清空待积累的变化。当前值不再受边界限制，只在 0~100 内；原始值保留用于对照。'}),
+    ...dims.map(d=>el('div',{class:'card pad',style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:'12px',marginTop:'12px'}},el('strong',{text:d.label,style:{gridColumn:'1 / -1'}}),...['current','baseline'].map(field=>{
+      const names={current:'当前值',baseline:'参考起点'}
       return el('label',{style:{display:'grid',gap:'6px'}},el('span',{class:'muted small',text:names[field]}),el('input',{class:'input',type:'number',min:0,max:field==='band'?40:100,step:1,value:values[d.key][field],'aria-label':d.label+names[field],on:{input:e=>{values[d.key][field]=e.target.value===''?NaN:Number(e.target.value)}}}))
     }))),reason,
     el('button',{class:'btn sm',on:{click:()=>changeSelfReference({action:'temperament',revision:data.revision,dimensions:Object.values(values),reason:reason.value})}},'保存六维修正'))
   return el('section',{class:'card pad'},el('h2',{class:'h2',text:'六维性格 · 缓慢变化的倾向'}),
     el('p',{class:'muted',text:'保留原来的六维数值，与下方自我参考共同参与回应和情绪理解。数字是倾向，不是必须表现的台词；“嘴硬”不要求撒谎或挖苦。'}),
+    el('div',{style:{display:'grid',placeItems:'center',margin:'6px 0 16px'}},el('div',{html:radarSvg(dims,p.current,p.baseline)})),
     el('div',{class:'traits'},...dims.map(d=>{
-      const value=p.current[d.key],base=p.baseline[d.key],lo=Math.max(0,base-d.band),hi=Math.min(100,base+d.band)
-      return el('div',{class:'trait'},el('div',{class:'trait-head'},el('span',{text:d.label}),el('span',{class:'muted small',text:`${value} / 参考 ${base} · 边界 ${lo}–${hi}`})),
+      const value=p.current[d.key],base=p.baseline[d.key]
+      return el('div',{class:'trait'},el('div',{class:'trait-head'},el('span',{text:d.label}),el('span',{class:'muted small',text:`${value} / 参考 ${base}`})),
         el('div',{class:'trait-track',role:'meter','aria-label':d.label,'aria-valuenow':value,'aria-valuemin':0,'aria-valuemax':100},
-          el('span',{class:'trait-band',style:{left:`${lo}%`,width:`${hi-lo}%`}}),el('div',{class:'trait-fill',style:{width:`${value}%`}}),el('span',{class:'trait-anchor',style:{left:`${base}%`}})))
+          el('div',{class:'trait-fill',style:{width:`${value}%`}}),el('span',{class:'trait-anchor',style:{left:`${base}%`}})))
     })),
-    el('p',{class:'muted small',text:'与自我参考共用一次模型整理。每维需至少 3 次、跨 3 天的独立经历支持同一方向；每 7 天最多变化一次，每次每维 1 点、最多 2 维。起点和边界由你修正。'}),editor,
+    el('p',{class:'muted small',text:'与自我参考共用一次模型整理。每维需至少 3 次、跨 3 天的独立经历支持同一方向；每 3 天最多变化一次，每次每维 1 点、最多 3 维。只在 0~100 内，没有活动边界。'}),editor,
     el('details',{},el('summary',{text:`六维变化记录（${p.history?.length||0}）`}),...(p.history||[]).slice().reverse().map(h=>el('p',{class:'muted small',text:`${new Date(h.at).toLocaleString()} · ${h.source==='manual'?'手动修正':'经历积累'} · ${h.reason||h.changes.map(c=>`${dims.find(d=>d.key===c.key)?.label||c.key} ${c.before} → ${c.after}；${c.evidence?.map(e=>e.reason).join(' / ')||''}`).join('；')}`}))))
 }
 
 function renderSelfReference(data) {
   const labels={identity:'身份理解',origin:'共同经历',trait:'性格倾向',interest:'兴趣探索'}
-  const statuses={tentative:'正在形成',supported:'多日依据支持',fading:'正在淡化',dormant:'暂不使用',retracted:'已撤回'}
+  const statuses={'source-paused':'来源已撤回，暂停使用',tentative:'正在形成',supported:'多日依据支持',fading:'正在淡化',dormant:'暂不使用',retracted:'已撤回'}
   return el('div',{class:'self-reference-panel',style:{display:'grid',gap:'16px'}},renderJointTemperament(data),
     el('section',{class:'card pad'},el('h2',{class:'h2',text:'会成长的自我参考'}),
+    (()=>{
+      const claims=data.claims||[]
+      if(!claims.length) return null
+      const by={}
+      for(const c of claims){const k=labels[c.category]||c.category||'其他';by[k]=(by[k]||0)+1}
+      const total=claims.length
+      const colors={'身份理解':'var(--accent)','性格倾向':'var(--violet)','共同经历':'var(--amber)','兴趣探索':'var(--green)'}
+      return el('div',{class:'claim-bars',style:{margin:'4px 0 14px'}},
+        el('div',{style:{display:'flex',height:'10px',borderRadius:'999px',overflow:'hidden',background:'color-mix(in srgb, var(--line) 45%, transparent)'}},
+          Object.entries(by).map(([k,v])=>el('span',{title:k+' '+v,style:{width:(v/total*100).toFixed(1)+'%',background:colors[k]||'var(--dim)'}}))),
+        el('div',{class:'muted small',style:{display:'flex',gap:'12px',flexWrap:'wrap',marginTop:'8px'}},
+          Object.entries(by).map(([k,v])=>el('span',null,el('i',{style:{display:'inline-block',width:'8px',height:'8px',borderRadius:'50%',background:colors[k]||'var(--dim)',marginRight:'5px'}}),k+' '+v))),
+      )
+    })(),
       el('p',{class:'muted',text:'由真实交流逐步形成，只作参考。六维表达缓慢变化的倾向，文字参考解释经历；旧角色卡已退出当前回应。私人经历仅用于同一私聊。'}),
       el('p',{class:'muted',text:`版本 ${data.revision} · 待整理 ${data.queue?.length||0} 条。自动整理每批至少 12 条、两次尝试间隔至少 6 小时；计入“性格整理”。原话重复不续期，30 天无新依据淡化，90 天暂不使用。`}),
       el('button',{class:'btn sm',disabled:data.busy||!data.queue?.length,on:{click:()=>changeSelfReference({action:'review'})}},'整理已有新经历')),
     ...(data.claims||[]).map(c=>el('section',{class:'card pad'},
-      el('h3',{text:`${labels[c.category]||c.category} · ${statuses[c.status]||c.status}`}),
+      el('h3',{text:`${c.referenceKind==='interaction_feedback'?'交流反馈':c.referenceKind==='user_preference'?'对方的表达偏好':labels[c.category]||c.category} · ${statuses[c.status]||c.status}`}),
+      c.referenceKind&&c.referenceKind!=='self'?el('p',{class:'muted small',text:'保留原文与依据，不作为当前人格台词，也不凭这条反馈推动六维变化。表达要求由回应偏好模块按时效处理。'}):null,
       el('p',{text:c.text}),
       el('details',{},el('summary',{text:`查看 ${c.evidence.length} 条原话依据`}),...c.evidence.map(e=>el('p',{class:'muted small',text:`${new Date(e.at).toLocaleString()} · ${e.quote}`}))),
       c.status!=='retracted'?el('button',{class:'btn sm',on:{click:()=>changeSelfReference({action:'retract',id:c.id})}},'撤回这条参考'):null)),
@@ -3120,7 +3246,7 @@ function renderPersona() {
   const bandText = bands.length ? `${Math.min(...bands)}–${Math.max(...bands)}` : String(limits.band ?? 22)
   const stats = el('section', { class: 'stats' },
     statCard(data.pending ?? 0, '攒着的事', `权重 ${data.pendingWeight ?? 0} / ${limits.minWeight ?? 12}`, (data.pendingWeight ?? 0) >= (limits.minWeight ?? 12) ? 'amber' : ''),
-    statCard(bandText, '底色边界', '每维不同', 'green'),
+    statCard('无', '底色边界', '已取消限制', 'green'),
     statCard(p.history?.length ?? 0, '变过几次', p.lastChangeAt ? `上次 ${fmtWhen(p.lastChangeAt)}` : '还没变过', 'accent'),
   )
   const traitCard = el('section', { class: 'card pad' },
@@ -3130,7 +3256,7 @@ function renderPersona() {
       el('button', { class: 'btn sm', disabled: !hasCap('persona'), on: { click: () => draftPersona() } }, '从角色卡起草'),
       el('button', { class: 'btn sm', disabled: !hasCap('persona') || !(p.history?.length), on: { click: () => undoPersonaChange() } }, '撤销最近变化'),
       el('button', { class: 'btn sm', disabled: !hasCap('persona'), on: { click: () => startPersonaEdit() } }, '编辑维度'),
-      el('span', { class: 'muted small', text: '竖线 = 底色，浅色带 = 边界' }),
+      el('span', { class: 'muted small', text: '竖线 = 底色' }),
     ),
     el('div', { class: 'traits' }, dims.map(([key, label]) => {
       const value = Math.max(0, Math.min(100, Number(cur[key]) || 0))
@@ -3243,7 +3369,7 @@ function renderChatPersonaCard() {
       el('button', { class: 'btn sm primary', on: { click: () => saveChatPersona() } }, '保存'),
       el('button', { class: 'btn sm ghost', on: { click: () => resetChatPersona() } }, '清除'),
     ),
-    el('p', { class: 'note', style: { marginBottom: 0 } }, '偏移会叠加在全局当前值上，再按这个维度的边界夹住；不会改全局 baseline，也不会写进情绪统计。'),
+    el('p', { class: 'note', style: { marginBottom: 0 } }, '偏移会叠加在全局当前值上，只在 0~100 内；不会改全局 baseline，也不会写进情绪统计。'),
   )
 }
 
@@ -3329,7 +3455,7 @@ function renderPersonaEditor() {
       el('span', { class: 'spacer' }),
       el('span', { class: 'muted small', text: '保存后桥接立刻重读，不用重启' }),
     ),
-    el('p', { class: 'note' }, '底色是锚点，边界是每维最多能偏多少。改完会重置这几维的原点和当前值，历史记录保留。'),
+    el('p', { class: 'note' }, '底色是锚点；现在没有边界，只在 0~100 内变化。改完会重置这几维的原点和当前值，历史记录保留。'),
     el('div', null, rows),
     el('div', { class: 'row', style: { marginTop: '10px' } },
       el('button', { class: 'btn sm primary', on: { click: () => savePersonaSpec() } }, '保存'),
@@ -3423,6 +3549,53 @@ function renderEmotion() {
     el('p', { text: `回应态度：${e.stance || '正常交流'}。快变量是“现在”，心情是“今天”，底色是“长期”。情绪波动表示相对平常状态的变化，0.00 不代表没有感受。` }),
     el('p', { class:'muted small', text: e.lastCause ? `最近影响情绪的事件：${e.lastCause.kind} · ${(e.lastCause.evidence || []).join(' / ')}（${fmtWhen(e.lastCause.at)}）` : '尚无明确的情绪触发事件' }),
   )
+const pieFeelings = (()=>{
+  const fs2 = Array.isArray(st.feelings) ? st.feelings.filter(f=>Number(f.level)>0) : []
+  if(fs2.length < 2) return null
+  const total = fs2.reduce((a,f)=>a+Number(f.level||0),0) || 1
+  const colors = ['var(--accent)','var(--violet)','var(--amber)','var(--green)','var(--rose)']
+  let acc = 0
+  const segs = fs2.map((f,idx)=>{
+    const frac = Number(f.level||0)/total
+    const seg = [acc, acc+frac, colors[idx%colors.length], f.label]
+    acc += frac
+    return seg
+  })
+  const R=54, C=64
+  const arc = ([a,b])=>{
+    const p1=[C+R*Math.cos(2*Math.PI*a-Math.PI/2), C+R*Math.sin(2*Math.PI*a-Math.PI/2)]
+    const p2=[C+R*Math.cos(2*Math.PI*b-Math.PI/2), C+R*Math.sin(2*Math.PI*b-Math.PI/2)]
+    const large=b-a>0.5?1:0
+    return `M ${C} ${C} L ${p1[0].toFixed(1)} ${p1[1].toFixed(1)} A ${R} ${R} 0 ${large} 1 ${p2[0].toFixed(1)} ${p2[1].toFixed(1)} Z`
+  }
+  return el('section',{class:'card pad'},el('h2',{class:'h2',text:'此刻的组成'}),
+    el('div',{style:{display:'flex',gap:'20px',alignItems:'center',flexWrap:'wrap'}},
+      el('div',{html:'<svg width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="情绪构成">'+segs.map(s=>`<path d="${arc(s)}" fill="${s[2]}" stroke="var(--bg)" stroke-width="1.5"/>`).join('')+'</svg>'}),
+      el('div',{style:{display:'grid',gap:'6px'}},segs.map(s=>el('div',{class:'muted small'},el('i',{style:{display:'inline-block',width:'9px',height:'9px',borderRadius:'2px',background:s[2],marginRight:'6px'}}),s[3]+' '+Math.round((s[1]-s[0])*100)+'%'))),
+    ))
+})()
+
+const hourCurve = (()=>{
+  const h = Array.isArray(e.history) ? e.history.slice(-240) : []
+  if(h.length < 3) return null
+  const buckets = new Map()
+  for(const p of h){ const t = Math.floor(Number(p.at||0)/3600000); if(!buckets.has(t)) buckets.set(t,{v:0,a:0,n:0}); const b=buckets.get(t); b.v+=Number(p.v||0); b.a+=Number(p.a||0); b.n++ }
+  const rows=[...buckets.entries()].sort((x,y)=>x[0]-y[0]).slice(-24).map(([t,b])=>({t, v:b.v/b.n}))
+  if(rows.length<2) return null
+  const W=520,H=120,P=18
+  const min=Math.min(...rows.map(r=>r.v)), max=Math.max(...rows.map(r=>r.v)), span=Math.max(0.05,max-min)
+  const pts=rows.map((r,i)=>{const x=P+i*(W-P*2)/(rows.length-1);const y=H-P-((r.v-min)/span)*(H-P*2);return x.toFixed(1)+','+y.toFixed(1)}).join(' ')
+  return el('section',{class:'card pad'},el('h2',{class:'h2',text:'最近 24 小时'}),
+    el('p',{class:'muted small',text:'按小时聚合的愉悦度，看的是走势不是绝对值。'}),
+    el('div',{html:`<svg width="100%" height="${H}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="情绪曲线"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/></svg>`}),
+  )
+})()
+
+const impactCard = el('section',{class:'card pad'},el('h2',{class:'h2',text:'最近谁影响了她'}),
+  el('p',{class:'muted small',text:'按 7 天内每个聊天带来的情绪净变化 × 事件频次排序；只读程序记录，不是对人的评价。'}),
+  el('div',{id:'impact-body'},el('p',{class:'muted small',text:'读取中…'})))
+setTimeout(()=>{ void loadEmotionImpact() }, 60)
+
   const stats = el('section', { class: 'stats' },
     statCard(label, '现在', `情绪波动 ${intensity.toFixed(2)}`, intensity > 0.55 ? 'amber' : ''),
     statCard(String(mood.label || '平静'), '心情', `V ${Number(mood.valence || 0).toFixed(2)} · A ${Number(mood.arousal || 0).toFixed(2)}`, 'green'),
@@ -3449,7 +3622,7 @@ function renderEmotion() {
       ? el('div', { class: 'mini-list' }, triggers.map((t) => el('div', { class: 'mini' },
           el('span', { class: 'd', text: fmtWhen(t.at) }),
           el('span', { class: 't', text: `${sourceName[t.source] || t.source || '—'}：${t.summary || '—'} · ${t.kind || '旧事件'} / ${t.target || '未知对象'} · 判断分 ${Number(t.confidence || 0).toFixed(2)}` }),
-          el('span', { class: 'r', text: `${t.displayLabel || t.label || '—'} · 本轮变化 V${Number(t.deltaV || 0) >= 0 ? '+' : ''}${Number(t.deltaV || 0).toFixed(3)} / A${Number(t.deltaA || 0) >= 0 ? '+' : ''}${Number(t.deltaA || 0).toFixed(3)}` }),
+          el('span', { class: 'r', text: `${t.displayLabel || t.label || '—'} · ${t.transientOnly ? "短时反应（未计入关系） · " : ""}本轮变化 V${Number(t.deltaV || 0) >= 0 ? '+' : ''}${Number(t.deltaV || 0).toFixed(3)} / A${Number(t.deltaA || 0) >= 0 ? '+' : ''}${Number(t.deltaA || 0).toFixed(3)}` }),
           t.feelings?.length?el('span',{class:'small muted',text:'本轮采用的细微感受：'+t.feelings.map(f=>f.label+(f.action==='settle'?'（收束）':'')).join('、')}):null,
         )))
       : el('div', { class: 'empty', text: '还没有触发。等她收到第一条有情绪的话。' }),
@@ -3712,9 +3885,9 @@ function renderEmotion() {
     el('p', {text:e.subjective ? `${e.subjective.text}（未确认）` : '当前没有生效的主观印象。'}),
     e.subjective ? el('p', {class:'note',text:`轻微偏移 V ${Number(e.subjective.valence).toFixed(3)} / A ${Number(e.subjective.arousal).toFixed(3)}；${new Date(e.subjective.expiresAt).toLocaleString()} 到期。`}) : null,
     el('p', {class:'note',text:'这是临时感受；事实事件情绪、长期气候和人格不会因此被改写。新的主人私聊消息会清除它。'}),
-    el('a', {class:'btn sm',href:'#/continuity',text:'在当前心绪查看来源与去向'}),
+    el('a', {class:'btn sm',href:'#/continuity',text:'在余音查看来源与去向'}),
   )
-  return frag(hero, stats, padCard, el('div', { class: 'panel-stack' }, subjectiveCard, contactCard, bedtimeCard, climateCard, episodeCard, weightsCard, optionsCard, triggersCard, metricsCard))
+  return frag(hero, pieFeelings, hourCurve, stats, impactCard, padCard, el('div', { class: 'panel-stack' }, subjectiveCard, climateCard, episodeCard, weightsCard, optionsCard, triggersCard, metricsCard))
 }
 
 async function saveOwnerContact() {
@@ -4195,7 +4368,12 @@ function ensureForceGraph() {
     .linkDirectionalParticleWidth(1.3)
     .linkDirectionalParticleColor(() => 'rgba(160,240,255,0.9)')
     .enableNodeDrag(true)
-    .onNodeClick((n) => openGraphNode(n))
+    .onNodeClick((n) => {
+      if (S.graph.picked === n.id) { openGraphNode(n); return }
+      S.graph.picked = n.id
+      S.graph.nearCache = null
+      if (S.graph.fg && S.graph.fg.nodeCanvasObject) S.graph.fg.nodeCanvasObject(forceNodePaint); else renderForceGraph()
+    })
     .onNodeHover((n) => { S.graph.hover = n })
     .d3AlphaDecay(0.022)
     .d3VelocityDecay(0.35)
@@ -4214,74 +4392,18 @@ function ensureForceGraph() {
 }
 
 function forceLinkColor(l) {
-  const hot = S.graph.hover && (l.source?.id === S.graph.hover.id || l.target?.id === S.graph.hover.id)
+  const picked = S.graph.picked
+  if (picked) {
+    const a = typeof l.source === 'object' ? l.source.id : l.source
+    const b = typeof l.target === 'object' ? l.target.id : l.target
+    if (a !== picked && b !== picked) return 'rgba(127,214,230,0.06)'
+  }
+  const hot = S.graph.hover && (l.source && l.source.id === S.graph.hover.id || l.target && l.target.id === S.graph.hover.id)
   if (l.kind === 'relation') return hot ? 'rgba(206,192,255,0.95)' : 'rgba(182,167,240,0.55)'
   if (l.kind === 'fact') return hot ? 'rgba(255,222,160,0.9)' : 'rgba(240,201,135,0.4)'
   const alpha = 0.16 + Math.max(0, Math.min(1, l.w || 0)) * 0.28
-  return `rgba(127,214,230,${hot ? 0.75 : alpha})`
+  return 'rgba(127,214,230,' + (hot ? 0.75 : alpha) + ')'
 }
-
-function forceNodePaint(n, ctx) {
-  const r = n.r || 6
-  if (S.graph.view === 'brain') {
-    const seed = String(n.id).split('').reduce((a, c) => a + c.charCodeAt(0), 0)
-    ctx.strokeStyle = n.status === 'active' ? 'rgba(127,214,230,0.32)' : 'rgba(127,214,230,0.14)'
-    ctx.lineWidth = 0.8
-    for (let k = 0; k < 4; k++) {
-      const ang = (seed % 31) / 31 * Math.PI * 2 + k * (Math.PI / 2) + 0.4
-      const len = r * (1.8 + ((seed + k * 7) % 10) / 10)
-      ctx.beginPath()
-      ctx.moveTo(n.x, n.y)
-      ctx.lineTo(n.x + Math.cos(ang) * len, n.y + Math.sin(ang) * len)
-      ctx.stroke()
-    }
-  }
-  const base = n.dead ? 0.22 : n.status === 'candidate' ? 0.55 : 0.45 + 0.5 * (Number.isFinite(n.recall) ? n.recall : 1)
-  // 三层光晕，比硬边圆点柔和；不用 shadowBlur，节点多也不掉帧。
-  const layers = [[3.4, 0.05], [2.3, 0.08], [1.55, 0.12]]
-  for (const [mul, alpha] of layers) {
-    ctx.beginPath()
-    ctx.arc(n.x, n.y, r * mul, 0, Math.PI * 2)
-    ctx.fillStyle = n.color
-    ctx.globalAlpha = alpha * base
-    ctx.fill()
-    ctx.globalAlpha = 1
-  }
-  ctx.beginPath()
-  ctx.arc(n.x, n.y, r, 0, Math.PI * 2)
-  ctx.fillStyle = n.color
-  ctx.globalAlpha = base
-  ctx.fill()
-  ctx.globalAlpha = 1
-  // 核心高光：让节点像发光的星，而不是色块。
-  ctx.beginPath()
-  ctx.arc(n.x, n.y, Math.max(1.2, r * 0.38), 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(255,255,255,0.82)'
-  ctx.fill()
-  if (n.tier === 'core') {
-    ctx.beginPath()
-    ctx.arc(n.x, n.y, r + 3, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(240,201,135,0.7)'
-    ctx.lineWidth = 1.2
-    ctx.stroke()
-  } else if (n.status === 'candidate') {
-    ctx.beginPath()
-    ctx.arc(n.x, n.y, r + 3, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(182,167,240,0.6)'
-    ctx.lineWidth = 1
-    ctx.setLineDash([2, 3])
-    ctx.stroke()
-    ctx.setLineDash([])
-  }
-  if (S.graph.hover?.id === n.id) {
-    ctx.beginPath()
-    ctx.arc(n.x, n.y, r + 6, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)'
-    ctx.lineWidth = 1
-    ctx.stroke()
-  }
-}
-
 function forcePointerPaint(n, color, ctx) {
   ctx.beginPath()
   ctx.arc(n.x, n.y, (n.r || 5) + 7, 0, Math.PI * 2)
@@ -4398,12 +4520,21 @@ function drawGraphBackdrop() {
 
 function openGraphNode(n) {
   if (!n) return
-  S.library.scope = n.scope
-  S.library.status = n.status === 'active' ? 'active' : n.status
+  S.library.scope = n.scope || "all"
+  S.library.status = n.status === 'active' ? 'active' : (n.status || 'active')
   S.library.tier = 'all'
-  S.library.q = ''
+  S.library.q = String(n.text || "").slice(0, 24)
+  S.library.sort = 'recent'
   S.library.loaded = false
+  S.library.focusId = n.id
   go('library')
+  const graphFocusScroll = () => {
+    const t = document.querySelector(`[data-id="${CSS.escape(String(n.id))}"]`)
+    if (t) { t.classList.add("expanded"); t.classList.add("graph-focus"); setTimeout(() => t.classList.remove("graph-focus"), 2600); t.scrollIntoView({ block: "center", behavior: "smooth" }); return true }
+    return false
+  }
+  setTimeout(graphFocusScroll, 500)
+  setTimeout(graphFocusScroll, 1200)
 }
 
 function startGraphLoop() {
@@ -4817,7 +4948,7 @@ async function boot() {
 boot()
 
 // ---------------------------------------------------------------- 当前心绪
-const CONTINUITY_STATUS = {open:'进行中',paused:'暂不聊',closed:'已结束',expired:'已过期',tentative:'待验证',observed:'多次经历支持，仍可修正',rejected:'已否定',understood:'已理解事件',partial:'已复用情绪，其他更新未通过',unavailable:'本轮使用原有处理',interrupted:'已丢弃过时理解',busy:'繁忙，保持原有处理',injected:'已交给聊天模型',rejected_delivery:'投递未接受','delivery-unknown':'投递结果未知',manual:'手动修正','reply-result':'回复结果'}
+const CONTINUITY_STATUS = {'source-clarification':'聊天澄清处理','source-paused':'来源已撤回，暂停使用',open:'进行中',paused:'暂不聊',closed:'已结束',expired:'已过期',tentative:'待验证',observed:'多次经历支持，仍可修正',rejected:'已否定',understood:'已理解事件',partial:'已复用情绪，其他更新未通过',unavailable:'本轮使用原有处理',interrupted:'已丢弃过时理解',busy:'繁忙，保持原有处理',injected:'已交给聊天模型',rejected_delivery:'投递未接受','delivery-unknown':'投递结果未知',manual:'手动修正','reply-result':'回复结果'}
 async function loadContinuity(force=false) {
   if (S.continuity.loading) return
   S.continuity.loading = true
@@ -4866,20 +4997,31 @@ function renderContinuity() {
   const d=S.continuity.data, wrap=el('div',{class:'mind-page stack',style:{display:'grid',gap:'20px'}})
   const switchView=view=>{S.continuity.view=view;localStorage.setItem('feiyu-mind-view',view);paintCurrent()}
   wrap.appendChild(el('section',{class:'mind-hero'},
-    el('div',{},el('span',{class:'eyebrow',text:'此刻 · 有迹可循'}),el('h1',{text:'当前心绪'}),el('p',{text:'正在挂念什么、空闲时想到什么、这些念头怎样影响此刻。'})),
+    el('div',{},el('span',{class:'eyebrow',text:'此刻 · 有迹可循'}),el('h1',{text:'余音'}),el('p',{text:'正在挂念什么、空闲时想到什么、这些念头怎样影响此刻。'})),
     el('div',{class:'mind-hero-actions'},el('div',{class:'segmented',role:'group','aria-label':'心绪展示方式'},
       el('button',{class:S.continuity.view==='visual'?'active':'','aria-pressed':String(S.continuity.view==='visual'),on:{click:()=>switchView('visual')},text:'可视化'}),
       el('button',{class:S.continuity.view==='text'?'active':'','aria-pressed':String(S.continuity.view==='text'),on:{click:()=>switchView('text')},text:'文字列表'})),
-      el('button',{class:'btn',disabled:S.continuity.loading,on:{click:()=>loadContinuity(true)}},icon('refresh'),'刷新当前心绪')),
+      el('button',{class:'btn',disabled:S.continuity.loading,on:{click:()=>loadContinuity(true)}},icon('refresh'),'刷新当前心绪'),
+      el('a',{class:'btn',href:'#/evidence',text:'在拾光看证据'})),
     S.continuity.error ? el('p',{role:'alert',text:S.continuity.error}) : null))
   wrap.appendChild(mindWorkspacePanel(el,{data:S.continuity.mind,error:S.continuity.mindError,loading:S.continuity.loading||S.continuity.changing,visual:S.continuity.view==='visual',emotion:S.continuity.emotion,selectedReference:S.continuity.hubSelected,select:id=>{S.continuity.hubSelected=id},folds:S.continuity.hubFolds||(S.continuity.hubFolds={}),change:changeMindWorkspace}));
   wrap.appendChild(mindAssociations(el,{idle:S.continuity.idle,error:S.continuity.idleError,emotion:S.continuity.emotion,emotionError:S.continuity.emotionError,overview:S.overview||{},visual:S.continuity.view==='visual',loading:S.continuity.loading,when:fmtWhen,details:showIdleAssociation,change:changeMindAssociation}));
   if(!d)return wrap
   wrap.appendChild(el('section',{class:'card pad'},
     el('label',{},el('input',{type:'checkbox',checked:d.enabled,disabled:S.continuity.loading,on:{change:e=>changeContinuity({enabled:e.target.checked})}}),' 启用连续事件理解（试验）'),
+    el('label',{},el('input',{type:'checkbox',checked:d.clarificationsEnabled===true,disabled:S.continuity.loading||!d.enabled,on:{change:e=>changeContinuity({clarifications:e.target.checked})}}),' 复用本轮理解，处理明确的整句澄清'),
+    el('p',{class:'note',text:'无需逐条确认。仅主人私聊、近 45 分钟内可完整核验的本人原话；局部纠正、后来变化与不确定表达不撤回整句。复用事件理解，不新增模型调用，但增加少量输入和澄清时的输出 token。误判可在记忆来源里撤销。'}),
     el('p',{class:'muted',text:'默认关闭，仅主人私聊。开启后每条符合条件的消息最多新增一次事件理解调用，成功时复用情绪判断；花费单列“事件理解”，不设每日硬上限。单次等待最多约 12 秒，失败时保持原有处理。'}),
     !d.enabled?el('p',{text:'当前关闭：保留历史记录，但不会生成或使用挂念、认识及关系参考。'}):null,
     d.storageError?el('p',{role:'alert',text:'状态保存异常，重启后可能丢失最近变化。请检查磁盘和权限。'}):null))
+  const clarificationEvents=(d.events||[]).filter(e=>e.clarification?.status==='applied').slice(-5).reverse();
+  if(clarificationEvents.length)wrap.appendChild(el('section',{class:'card pad'},el('h2',{text:'自动澄清记录'}),el('p',{class:'note',text:'只撤回明确说错的整句依据，不自动生成替代事实。可撤销误判；后续有改动的条目不会被覆盖。'}),...clarificationEvents.map(e=>{
+    const r=e.clarification;
+    return el('div',{class:'note'},el('p',{text:`${fmtWhen(e.at)} · 当时暂停 ${r.paused||0} 条记忆或摘要 · ${r.canUndo?'仍在生效':r.currentState==='restored'?'已撤销':r.currentState==='unavailable'?'状态暂不可核验':'记录已有后续修改'}`}),r.canUndo?el('button',{class:'btn ghost',text:'撤销这次自动澄清',on:{click:async event=>{
+      const button=event.currentTarget;button.disabled=true;
+      try{const result=await api('/source-correction/undo',{method:'POST',body:{scope:r.scope,sourceVersion:r.sourceVersion,correctionRevision:r.correctionRevision}});toast(`已撤销，恢复 ${result.restored||0} 条，${result.skipped||0} 条保持后续现状`);await loadContinuity(true);}catch(error){toast(error.message,'error');button.disabled=false;}
+    }}}):null);
+  })));
   if(S.continuity.view==='visual'){
     wrap.appendChild(continuityVisual(el,d,{...S.continuity,statuses:CONTINUITY_STATUS,when:fmtWhen,change:changeContinuity,
       set:patch=>{Object.assign(S.continuity,patch);paintCurrent()}}))
@@ -4904,8 +5046,39 @@ function renderContinuity() {
   wrap.appendChild(beliefs)
   if(d.relation)wrap.appendChild(el('section',{class:'card pad'},el('h2',{text:'关系观察'}),
     el('p',{class:'muted',text:'程序内部慢变量，不是人类感情的测量值。只接受明确关系证据；忙碌、沉默、任务纠错及联想不会自行扣分。'}),
-    el('p',{text:`信任倾向 ${Math.round(d.relation.trust*100)} / 熟悉积累 ${Math.round(d.relation.familiarity*100)} / 未解决张力 ${Math.round(d.relation.tension*100)}`}),
+    ...['trust','familiarity','tension'].map((k) => {
+      const meta = { trust: ['信任', 'var(--accent)'], familiarity: ['熟悉', 'var(--violet)'], tension: ['张力', 'var(--rose)'] }[k]
+      const v = Math.round((Number(d.relation[k]) || 0) * 100)
+      return el('div', { style: { margin: '10px 0' } },
+        el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' } },
+          el('span', { class: 'small', text: meta[0] }),
+          el('span', { class: 'muted small', text: v + ' / 100' }),
+        ),
+        el('div', { class: 'trait-track', role: 'meter', 'aria-label': meta[0], 'aria-valuenow': v, 'aria-valuemin': 0, 'aria-valuemax': 100 },
+          el('div', { class: 'trait-fill', style: { width: v + '%', background: meta[1] } }),
+        ),
+      )
+    }),
     el('p',{class:'muted',text:'初始信任倾向 50、熟悉积累 0、张力 0；这些是设计基线。关系数值用于观察，不直接放大情绪，也不直接改写人格。'})))
+  const knots = Array.isArray(d.relation?.knots) ? d.relation.knots.filter((k) => Number(k.severity) > 0.001) : []
+  if (knots.length) wrap.appendChild(el('section', { class: 'card pad' },
+    el('h2', { text: '心结（' + knots.length + '）' }),
+    el('p', { class: 'muted', text: '还没真正过去的事。哄只能削掉一部分，得那件事被说开才消；这里只给你看，不能手动删。' }),
+    ...knots.slice().reverse().map((k) => {
+      const sev = Math.max(0, Math.min(0.06, Number(k.severity) || 0))
+      const pct = Math.round((sev / 0.06) * 100)
+      const days = Math.max(0, Math.round((Date.now() - Number(k.at || Date.now())) / 86400000))
+      return el('div', { class: 'knot-row', style: { margin: '10px 0' } },
+        el('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px' } },
+          el('span', { text: String(k.text || '（没说清的事）').slice(0, 60) }),
+          el('span', { class: 'muted small', text: pct + '% · ' + days + ' 天前' }),
+        ),
+        el('div', { class: 'trait-track', style: { marginTop: '6px' }, role: 'meter', 'aria-valuenow': pct, 'aria-valuemin': 0, 'aria-valuemax': 100 },
+          el('div', { class: 'trait-fill', style: { width: pct + '%', background: 'linear-gradient(90deg,#f2a2a2,#f0c987)' } }),
+        ),
+      )
+    }),
+  ))
   const events=el('section',{class:'card pad'},el('h2',{text:'变化来由与回复去向'}),el('p',{class:'muted',text:'模型接受参考不代表表达了它；QQ 发送成功也不能证明采用了某条认识。'}))
   for(const e of [...(d.events||[])].reverse().slice(0,30))events.appendChild(el('article',{class:'card pad'},
     el('h3',{text:e.status==='rejected'?'投递未接受':CONTINUITY_STATUS[e.status]||e.status}),el('p',{text:e.summary}),el('p',{class:'muted',text:fmtWhen(e.at)}),
@@ -4931,10 +5104,104 @@ function renderCandidateAuto(){
   const d=S.candidateAuto.data,wrap=el('section',{class:'card pad auto-review-card'})
   wrap.appendChild(el('div',{class:'section-head'},el('h2',{text:'让模型帮你核对'}),el('span',{class:'mind-badge',text:d?.running?'正在核对':d?.enabled?'自动核对已开启':'自动核对关闭'})))
   wrap.appendChild(el('p',{class:'muted small',text:'仅主人私聊。每分钟最多处理一条候选或一批历史；有明确原话、无矛盾且核对通过才自动确认。不确定继续保留，绝不自动替换已有事实。会产生“候选核对”和“事实复核”用量。'}))
-  if(d)wrap.appendChild(el('div',{class:'row'},el('label',{},el('input',{type:'checkbox',checked:d.enabled,disabled:S.candidateAuto.loading,on:{change:e=>loadCandidateAuto({enabled:e.target.checked})}}),' 自动核对待确认记忆'),el('button',{class:'btn sm',disabled:!d.enabled||d.running||S.candidateAuto.loading,text:'检查下一条',on:{click:()=>loadCandidateAuto({run:true})}})))
+  if(d)wrap.appendChild(el('div',{class:'row'},el('label',{},el('input',{type:'checkbox',checked:d.enabled,disabled:S.candidateAuto.loading,on:{change:e=>loadCandidateAuto({enabled:e.target.checked})}}),' 可选事实审核（调用模型）'),el('button',{class:'btn sm',disabled:!d.enabled||d.running||S.candidateAuto.loading,text:'检查下一条',on:{click:()=>loadCandidateAuto({run:true})}})))
   if(S.candidateAuto.error||d?.error)wrap.appendChild(el('p',{role:'alert',text:S.candidateAuto.error||d.error}))
-  if(d?.records?.length)wrap.appendChild(el('details',{},el('summary',{text:'最近自动核对记录'}),...d.records.slice(0,10).map(r=>el('article',{class:'auto-review-record'},el('strong',{text:({confirmed:'已自动确认',manual:'留待人工',pending:'核对中',error:'稍后重试'})[r.status]||r.status}),el('p',{text:r.text}),el('p',{class:'muted small',text:`${r.reason} · ${fmtWhen(r.at)}`})))))
+  if(d?.records?.length)wrap.appendChild(el('details',{},el('summary',{text:'最近自动核对记录'}),...d.records.slice(0,10).map(r=>el('article',{class:'auto-review-record'},el('strong',{text:({confirmed:'已自动确认',manual:'等待新依据',pending:'核对中',error:'稍后重试'})[r.status]||r.status}),el('p',{text:r.text}),el('p',{class:'muted small',text:`${r.reason} · ${fmtWhen(r.at)}`})))))
   wrap.appendChild(el('p',{class:'small muted',text:'已自动确认的操作可在“整理 → 操作记录”查看和撤销。关闭网页后，DSH 运行且开关开启时仍会核对；关闭开关会停止后续提交。'}))
   if(!d&&!S.candidateAuto.loading&&!S.candidateAuto.error)void loadCandidateAuto()
   return wrap
+}
+
+
+function radarSvg(dims, cur, base, size = 268) {
+  const n = dims.length, c = size / 2, R = c - 38
+  const pt = (i, v) => {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n
+    const r = R * Math.max(0, Math.min(1, (Number(v) || 0) / 100))
+    return [c + r * Math.cos(a), c + r * Math.sin(a)]
+  }
+  const ring = (f) => dims.map((_, i) => pt(i, f * 100).map((x) => x.toFixed(1)).join(",")).join(" ")
+  const curPts = dims.map((d, i) => pt(i, cur[d.key]).map((x) => x.toFixed(1)).join(",")).join(" ")
+  const basePts = dims.map((d, i) => pt(i, base[d.key]).map((x) => x.toFixed(1)).join(",")).join(" ")
+  const grid = [0.25, 0.5, 0.75, 1].map((f) => `<polygon points="${ring(f)}" fill="none" stroke="var(--line)" stroke-width="1"/>`).join("")
+  const spokes = dims.map((_, i) => { const p = pt(i, 100); return `<line x1="${c}" y1="${c}" x2="${p[0].toFixed(1)}" y2="${p[1].toFixed(1)}" stroke="var(--line)" stroke-width="1"/>` }).join("")
+  const labels = dims.map((d, i) => { const p = pt(i, 118); return `<text x="${p[0].toFixed(1)}" y="${p[1].toFixed(1)}" fill="var(--ink-2)" font-size="11" text-anchor="middle" dominant-baseline="middle">${d.label}</text>` }).join("")
+  const dots = dims.map((d, i) => { const p = pt(i, cur[d.key]); return `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="var(--accent)"/>` }).join("")
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="六维性格雷达图">${grid}${spokes}` +
+    `<polygon points="${basePts}" fill="none" stroke="var(--violet)" stroke-width="1.3" stroke-dasharray="4 3" opacity="0.7"/>` +
+    `<polygon points="${curPts}" fill="rgba(127,214,230,0.18)" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>` +
+    `${dots}${labels}</svg>`
+}
+
+async function loadEmotionImpact() {
+  const box = document.getElementById('impact-body')
+  if (!box) return
+  try {
+    const res = await fetch('http://127.0.0.1:3100/api/emotion/impact?days=7', { cache: 'no-store' })
+    const data = await res.json()
+    const name = (key) => (S.overview?.scopes || []).find((s) => s.scope === key)?.label || key
+    const bar = (row, max, color) => el('div', { style: { margin: '8px 0' } },
+      el('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', marginBottom: '4px' } },
+        el('span', { class: 'small', text: name(row.key) }),
+        el('span', { class: 'muted small', text: (row.dv > 0 ? '+' : '') + row.dv.toFixed(3) + ' · ' + row.events + ' 次' }),
+      ),
+      el('div', { class: 'trait-track' },
+        el('div', { class: 'trait-fill', style: { width: Math.round((row.impact / max) * 100) + '%', background: color } }),
+      ),
+    )
+    const owner = data.ownerItems || []
+    const others = (data.others || []).slice(0, 8)
+    if (!owner.length && !others.length) { box.textContent = "还没有足以记录的波动。聊得多了，这里会出现谁让她心情变了。"; return }
+    const max = Math.max(0.0001, ...owner.concat(others).map((r) => Number(r.impact) || 0))
+    box.replaceChildren(
+      el('div', { class: 'muted small', style: { marginTop: '4px' }, text: '和你' }),
+      ...(owner.length ? owner.map((r) => bar(r, max, 'var(--accent)')) : [el('p', { class: 'muted small', text: '暂时没有' })]),
+      el('div', { class: 'muted small', style: { marginTop: '10px' }, text: '和其他聊天' }),
+      ...(others.length ? others.map((r) => bar(r, max, 'var(--violet)')) : [el('p', { class: 'muted small', text: '暂时没有' })]),
+    )
+  } catch (error) {
+    box.textContent = '排行读取失败：' + (error.message || error)
+  }
+}
+function forceNodePaint(n, ctx) {
+  const picked = S.graph.picked
+  let near = null
+  if (picked) {
+    const cache = S.graph.nearCache
+    if (cache && cache.id === picked) near = cache.set
+    else {
+      near = new Set([picked])
+      for (const l of (S.graph.links || [])) {
+        const a = typeof l.source === 'object' ? l.source.id : l.source
+        const b = typeof l.target === 'object' ? l.target.id : l.target
+        if (a === picked) near.add(b)
+        if (b === picked) near.add(a)
+      }
+      S.graph.nearCache = { id: picked, set: near }
+    }
+  }
+  const dimScale = near && !near.has(n.id) ? 0.22 : 1
+  const r = n.r || 6
+  const base = dimScale * n.dead ? 0.22 : n.status === 'candidate' ? 0.55 : 0.45 + 0.5 * (Number.isFinite(n.recall) ? n.recall : 1)
+  for (const pair of [[3.4, 0.05], [2.3, 0.08], [1.55, 0.12]]) {
+    ctx.beginPath()
+    ctx.arc(n.x, n.y, r * pair[0], 0, Math.PI * 2)
+    ctx.fillStyle = n.color || "#7fd6e6"
+    ctx.globalAlpha = pair[1] * base
+    ctx.fill()
+    ctx.globalAlpha = 1
+  }
+  ctx.beginPath()
+  ctx.arc(n.x, n.y, r, 0, Math.PI * 2)
+  ctx.fillStyle = n.color || "#7fd6e6"
+  ctx.globalAlpha = base
+  ctx.fill()
+  ctx.globalAlpha = 1
+  if (n.tier === "core") {
+    ctx.beginPath()
+    ctx.arc(n.x, n.y, r + 3, 0, Math.PI * 2)
+    ctx.strokeStyle = "rgba(240,201,135,0.7)"
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+  }
 }

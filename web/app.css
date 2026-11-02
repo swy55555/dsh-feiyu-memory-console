@@ -144,8 +144,8 @@ body.embed .stats { margin-top: 4px; }
 .topbar {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 6px 2px 18px;
+  gap: 18px;
+  padding: 8px 2px 22px;
   flex-wrap: wrap;
 }
 
@@ -172,10 +172,12 @@ body.embed .stats { margin-top: 4px; }
 }
 
 .brand p {
-  margin: 2px 0 0;
+  margin: 6px 0 0;
   font-size: 12px;
   color: var(--dim);
   letter-spacing: 0.04em;
+  line-height: 1.6;
+  max-width: 760px;
 }
 
 .top-actions {
@@ -225,9 +227,9 @@ body.embed .stats { margin-top: 4px; }
 .tabs {
   display: flex;
   align-items: stretch;
-  gap: 2px;
+  gap: 6px;
   border-bottom: 1px solid var(--line);
-  margin: 2px 0 24px;
+  margin: 4px 0 30px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -235,12 +237,18 @@ body.embed .stats { margin-top: 4px; }
 
 .tab {
   position: relative;
-  flex: none;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
   border: 0;
   background: none;
   color: var(--dim);
-  padding: 11px 15px 13px;
-  font-size: 13.5px;
+  padding: 12px 10px 14px;
+  font-size: 14px;
   letter-spacing: 0.03em;
   border-radius: 10px 10px 0 0;
   transition: color 0.16s, background 0.16s;
@@ -1232,3 +1240,367 @@ details.advanced[open] summary { margin-bottom: 6px; }
 .classroom-page .page-head{justify-content:space-between}
 .classroom-course p,.classroom-course h2{overflow-wrap:anywhere}
 .classroom-course .hub-evidence{margin:16px 0}
+
+/* ---------------------------------------------------------------- 视觉统一（2026-11）
+   只做观感与层级，不改结构：统一节奏、强化焦点、收敛装饰。 */
+
+:root {
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --radius-sm: 10px;
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+/* 焦点可见性：键盘用户能看清当前在哪 */
+.btn:focus-visible,
+.scope-line:focus-visible,
+.tab:focus-visible,
+summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* 标题层级：区块标题不再和正文抢眼 */
+.card > .section-head > .h2,
+.card .section-head h2 {
+  font-size: 15px;
+  letter-spacing: .02em;
+  font-weight: 600;
+  color: var(--ink);
+}
+.card h3 { font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+
+/* 说明文字更安静，行距更松 */
+.muted.small, .note, p.muted {
+  line-height: 1.65;
+  color: color-mix(in srgb, var(--dim) 88%, var(--ink-2));
+}
+
+/* 卡片：同一屏里节奏一致，悬停给一点点反馈 */
+.card { transition: border-color .18s ease, background .18s ease; }
+.card.pad:hover { border-color: color-mix(in srgb, var(--line-strong) 70%, transparent); }
+
+/* 会话/范围行：可点区域更明确 */
+.scope-line { border-radius: var(--radius-sm); transition: background .16s ease, transform .16s ease; }
+.scope-line:hover { background: var(--panel-soft); }
+.scope-line:active { transform: translateY(1px); }
+
+/* 数值型条形：三个可视化共用，保证粗细与圆角一致 */
+.trait-track { height: 10px; border-radius: 999px; background: color-mix(in srgb, var(--line) 60%, transparent); overflow: hidden; }
+.trait-fill { height: 100%; border-radius: 999px; transition: width .35s cubic-bezier(.22,.61,.36,1); }
+
+/* 心结列表：和六维同一种语言 */
+.knot-row .trait-track { height: 8px; }
+
+/* 表格/列表里的数字用等宽，避免跳动 */
+.count, .trait-head .muted, .knot-row .muted { font-variant-numeric: tabular-nums; }
+
+/* 窄屏：卡片内边距收一档，条形不被挤扁 */
+@media (max-width: 720px) {
+  .card.pad { padding: 16px 14px; }
+  .trait-track { height: 8px; }
+  .section-head { gap: 8px; flex-wrap: wrap; }
+}
+
+/* 尊重减少动态 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: .001ms !important; animation-duration: .001ms !important; }
+}
+
+/* ================================================================
+   设计层 v2（2026-11）—— 在原有规则之上做减法：更少的框、更稳的节奏、
+   更清楚的主次。只覆盖观感，不动结构与交互。
+   ================================================================ */
+
+:root {
+  --space-xs: 6px;
+  --space-s: 10px;
+  --space-m: 18px;
+  --space-l: 28px;
+  --space-xl: 40px;
+  --radius-card: 16px;
+  --radius-pill: 999px;
+  --hairline: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+}
+
+/* 版面：更宽一点的留白，内容不再贴边 */
+.app { width: min(1120px, 100%); padding: 28px 24px 96px; }
+@media (max-width: 900px) { .app { padding: 20px 16px 80px; } }
+
+/* 顶栏与标签：粘住、降噪、明确当前页 */
+.topbar { padding-bottom: 6px; border-bottom: none; }
+.tabs {
+  position: sticky; top: 0; z-index: 20;
+  margin: 4px -4px 26px; padding: 8px 4px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: var(--hairline);
+  gap: 2px;
+}
+.tab {
+  border: none; background: transparent;
+  padding: 8px 12px; border-radius: var(--radius-pill);
+  color: var(--dim); font-size: 13px; letter-spacing: .01em;
+  transition: color .16s ease, background .16s ease;
+}
+.tab:hover { color: var(--ink-2); background: var(--panel-soft); }
+.tab[aria-selected="true"], .tab.active {
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-weight: 600;
+}
+.tab .n { opacity: .55; font-variant-numeric: tabular-nums; }
+
+/* 首屏：标题收敛，重点一句话说完 */
+.hero {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%);
+  border: none; border-radius: var(--radius-card);
+  padding: 26px 28px 24px; margin-bottom: var(--space-l);
+}
+.hero h2 { font-size: clamp(19px, 2.2vw, 24px); line-height: 1.35; letter-spacing: -.01em; }
+.hero p { max-width: 640px; line-height: 1.7; }
+.hero .kicker { letter-spacing: .18em; font-size: 10.5px; text-transform: uppercase; opacity: .6; }
+
+/* 关键数字：横向一排，用分隔线而不是卡片 */
+.stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0; border: var(--hairline); border-radius: var(--radius-card);
+  overflow: hidden; background: var(--panel);
+}
+.stats > * {
+  padding: 16px 18px;
+  border-right: var(--hairline);
+}
+.stats > *:last-child { border-right: none; }
+@media (max-width: 720px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stats > * { border-bottom: var(--hairline); }
+}
+
+/* 卡片：能不加框就不加；加了就统一圆角与内距 */
+.card {
+  border-radius: var(--radius-card);
+  border: var(--hairline);
+  background: var(--panel);
+  box-shadow: none;
+}
+.card.pad { padding: 20px 22px; }
+.card + .card { margin-top: 14px; }
+.card .card { background: color-mix(in srgb, var(--panel-soft) 70%, transparent); border-color: transparent; box-shadow: none; }
+
+/* 区块头：标题左、说明右，一条基线对齐 */
+.section-head { align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.section-head .h2 { font-size: 15px; letter-spacing: .01em; }
+.section-head .muted.small { margin-left: auto; }
+
+/* 按钮：高度、圆角、主次一致 */
+.btn { height: 34px; padding: 0 14px; border-radius: 10px; font-size: 13px; border: var(--hairline); }
+.btn.sm { height: 30px; padding: 0 11px; font-size: 12.5px; border-radius: 9px; }
+.btn.primary { border-color: transparent; }
+.btn.ghost { border-color: transparent; background: transparent; }
+.btn:disabled { opacity: .45; }
+
+/* 输入：和按钮同一套高度与圆角 */
+.input, .select, .textarea { border-radius: 10px; border: var(--hairline); padding: 8px 11px; font-size: 13px; }
+.input:focus, .select:focus, .textarea:focus { outline: none; box-shadow: var(--focus-ring); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+
+/* 列表行：更像“可点的一行”，少一点方块 */
+.scope-line {
+  display: grid; grid-template-columns: 1fr auto auto; align-items: center;
+  gap: 14px; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid transparent; transition: background .16s ease, border-color .16s ease;
+}
+.scope-line:hover { background: var(--panel-soft); border-color: var(--hairline); }
+.scope-line .name { font-weight: 550; }
+.scope-line .meta { color: var(--dim); font-size: 12px; margin-top: 2px; }
+
+/* 可视化：条形更精致一点，轨道更轻，填充带一点光 */
+.trait-track {
+  position: relative; height: 9px; border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+  overflow: hidden;
+}
+.trait-fill {
+  height: 100%; border-radius: var(--radius-pill);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18);
+  transition: width .4s cubic-bezier(.22,.61,.36,1);
+}
+.trait-anchor { position: absolute; top: -2px; bottom: -2px; width: 1px; background: color-mix(in srgb, var(--ink) 35%, transparent); }
+
+/* 折线图容器：给一点内边距和底色，别让它孤零零贴边 */
+svg[role="img"], svg[aria-label="评分趋势"] { display: block; }
+div:has(> svg[aria-label="评分趋势"]) { padding: 6px 2px; }
+
+/* 空状态：居中、说明清楚、别显得像错误 */
+.empty { padding: 34px 20px; text-align: center; color: var(--dim); line-height: 1.7; }
+
+/* 对话框/抽屉：统一圆角与投影 */
+.modal, .dialog, .drawer { border-radius: var(--radius-card); border: var(--hairline); box-shadow: var(--shadow); }
+
+/* 修正：标签栏在深色底上不能被 backdrop-filter 洗白 */
+body .tabs {
+  background: var(--bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-bottom: var(--hairline);
+  margin: 0 -4px 20px;
+  padding: 8px 4px 6px;
+}
+body .stats { margin-top: 10px; }
+
+/* ---------------------------------------------------------------- 视觉强化（v2.1）
+   上一版改动偏细，这一版把层级拉开：数字变大、区块标题有标记、首屏更聚焦。 */
+
+body {
+  background:
+    radial-gradient(1100px 600px at 50% -10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
+    var(--bg);
+}
+
+/* 首屏 */
+.hero {
+  padding: 34px 34px 30px;
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 55%),
+    var(--panel);
+}
+.hero h2 { font-size: clamp(24px, 2.6vw, 30px); font-weight: 600; letter-spacing: -.015em; }
+.hero p { font-size: 13.5px; color: var(--ink-2); margin-top: 10px; }
+
+/* 关键数字：大一点，用主色点出来 */
+.stats > * b, .stats > * strong, .stats .stat-value {
+  font-size: 26px; font-weight: 600; color: var(--accent);
+  font-variant-numeric: tabular-nums; line-height: 1.15;
+}
+.stats > * { padding: 18px 20px; }
+
+/* 区块标题加一条竖标记，扫视觉更快 */
+.card > .section-head > .h2,
+.card > .section-head > h2 {
+  position: relative;
+  padding-left: 11px;
+  font-size: 14.5px;
+}
+.card > .section-head > .h2::before,
+.card > .section-head > h2::before {
+  content: '';
+  position: absolute; left: 0; top: 3px; bottom: 3px;
+  width: 3px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 30%, transparent));
+}
+
+/* 记忆分布行：让百分比条更醒目，行距更松 */
+.scope-line { padding: 14px 16px; }
+.scope-line .count { font-size: 17px; font-weight: 600; color: var(--ink); }
+.scope-line .name { font-size: 13.5px; }
+.scope-line .meta { font-size: 11.5px; }
+
+/* 右栏列表项：拉开呼吸 */
+.list-row, .recent-row, .fading-row { padding: 10px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+.list-row:last-child, .recent-row:last-child { border-bottom: none; }
+
+/* 卡片与背景分开：现在很多卡片和背景同色，看起来是“一片”，这是页面显乱的根因 */
+.card {
+  background: color-mix(in srgb, var(--panel-solid) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+}
+.card + .card { margin-top: 16px; }
+section.card.pad { padding: 22px 24px; }
+
+/* 花费页：折叠区块的标题行 */
+.cost-summary {
+  display: flex; align-items: baseline; gap: 10px;
+  cursor: pointer; list-style: none;
+  font-size: 14.5px; font-weight: 600; color: var(--ink);
+}
+.cost-summary::-webkit-details-marker { display: none; }
+.cost-summary::before {
+  content: '▸'; color: var(--accent); font-size: 11px; transition: transform .18s ease;
+}
+details[open] > .cost-summary::before { transform: rotate(90deg); }
+.cost-summary .muted.small { margin-left: auto; font-weight: 400; }
+details.card.pad > .cost-summary + * { margin-top: 6px; }
+
+/* 长期记忆：更高密度、更容易扫读 */
+.lib-row, .memory-row { padding: 10px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+.lib-row:last-child, .memory-row:last-child { border-bottom: none; }
+.lib-row .text, .memory-row .text { font-size: 13.5px; line-height: 1.6; }
+
+/* 成长课堂：顶部概览条 */
+.classroom-stats {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0; border: var(--hairline); border-radius: var(--radius-card, 16px);
+  overflow: hidden; background: var(--panel); margin-bottom: 4px;
+}
+.classroom-stats > div {
+  padding: 14px 16px; border-right: var(--hairline);
+  display: flex; align-items: baseline; gap: 8px;
+}
+.classroom-stats > div:last-child { border-right: none; }
+.classroom-stats b { font-size: 22px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+.classroom-stats span { font-size: 12px; color: var(--dim); }
+@media (max-width: 720px) {
+  .classroom-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .classroom-stats > div { border-bottom: var(--hairline); }
+}
+
+/* 从记忆图跳过来时，把那条记忆"点亮"两秒，方便一眼看到 */
+@keyframes graphFocusPulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  60%  { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.graph-focus {
+  position: relative;
+  border-radius: 14px;
+  animation: graphFocusPulse 1.3s ease-out 2;
+  background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+  outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-focus { animation: none; outline: 2px solid var(--accent); }
+}
+
+/* 分组导航：她 / 回廊 / 工具 */
+.tab-group{
+  display:inline-flex;align-items:center;flex:none;
+  padding:0 4px 0 14px;margin-left:6px;
+  font-size:11px;letter-spacing:.16em;color:var(--dim);
+  border-left:1px solid var(--line);
+}
+.tabs > .tab-group:first-of-type{border-left:0;margin-left:0;padding-left:2px}
+
+/* 回廊二级视图 */
+.subtabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 18px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.subtab{font:inherit;font-size:13px;padding:6px 12px;border-radius:999px;border:1px solid transparent;background:none;color:var(--ink-2);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.subtab:hover{color:var(--accent)}
+.subtab.active{color:var(--accent);border-color:var(--line-strong);background:var(--panel-soft)}
+.subtab .n{font-size:11px;color:var(--dim)}
+.memory-book .memory-body{min-height:40vh}
+
+/* 窄屏：等宽会挤扁，改成可横滑的固定宽度 */
+@media (max-width:900px){
+  .tab{flex:0 0 auto;min-width:92px;padding:12px 12px 14px}
+}
+
+/* 视觉统一 v2：实色面板、淡线、衬线标题，和拾光一致 */
+:root{ --panel: rgba(16,36,48,.96); --panel-solid:#10232a; --radius:14px; }
+html[data-theme="light"]{ --panel: rgba(255,253,248,.97); --panel-solid:#fffdf8; }
+.card{ background:var(--panel-solid); border-color:var(--line); box-shadow:none; }
+.card.pad{ padding:22px 24px; }
+.hero h1{ font-family:var(--serif); font-weight:600; letter-spacing:.02em; }
+.stats .stat{ background:var(--panel-solid); border-color:var(--line); box-shadow:none; }
+.section-head .h2{ font-size:16px; }
+.btn{ border-radius:9px; }
+
+.hero h1{ font-size:clamp(24px,2.5vw,32px); line-height:1.35; max-width:920px; }
+
+.hero h1{ font-size:clamp(22px,2vw,28px); line-height:1.4; max-width:780px; letter-spacing:.01em; }
+
+.hero h2{ font-family:var(--serif); font-size:clamp(22px,2vw,28px); line-height:1.4; max-width:780px; font-weight:600; letter-spacing:.01em; margin:6px 0 10px; }
+
+.hero h2{ font-size:clamp(20px,1.9vw,24px); line-height:1.5; font-weight:600; max-width:820px; }

@@ -7,6 +7,22 @@ const key = 'private:123';
 const message = (id='m1',text='他说他喜欢咖啡，但我喜欢喝豆浆。') => ({id,userId:'123',text,time:Date.now()-100000});
 const item = (m,quote='我喜欢喝豆浆',extra={}) => ({source_id:String(m.id),quote,kind:'preference',confidence:.99,assessment:{subject:'self',mode:'asserted',sensitive:false},relation:'independent',relation_confidence:.99,...extra});
 const response = (items=[],completed=['m1']) => JSON.stringify({items,completed_source_ids:completed});
+test('whole personal utterances become references while fragments, protected content and explicit conflicts remain facts',()=>{
+  for(const kind of ['preference','habit','plan']){
+    const m=message('whole','我明天想试试豆浆。');
+    const rows=memoryCandidates(JSON.stringify([item(m,m.text,{kind})]),[m],Date.now(),[]);
+    assert.equal(rows[0].memory_kind,'experience');
+    assert.equal(rows[0].source_text,m.text);
+    if(kind==='plan')assert.ok(rows[0].expires_at>0);
+    for(const extra of [{quote:'想试试豆浆'},{assessment:{subject:'uncertain',mode:'asserted',sensitive:false}},{relation:'conflict'}]){
+      const [r]=memoryCandidates(JSON.stringify([item(m,m.text,{kind,...extra})]),[m],Date.now(),[]);
+      assert.equal(r.memory_kind,'fact');
+    }
+  }
+  const m=message('core','永远记住我不喜欢豆浆。');
+  const [r]=memoryCandidates(JSON.stringify([item(m,m.text)]),[m],Date.now(),[]);
+  assert.equal(r.tier,'core');assert.equal(r.memory_kind,'fact');
+});
 function fixture(t,{messages=[message()],extract=async()=>response(),verify=async(_prompt,messages)=>JSON.stringify({checks:messages.map(m=>({source_id:String(m.id),status:'complete',missing_quotes:[],reason:'未发现遗漏'}))}),state,request,save}={}) {
   const writes=[], prompts=[];
   let persisted;

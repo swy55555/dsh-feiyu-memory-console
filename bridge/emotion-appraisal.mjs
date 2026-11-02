@@ -196,7 +196,7 @@ export function validateSemanticAppraisal(value, text) {
     return null;
   if (!["neutral", "uncertain"].includes(value.kind) && !value.evidence.length)
     return null;
-  const feelingKinds=new Set(['warmth','joy','curiosity','relief','concern','disappointment']);
+  const feelingKinds=new Set(['warmth','joy','curiosity','relief','concern','disappointment','tension','frustration']);
   if(value.feelings!==undefined&&(!Array.isArray(value.feelings)||value.feelings.length>2))return null;
   const feelings=value.feelings||[];
   if(new Set(feelings.map(f=>f?.kind)).size!==feelings.length||feelings.some(f=>!feelingKinds.has(f?.kind)||typeof f.intensity!=='number'||!Number.isFinite(f.intensity)||f.intensity<0||f.intensity>1||typeof f.evidence!=='string'||!f.evidence.trim()||f.evidence.length>200||!original.includes(f.evidence)))return null;

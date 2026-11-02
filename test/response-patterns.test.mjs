@@ -62,7 +62,7 @@ test('explicit expression requests can enter this turn without training habits, 
  f.advance(1000);f.p.adjust(key,[op],{...source,id:'copy',at:f.now});assert.equal(f.p.view(key).adjustments[0].expiresAt,first.expiresAt);
  f.p.adjust('group:123',[op],source);assert.equal(f.p.view('group:123').evidence.length,0);
  f.p.adjust(key,[{...op,quote:'不是原话'}],{...source,id:'bad',at:f.now});assert.equal(f.p.view(key).adjustments.length,1);
- const quote2='这次展开说，详细一点';f.p.adjust(key,[{...op,instruction:'详细说明',quote:quote2}],{...source,id:'b',at:f.now,original:quote2});
+ const quote2='这次展开说，详细一点';f.p.adjust(key,[{...op,instruction:'详细说明',quote:quote2,supersedes:[first.id]}],{...source,id:'b',at:f.now,original:quote2});
  assert.equal(f.p.view(key).adjustments.length,1);assert.equal(f.p.view(key).adjustments[0].instruction,'详细说明');
  const loaded=new ResponsePatterns({allowed:k=>k===key,enabled:()=>true,now:()=>f.now,load:()=>f.saved});
  loaded.edit(key,{action:'dismiss-adjustment',id:loaded.view(key).adjustments[0].id});assert.equal(loaded.candidates(key,'neutral').length,0);
@@ -72,4 +72,13 @@ test('explicit expression requests can enter this turn without training habits, 
 test('invalid feedback records a specific reason without inventing an accepted experience',()=>{
  const f=fixture();f.add(1,{experienceId:undefined});assert.equal(f.p.view(key).evidence.length,0);assert.match(f.p.view(key).audit.at(-1).reason,/独立经历/);
  f.add(2,{quote:'不在原话里'}, {original:'今天有点累'});assert.match(f.p.view(key).audit.at(-1).reason,/引用/);
+});
+
+
+test('unrelated explicit preferences coexist and replacement cannot cross scopes',()=>{
+ const f=fixture(),add=(id,quote,extra={})=>f.p.adjust(key,[{kind:'response_style',instruction:quote,quote,explicit:true,confidence:.95,...extra}],{id,at:f.now,original:quote,source:'user'});
+ add('a','不要写成汇报');f.advance(1);add('b','可以有不同意见');
+ assert.equal(f.p.view(key).adjustments.length,2);const block=f.p.candidates(key,'neutral')[0];assert.match(block.text,/不要写成汇报/);assert.match(block.text,/可以有不同意见/);assert.deepEqual(block.evidenceIds,['a','b']);
+ add('c','详细一点',{supersedes:['foreign-id']});assert.equal(f.p.view(key).adjustments.length,2);
+ const before=f.p.view(key).adjustments[0];add('d','这次可以按报告写',{supersedes:[before.id]});assert.equal(f.p.view(key).adjustments.length,2);assert.ok(!f.p.view(key).adjustments.some(x=>x.id===before.id));
 });

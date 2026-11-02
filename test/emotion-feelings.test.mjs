@@ -10,7 +10,7 @@ test('a weaker new warm event reinforces instead of overwriting warmth; decay, s
  const first=applyEmotionEvent(emptyEmotion(base),event('a','今天聊得很开心','warmth',.6),base);
  const before=tickEmotion(first,base+60000),next=applyEmotionEvent(first,event('b','你在干嘛呢','warmth',.22),base+60000);
  assert.ok(next.dailyFeelings.levels.warmth>=before.dailyFeelings.levels.warmth);assert.ok(next.triggers[0].deltaV>=0);
- assert.equal(next.triggers[0].feelings[0].label,'温暖');assert.equal(next.triggers[0].dynamicsVersion,3);
+ assert.equal(next.triggers[0].feelings[0].label,'温暖');assert.equal(next.triggers[0].dynamicsVersion,4);
  const neutral=applyEmotionEvent(next,event('c','普通消息','warmth',0),base+120000);
  assert.equal(neutral.triggers[0].deltaV,0);assert.ok(neutral.state.valence<next.state.valence);
  const settled=applyEmotionEvent(next,event('d','这件事已经过去了','warmth',0,'settle'),base+120000);assert.ok(settled.dailyFeelings.levels.warmth<.04);
@@ -53,7 +53,7 @@ test('daily feelings decay independently, do not grow from refreshes, and repeat
 })
 test('uncertain hostility cannot become anger; daily negative tone is limited and cannot produce relationship conflict',()=>{
  let s=emptyEmotion(base);for(let i=0;i<20;i++)s=applyEmotionEvent(s,input('c'+i,['concern','disappointment'],'conflict',.8),base+i)
- assert.equal(s.dynamics.conflict,0);assert.notEqual(s.state.label,'生气');assert.ok(s.state.valence>=0);assert.equal(s.relationshipSamples,0)
+ assert.equal(s.dynamics.conflict,0);assert.notEqual(s.state.label,'生气');assert.ok(s.state.valence>=-.36);assert.equal(s.state.label,'紧绷');assert.equal(s.relationshipSamples,0);assert.equal(s.climate.owner.samples,0)
 })
 test('daily warmth does not erase genuine unresolved conflict',()=>{
  let s=emptyEmotion(base);for(let i=0;i<5;i++)s=applyEmotionEvent(s,input('c'+i,[],'conflict',.95),base+i)
@@ -77,3 +77,37 @@ test('same short affection is deduplicated within the interaction, but can be a 
  assert.equal(later.dailyFeelings.sources.warmth.at,base+20*60000);assert.ok(later.dailyFeelings.levels.warmth>tickEmotion(first,base+20*60000).dailyFeelings.levels.warmth)
  assert.equal(later.dynamics.conflict,0)
 })
+
+test('observed .82 conflict produces transient tension, not hostility or personality training',()=>{
+ const text='你为什么不能理解，为什么不能改一改';
+ const event={source:'owner',eventId:'argument',text,appraisal:{kind:'conflict',target:'character',confidence:.82,intensity:.62,evidence:[text],feelings:[]}};
+ const warm=applyEmotionEvent(emptyEmotion(base),input('earlier',['warmth','joy']),base);
+ const state=applyEmotionEvent(warm,event,base+60000);
+ assert.equal(state.lastEvent.kind,'uncertain');assert.equal(state.triggers[0].assessedKind,'conflict');assert.equal(state.triggers[0].transientOnly,true);
+ assert.equal(state.state.label,'紧绷');assert.ok(state.triggers[0].deltaV<-.08);assert.ok(state.state.feelings.some(f=>f.kind==='tension'));
+ assert.equal(state.dynamics.conflict,0);assert.equal(state.relationshipSamples,0);assert.equal(state.climate.owner.samples,0);
+ assert.ok(state.dailyFeelings.levels.warmth>0);assert.ok(emotionPromptLine(state,{isOwner:true,compact:true}).includes('紧绷'));
+ assert.equal(tickEmotion(state,state.updatedAt).state.valence,state.state.valence);
+ const later=tickEmotion(state,base+180*60000);assert.equal(later.state.label,'平静');assert.ok(later.state.intensity<.01);
+ const low=applyEmotionEvent(emptyEmotion(base),{...event,appraisal:{...event.appraisal,confidence:.64}},base);
+ assert.equal(low.state.intensity,0);assert.equal(low.dynamics.conflict,0);
+});
+
+test('task feedback can be felt without treating it as relationship hostility',()=>{
+ const text='这次还是没有解决';
+ const event={source:'owner',eventId:'feedback',text,appraisal:{kind:'criticism',target:'task',confidence:.75,intensity:.6,evidence:[text],feelings:[{kind:'frustration',intensity:.5,confidence:.8,evidence:text,reason:'尝试后的问题仍未解决'}]}};
+ const s=applyEmotionEvent(emptyEmotion(base),event,base);
+ assert.equal(s.state.label,'烦闷');assert.ok(s.triggers[0].deltaV<-.07);assert.equal(s.dynamics.conflict,0);assert.equal(s.relationshipSamples,0);
+ const settledText='刚才的问题解决了';
+ const settled=applyEmotionEvent(s,{source:'owner',eventId:'settled',text:settledText,appraisal:{kind:'neutral',target:'none',confidence:.9,intensity:0,evidence:[],feelings:[{kind:'frustration',action:'settle',intensity:0,confidence:.9,evidence:settledText}]}},base+60000);
+ assert.equal(settled.state.label,'平静');assert.ok(settled.dailyFeelings.levels.frustration<=.03);
+ assert.equal(validateSemanticAppraisal({...event.appraisal,feelings:[{kind:'frustration',intensity:.5,evidence:'不存在'}]},text),null);
+});
+
+test('clarification can replay an uncertain disagreement without carrying its tension forward',()=>{
+ const text='你真是个笨蛋';const meta={source:'owner',chatKey:'private:1',speakerId:'1'};
+ const first=applyEmotionEvent(emptyEmotion(base),{...meta,eventId:'medium',messageId:'medium',text,appraisal:{kind:'conflict',target:'character',confidence:.8,intensity:.6,evidence:[text],feelings:[]}},base);
+ assert.equal(first.state.label,'紧绷');
+ const clarified=applyEmotionEvent(first,{...meta,eventId:'clarify',replyToId:'medium',text:'刚才是在开玩笑，不是骂你'},base+60000);
+ assert.equal(clarified.corrections.at(-1)?.status,'replayed');assert.ok(!clarified.state.feelings.some(f=>f.kind==='tension'));assert.equal(clarified.dynamics.conflict,0);
+});

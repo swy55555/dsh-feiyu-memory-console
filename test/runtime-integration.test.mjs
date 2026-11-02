@@ -1,3 +1,5 @@
+import * as replyContext from '../bridge/reply-context.mjs';
+import {ReferenceReuse} from '../bridge/reference-reuse.mjs';
 import {EmotionScopes,emotionScope} from '../bridge/emotion-scopes.mjs';
 import os from "node:os";
 import path from "node:path";
@@ -31,7 +33,7 @@ test('actual headless sessions record isolated feature keys before follow and pr
   t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const features=new Map(), learners=new Set();let serial=0;
   const ledger=createTokenLedger({file:path.join(dir,'usage.jsonl'),resolveKey:id=>features.get(id)});
-  const ctx=vm.createContext({path,fs,URL,AbortSignal,pendingBackgroundStops:new Map(),backgroundEffort,runBoundedHeadless,cfg:{dsh:{baseUrl:"http://127.0.0.1:1"},consoleToken:"fixture-console-token"},fetch:async()=>({ok:true,json:async()=>({ok:true})}),STATE_DIR:dir,featureKey,learnerFeatures:features,learnerSessions:learners,
+  const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',path,fs,URL,AbortSignal,pendingBackgroundStops:new Map(),backgroundEffort,runBoundedHeadless,cfg:{dsh:{baseUrl:"http://127.0.0.1:1"},consoleToken:"fixture-console-token"},fetch:async()=>({ok:true,json:async()=>({ok:true})}),STATE_DIR:dir,featureKey,learnerFeatures:features,learnerSessions:learners,
     learnerWaiters:new Map(),learnerCollectors:new Map(),clearTimeout,
     unwrap:x=>x,ensureChatModel:async()=> 'applied',waitLearnerTurn:async()=> 'ok',
     dispatchTracedPrompt:async()=>({result:{ok:true}}),
@@ -53,7 +55,7 @@ test('actual headless sessions record isolated feature keys before follow and pr
 test('actual prompt dispatch distinguishes accepted, rejected and unknown association delivery',async()=>{
   const delivery=[];
   let result={result:{ok:true,value:{}}};
-  const ctx=vm.createContext({reverse:new Map([['s','private:1']]),turnTraces:new TurnTraces(()=>{}),
+  const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',cfg:{},referenceReuse:new ReferenceReuse(),reverse:new Map([['s','private:1']]),turnTraces:new TurnTraces(()=>{}),
     idleAssociations:{delivery:(ref,status)=>delivery.push({ref,status})},
     api:{sessions:{prompt:async()=>{if(result instanceof Error)throw result;return result;}}},
   });
@@ -69,7 +71,8 @@ test("actual bridge dispatch wrapper cancels rejected/command slots and binds ac
   const rows = [],
     turnTraces = new TurnTraces((r) => rows.push(r));
   let result = { result: { ok: true, value: {} } };
-  const ctx = vm.createContext({
+  const ctx = vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',
+    cfg:{},referenceReuse:new ReferenceReuse(),
     turnTraces,
     reverse: new Map([["s", "private:1"]]),
     api: { sessions: { prompt: async () => result } },
@@ -116,7 +119,7 @@ test("actual withMemoryContext records only selected rows with subject and assoc
       status: "active",
     },
   ];
-  const ctx = vm.createContext({
+  const ctx = vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',
     ...human,
     crypto,
     AbortSignal,
@@ -181,7 +184,7 @@ test("actual withMemoryContext records only selected rows with subject and assoc
 test('actual recall prepares privacy before shared search and only gives owner requested summaries',async()=>{
  for(const key of ['private:1','private:2','group:9'])for(const asked of [true,false]){
   const order=[],body='你刚才在群里聊了什么';
-  const ctx=vm.createContext({...human,crypto,AbortSignal,
+  const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',...human,crypto,AbortSignal,
    cfg:{ownerQQ:'1',socialV2:{humanContext:{enabled:true},memoryShare:{enabled:true},context:{enabled:false}}},
    recordRetrievalTrace:()=>{},noteSessionTurn:()=>{},scheduleRotationCheck:()=>{},
    dailyMemorySubjects:new Map([[key,'1']]),dailyRecallQueries:new Map([[key,'1 '+body]]),
@@ -206,7 +209,7 @@ test("actual noteEmotion/refinement replaces scores once and ignores a late resp
       fs.rmSync(quotaDir, { recursive: true, force: true });
   });
   let resolveModel;
-  const ctx = vm.createContext({
+  const ctx = vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',
     ...emotion,
     crypto,
     emotionState: emotion.emptyEmotion(),
@@ -266,7 +269,7 @@ test("actual noteEmotion/refinement replaces scores once and ignores a late resp
 
 test("manual reset invalidates in-flight appraisal and clears dynamics", () => {
   let impressionsCleared = false;
-  const ctx = vm.createContext({
+  const ctx = vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',
     ...emotion,
     idleAssociations: {clearImpressions: () => { impressionsCleared = true; }},
     emotionState: emotion.applyEmotionEvent(emotion.emptyEmotion(), {
@@ -296,7 +299,7 @@ test("actual model gate reviews ordinary owner messages, reuses semantic results
   });
   let calls = 0,
     prompt = "";
-  const ctx = vm.createContext({
+  const ctx = vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',
     ...emotion,
     crypto,
     path,
@@ -383,7 +386,7 @@ test("actual model gate reviews ordinary owner messages, reuses semantic results
 test("correction retracts matching derived episode and queued spillover without deleting unrelated history", () => {
   let saved = 0;
   const pending = { items: [{ emotionEventId: "a" }, { emotionEventId: "b" }] };
-  const ctx = vm.createContext({
+  const ctx = vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',
     episodes: [
       { emotionEventId: "a", summary: "original" },
       { emotionEventId: "b" },

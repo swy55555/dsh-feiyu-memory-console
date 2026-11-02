@@ -5,6 +5,21 @@ import {emptyEmotion,withSubjectiveFeeling,emotionPromptLine} from '../bridge/em
 const key='private:123';
 const source={id:'a',text:'我喜欢雨声',source_time:10,subject_id:'123'};
 const reply=(topic='雨声和哪些阅读场景比较搭？',more=false)=>JSON.stringify({useful:true,kind:'question',topic,sourceIds:['a'],continue:more});
+
+test('local derivation versions stay out of prompts and revalidate before delivery',async()=>{
+ const provenance={version:1,scope:key,memoryVersion:'b'.repeat(64),sourceVersion:'a'.repeat(64)};
+ let changed=false,calls=0,saved=null;
+ const worker=new IdleAssociations({enabled:()=>true,allowed:k=>k===key,affectEnabled:()=>true,idleMs:0,now:()=>1000000,save:s=>{saved=structuredClone(s)},
+  request:async(route,body)=>{assert.equal(body.include_provenance,true);return {results:[{...source,provenance:{...provenance,memoryVersion:changed?'c'.repeat(64):provenance.memoryVersion}}]}},
+  generate:async prompt=>{calls++;assert.ok(!prompt.includes('memoryVersion'));assert.ok(!prompt.includes('sourceVersion'));return JSON.stringify({nodes:[
+   {...JSON.parse(reply()),continue:true,nextPurpose:'new-angle',impression:{text:'也许可以聊聊雨声',feeling:'curiosity',confidence:.5}},
+   {...JSON.parse(reply('安静的故事适合怎样的配乐？')),impression:{text:'也许会觉得温暖',feeling:'warmth',confidence:.5}}]})}});
+ worker.note(key,'下雨了');await worker.tick();assert.equal(calls,1);
+ const ready=saved.events.find(e=>e.status==='ready');assert.equal(ready.dependencies.nodes.length,2);
+ assert.deepEqual(ready.dependencies.nodes[0].sources[0].provenance,provenance);
+ assert.ok(ready.dependencies.nodes[0].impression);assert.ok(!ready.dependencies.nodes[1].impression);
+ changed=true;assert.equal(await worker.take(key,[source]),'');assert.equal(worker.snapshot(key).status,'source-changed');assert.equal(calls,1);
+});
 function setup(generate=async()=>reply()) {
   let time=1000000,enabled=true,allowed=true,calls=0;
   const routes=[];

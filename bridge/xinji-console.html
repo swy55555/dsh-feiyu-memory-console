@@ -2007,6 +2007,19 @@ pre,.code-area { background:var(--surface-sunken);border-color:var(--border);fon
       </div>
       <div class="meta" id="simPromptRestart"></div>
     </section>
+<section id="section-expression" data-page="persona" class="card span-all">
+  <h2>表达规则 <span class="meta">参考 fishtalk · 本地发送前检查</span></h2>
+  <p class="meta">只检查二代仿真的文本发送，不判断谁对谁错。宽泛句式只提醒，正常解释和工作汇报可以保留。带有“原话、句式、刚才说”等说明的成对引用，以及完整代码片段，不按角色自己的口癖处理；这只是语法例外，不能可靠理解所有语境。</p>
+  <p class="meta">群聊、主人私聊和其他私聊共用这些规则。可以直接添加或删除下方短语，每行一条；删除一行后保存即可取消该规则。</p>
+  <label><input type="checkbox" id="expressionEnabled">启用表达规则</label>
+  <div class="row" style="align-items:stretch;gap:16px;margin-top:12px;flex-wrap:wrap">
+    <label style="flex:1;min-width:240px">禁止发送的完整短语<textarea id="expressionHard" rows="6" style="display:block;width:100%;box-sizing:border-box;margin-top:8px" placeholder="每行一条，例如：这话我不接"></textarea></label>
+    <label style="flex:1;min-width:240px">只提醒的短语<textarea id="expressionSoft" rows="6" style="display:block;width:100%;box-sizing:border-box;margin-top:8px" placeholder="每行一条，例如：值得一提的是"></textarea></label>
+  </div>
+  <p class="meta">每类最多 40 条，每条 3–60 字，不支持正则。第一次命中整批退回，给一次改写机会；仍命中就停止本轮自动重试并留下记录，新消息到来后恢复。不会删除原文、自动代写或永久暂停聊天。匹配不调用模型，改写仍会消耗聊天模型 token。设置保存后立即生效。</p>
+  <div class="row"><button id="expressionSave" disabled>保存表达规则</button><button id="expressionReload">重新加载</button><span id="expressionStatus" class="meta" role="status">尚未加载</span></div>
+  <details class="settings-group" style="margin-top:12px"><summary>最近检查记录</summary><div id="expressionEvents" class="settings-content">尚无记录</div></details>
+</section>
 <section id="section-social-v1" data-page="social-v1" class="card span-all">
       <h2>一代仿真模式（reserved）</h2>
       <div class="meta" id="socialStatus">加载中…</div>
@@ -4527,6 +4540,31 @@ setInterval(() => { if (currentConsolePage !== 'usage') return; refreshUsage(); 
   };
   document.getElementById('refreshConsole').addEventListener('click',()=>{void inspect().catch(()=>{})});
   void inspect().catch(()=>{});
+})();
+
+
+(function expressionRulesPanel(){
+  const el=id=>document.getElementById(id);let revision=null,busy=false,dirty=false;
+  function show(data){
+    revision=data.revision;el('expressionEnabled').checked=data.settings.enabled;
+    el('expressionHard').value=data.settings.hard.join('\n');el('expressionSoft').value=data.settings.soft.join('\n');dirty=false;
+    el('expressionSave').disabled=false;el('expressionStatus').textContent='已加载 · '+(data.settings.enabled?'正在启用':'已关闭');
+    const labels={rewrite:'等待一次改写',stopped:'本轮已停止重试',warning:'只提醒，不阻止发送'};
+    el('expressionEvents').textContent='';
+    const rows=(data.events||[]).slice(-20).reverse();
+    if(!rows.length)el('expressionEvents').textContent='还没有命中记录。';
+    for(const row of rows){const p=document.createElement('p');p.textContent=new Date(row.at).toLocaleString()+' · '+row.key+' · '+(labels[row.status]||row.status)+' · '+row.phrases.join('、');el('expressionEvents').append(p);}
+  }
+  async function load(){if(busy)return;busy=true;try{const data=await api('/api/expression-rules');if(!data.ok)throw Error(data.error||'读取失败');show(data);}catch(e){el('expressionStatus').textContent=e.message;}finally{busy=false;}}
+  for(const id of ['expressionEnabled','expressionHard','expressionSoft'])el(id).addEventListener('input',()=>{dirty=true;el('expressionStatus').textContent='有尚未保存的修改';});
+  el('expressionReload').onclick=load;
+  el('expressionSave').onclick=async()=>{if(busy||!revision)return;busy=true;el('expressionSave').disabled=true;try{
+    const lines=id=>el(id).value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const data=await api('/api/expression-rules','POST',{revision,settings:{enabled:el('expressionEnabled').checked,hard:lines('expressionHard'),soft:lines('expressionSoft')}});
+    if(!data.ok)throw Error(data.error||'保存失败');show(data);el('expressionStatus').textContent='已保存，对后续发送批次生效';
+  }catch(e){el('expressionStatus').textContent=e.message;}finally{busy=false;el('expressionSave').disabled=false;}};
+  const refresh=()=>{if(location.hash==='#persona'&&!dirty)void load();};window.addEventListener('hashchange',refresh);
+  document.getElementById('refreshConsole').addEventListener('click',refresh);refresh();
 })();
 
 </script>

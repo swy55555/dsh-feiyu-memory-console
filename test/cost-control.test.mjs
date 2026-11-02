@@ -1,3 +1,4 @@
+import {rotationBlockers} from '../bridge/context-efficiency.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,7 +9,7 @@ const rotateCode=block('  async function maybeRotateSession(key)', '  // 控制�
 const key='private:1',now=1800000000000;
 function fixture(extra={}){
  const st={lastIncomingAt:now-120000,unread:[]},retired=[];
- const ctx=vm.createContext({cfg:{socialV2:{context:{}}},state:{sessions:{[key]:'sid'},sessionTurns:{[key]:1}},tokenLedger:{latestInputTokens:()=>120000},
+ const ctx=vm.createContext({rotationBlockers,cfg:{socialV2:{context:{}}},state:{sessions:{[key]:'sid'},sessionTurns:{[key]:1}},tokenLedger:{latestInputTokens:()=>120000},
   Date:{now:()=>now},isSessionAllowedInCurrentMode:()=>true,promptQueues:new Map(),v2TurnStartAt:new Map(),collectors:new Map(),activeWaits:new Map(),pendingWakeKeys:new Set(),summaryRuns:new Map(),summaryFailures:new Map(),rotatingSessions:new Set(),
   getSocialV2State:()=>st,summarizeSession:async()=>({ok:true,id:'summary',messages:12}),retireSession:k=>retired.push(k),saveState:()=>{},log:()=>{},...extra});
  return {ctx,st,retired,rotate:vm.runInContext(rotateCode+';maybeRotateSession',ctx)};
@@ -32,7 +33,7 @@ test('failed summaries back off and cannot retire a session; transient schedulin
  let calls=0;const f=fixture({summarizeSession:async()=>{calls++;throw Error('offline')}});
  assert.equal((await f.rotate(key)).reason,'error');assert.equal((await f.rotate(key)).reason,'backoff');assert.equal(calls,1);assert.equal(f.retired.length,0);
  const callbacks=[];let checks=0;
- const ctx=vm.createContext({cfg:{},state:{sessions:{[key]:'sid'}},Date:{now:()=>now},isSessionAllowedInCurrentMode:()=>true,log:()=>{},
+ const ctx=vm.createContext({rotationBlockers,cfg:{},state:{sessions:{[key]:'sid'}},Date:{now:()=>now},isSessionAllowedInCurrentMode:()=>true,log:()=>{},
   setTimeout:fn=>{callbacks.push(fn);return {unref(){}}},maybeRotateSession:async()=>({reason:++checks===1?'active':'not-enough'})});
  const schedule=vm.runInContext(block('  const rotationTimers =','  async function summarizeSession(')+';scheduleRotationCheck',ctx);
  schedule(key);schedule(key);assert.equal(callbacks.length,1);callbacks.shift()();await new Promise(r=>setImmediate(r));assert.equal(callbacks.length,1);
@@ -46,7 +47,7 @@ test('simultaneous identical summaries share one call; conflicting manual mode d
 });
 test('proactive meme OCR uses fresh recent images, not distant history; cache stays bounded without mass eviction',async()=>{
  const rows=[],cache=new Map();let calls=0;
- const ctx=vm.createContext({cfg:{},STATE_DIR:'.',MEME_DB_PATH:'.',Date:{now:()=>now},memeImageDescriptions:cache,pendingMemeCandidates:new Map(),emotionState:{},AbortController,setTimeout,clearTimeout,
+ const ctx=vm.createContext({rotationBlockers,cfg:{},STATE_DIR:'.',MEME_DB_PATH:'.',Date:{now:()=>now},memeImageDescriptions:cache,pendingMemeCandidates:new Map(),emotionState:{},AbortController,setTimeout,clearTimeout,
   loadMemePlayConfig:()=>({enabled:true,private:true,proactive:true}),getSocialV2State:()=>({recentMessages:rows}),memeContextFor:()=>'',resolveMediaList:async()=>[{type:'image'}],
   runHeadlessPrompt:async()=>{calls++;return '图中文字'},fetch:async()=>({json:async()=>({results:[]})}),usedTitlesFromMemories:()=>[],pickMemeCandidates:()=>[],log:()=>{}});
  const run=vm.runInContext(block('  async function withMemeContext(','  function noteMemeUse(')+';withMemeContext',ctx);

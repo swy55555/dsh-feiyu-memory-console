@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "at": 1793575394126,
+  "topics": [
+    {
+      "topic": "咖啡",
+      "evidence": 2,
+      "sampleUrl": "https://www.bilibili.com/video/BV1taxi67EyC"
+    },
+    {
+      "topic": "天文摄影",
+      "evidence": 2,
+      "sampleUrl": "https://www.bilibili.com/video/BV1vm411D7UE"
+    },
+    {
+      "topic": "植物养护",
+      "evidence": 2,
+      "sampleUrl": "https://www.bilibili.com/video/BV1Bu4y1m7D8"
+    }
+  ],
+  "messages": 9,
+  "hits": 9,
+  "productionUnchanged": {
+    "taste": true,
+    "selfMemory": true
+  },
+  "results": [
+    {
+      "topic": "咖啡",
+      "text": "最近在看咖啡，有什么入门建议吗",
+      "gate": {
+        "available": true,
+        "hit": true,
+        "reason": "match:taste",
+        "matches": [
+          {
+            "kind": "taste",
+            "text": "咖啡"
+          }
+        ]
+      },
+      "injected": true,
+      "delta": 71,
+      "sample": ""
+    },
+    {
+      "topic": "咖啡",
+      "text": "我想试试咖啡，但怕坚持不下来",
+      "gate": {
+        "available": true,
+        "hit": true,
+        "reason": "match:taste",
+        "matches": [
+          {
+            "kind": "taste",
+            "text": "咖啡"
+          }
+        ]
+      },
+      "injected": true,
+      "delta": 71,
+      "sample": ""
+    },
+    {
+      "topic": "咖啡",
+      "text": "你觉得咖啡值得花时间吗",
+      "gate": {
+        "available": true,
+        "hit": true,
+        "reason": "match:taste",
+        "matches": [
+          {
+            "kind": "taste",
+            "text": "咖啡"
+          }
+        ]
+      },
+      "injected": true,
+      "delta": 71,
+      "sample": ""
+    },
+    {
+      "topic": "天文摄影",
+      "text": "最近在看天文摄影，有什么入门建议吗",
+      "gate": {
+        "available": true,
+        "hit": true,
+        "reason": "match:taste",
+        "matches": [
+          {
+            "kind": "taste",
+            "text": "天文摄影"
+          }
+        ]
+      },
+      "injected": true,
+      "delta": 73,
+      "sample": ""
+    },
+    {
+      "topic": "天文摄影",
+      "text": "我想试试天文摄影，但怕坚持不下来",
+      "gate": {
+        "available": true,
+        "hit": true,
+        "reason": "match:taste",
+        "matches": [
+          {
+            "kind": "taste",
+            "text": "天文摄影"
+          }
+        ]
+      },
+      "injected": true,
+      "delta": 73,
+      "sample": ""
+    },
+    {
+      "topic": "天文摄影",
+      "text": "你觉得天文摄影值得花时间吗",
+      "gate": {
+        "available": true,
+        "hit": true,
+        "reason": "match:taste",
+        "matches": [
+          {
+            "kind": "taste",
+            "text": "天文摄影"
+          }
+        ]
+      },
+      "injected": true,
+      "delta": 73,
+      "sample": ""
+    },
+    {
+      "topic": "植物养护",
+      "text": "最近在看植物养护，有什么入门建议吗",
+      "gate": {
+        "available": true,
+        "hit": true,
+        "reason": "match:taste",
+        "matches": [
+          {
+            "kind": "taste",
+            "text": "植物养护"
+          }
+        ]
+      },
+      "injected": true,
+      "delta": 73,
+      "sample": ""
+    },
+    {
+      "topic": "植物养护",
+      "text": "我想试试植物养护，但怕坚持不下来",
+      "gate": {
+        "available": true,
+        "hit": true,
+        "reason": "match:taste",
+        "matches": [
+          {
+            "kind": "taste",
+            "text": "植物养护"
+          }
+        ]
+      },
+      "injected": true,
+      "delta": 73,
+      "sample": ""
+    },
+    {
+      "topic": "植物养护",
+      "text": "你觉得植物养护值得花时间吗",
+      "gate": {
+        "available": true,
+        "hit": true,
+        "reason": "match:taste",
+        "matches": [
+          {
+            "kind": "taste",
+            "text": "植物养护"
+          }
+        ]
+      },
+      "injected": true,
+      "delta": 73,
+      "sample": ""
+    }
+  ]
+}

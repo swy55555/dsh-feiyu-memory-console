@@ -14,7 +14,7 @@ export function associationPrompt(sources, nodes = [], affectEnabled = false) {
 禁止猜测用户为什么没回复、是否讨厌角色、关系是否恶化；不推断用户的新偏好、经历、承诺、身体状况，不凭空编造共同回忆，不生成情绪评分或发消息要求。
 只输出 JSON：{"nodes":[{"useful":true,"kind":"question"或"hypothesis","topic":"最多120字的话题或开放问题，不断言用户具有新事实","sourceIds":["原始记忆ID"],"continue":true或false,"nextPurpose":"new-angle|clarify-question|none"}]}。没有值得聊的话题时 nodes=[]。所有节点必须使用同一份原始记忆 ID，不把上一步猜测当新事实。
 ${affectEnabled ? '每个节点可以另附 impression：{"text":"最多80字，以也许/可能表达角色的模糊理解，不宣称读懂用户心思","feeling":"curiosity 或 warmth 或 concern","confidence":0到0.6}；没有必要就省略。它只是角色此刻的主观感受，不是事实、不是用户真实情绪。concern 只可来自原始记忆中明确提到的困难或压力，不能来自沉默、未回复或自己上一步的猜测。不要输出生气、责备、惩罚或关系恶化。' : '不输出 impression。'}
-原始记忆：${JSON.stringify(sources)}
+原始记忆：${JSON.stringify(sources.map(({id,text,source_time})=>({id,text,source_time})))}
 已经想到的话题（均未证实）：${JSON.stringify(nodes)}`;
 }
 
@@ -111,10 +111,10 @@ export class IdleAssociations {
     if(s.ready) return {reason:'pending-topic'};
     this.busy=true;s.lastRun=this.now();s.processed=epoch;this.transition(key,s,'exploring');
     try {
-      const found=await this.request('/related',{scope:key,subject_id:key.slice(8),query:[s.text,this.seedFor(key)].filter(Boolean).join('；').slice(0,1400)});
+      const found=await this.request('/related',{scope:key,subject_id:key.slice(8),include_provenance:true,query:[s.text,this.seedFor(key)].filter(Boolean).join('；').slice(0,1400)});
       if (!current()) return {reason:'interrupted'};
       const sources=(found.results||[]).filter(r=>r && typeof r.id==='string' && typeof r.text==='string' && r.text.length<=500 && String(r.subject_id)===key.slice(8)).slice(0,3)
-        .map(r=>({id:r.id,text:r.text,source_time:r.source_time}));
+        .map(r=>({id:r.id,text:r.text,source_time:r.source_time,...(r.provenance?{provenance:r.provenance}:{})}));
       if (!sources.length) {this.transition(key,s,'no-source');return {reason:s.status};}
       const raw=await this.generate(associationPrompt(sources,s.history,this.affectEnabled()),12000);
       if (!current()) {this.record(key,'interrupted');return {reason:'interrupted'};}
@@ -124,8 +124,12 @@ export class IdleAssociations {
       if (nodes.length) {
         s.ready={id:`${this.now()}-${epoch}`,nodes,sources,expiresAt:this.now()+this.ttlMs};
         s.history=[...s.history,...nodes].slice(-12);
-        this.transition(key,s,'ready',{topics:nodes.map(n=>n.topic),sources,stopReason:nodes.length===3?'step-limit':nodes.at(-1)?.continue&&nodes.at(-1)?.nextPurpose!=='none'?'no-further-progress':'enough',steps:nodes.map((n,i)=>({step:i+1,parentStep:i||null,nextPurpose:n.nextPurpose||'unspecified'}))});
-        const impression=nodes.find(n=>n.impression)?.impression;
+        const impressionNode=this.affectEnabled()?nodes.find(n=>n.impression):null;
+        const dependencies={version:1,nodes:nodes.map((n,i)=>({id:`${s.ready.id}:${i+1}`,topic:n.topic,
+          sources:n.sourceIds.map(id=>({id,provenance:structuredClone(sources.find(r=>r.id===id)?.provenance||null)})),
+          ...(n===impressionNode?{impression:structuredClone(n.impression)}:{})}))};
+        this.transition(key,s,'ready',{topics:nodes.map(n=>n.topic),sources,dependencies,stopReason:nodes.length===3?'step-limit':nodes.at(-1)?.continue&&nodes.at(-1)?.nextPurpose!=='none'?'no-further-progress':'enough',steps:nodes.map((n,i)=>({step:i+1,parentStep:i||null,nextPurpose:n.nextPurpose||'unspecified'}))});
+        const impression=impressionNode?.impression;
         if(impression && this.affectEnabled()) {
           s.impression={...impression,ideaId:s.ready.id,at:this.now(),expiresAt:s.ready.expiresAt};
           this.record(key,'impression',{ideaId:s.ready.id,impression:s.impression});
@@ -160,11 +164,12 @@ export class IdleAssociations {
     // Missing from top-k is not evidence that a fact changed. Keep it for a later topic.
     if(!idea.sources.some(r=>current.has(r.id))) {this.transition(key,s,'waiting-topic');return '';}
     let lookup;
-    try {lookup=await this.request('/lookup',{scope:key,ids:idea.sources.map(r=>r.id)});} catch {if(this.states.get(key)===s) this.transition(key,s,'validation-unavailable');return '';}
+    try {lookup=await this.request('/lookup',{scope:key,ids:idea.sources.map(r=>r.id),include_provenance:true});} catch {if(this.states.get(key)===s) this.transition(key,s,'validation-unavailable');return '';}
     if(!this.enabled()||!this.allowed(key)||this.states.get(key)!==s||s.ready!==idea) return '';
     if(idea.expiresAt<=this.now()){this.expire(key,s);return '';}
     const fresh=new Map((lookup.results||[]).map(r=>[r.id,r]));
-    if(idea.sources.some(r=>fresh.get(r.id)?.text!==r.text||fresh.get(r.id)?.source_time!==r.source_time)) {
+    if(idea.sources.some(r=>fresh.get(r.id)?.text!==r.text||fresh.get(r.id)?.source_time!==r.source_time||
+      (r.provenance&&fresh.get(r.id)?.provenance?.memoryVersion!==r.provenance.memoryVersion))) {
       this.transition(key,s,'source-changed');s.ready=null;s.impression=null;return '';
     }
     const valid=new Set(idea.sources.filter(r=>current.get(r.id)?.text===r.text&&current.get(r.id)?.source_time===r.source_time).map(r=>r.id));

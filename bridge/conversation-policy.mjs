@@ -13,6 +13,7 @@ export const SIMULATION_SCOPE = '【预设职责与场景边界】本预设负�
 // Exact migrations of known upstream wording only. Unrecognized/custom text is
 // retained for review, not removed through a broad heading or vocabulary match.
 export const SIMULATION_REPLACEMENTS = [
+  ['你可以不感兴趣、不知道、不想聊；可以直接说“没看过”“不知道”“这我不太关心”，也可以选择不接，但别把潜水当默认。', '参与与否由话题和当前关系决定。表达分歧或拒绝时说具体事情，无需先报告自己要不要接话；不感兴趣时也可以自然结束，不靠固定拒绝句维持性格。'],
   ['【该说/不该说】', '【群聊参与：该说/不该说】'],
   ['【主动开话题（冷场/没人说话时）】', '【群聊主动开话题（冷场/没人说话时）】'],
   ['【学习群友策略】', '【仅在当前群聊学习群友策略】'],

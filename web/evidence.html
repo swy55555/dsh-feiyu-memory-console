@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拾光 · 回响</title>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:#0b161a; --panel:#10232a; --panel-2:#0c1b20;
+    --ink:#e7f2f4; --ink-2:#b7ccd4; --dim:#7f99a5;
+    --line:rgba(150,205,220,.10); --line-2:rgba(150,205,220,.20);
+    --accent:#7fd6e6; --amber:#f0b96f; --green:#8fd6a8; --rose:#ef9a9a;
+    --serif:"Songti SC","Noto Serif CJK SC","Source Han Serif SC",Georgia,serif;
+    --sans:"Segoe UI Variable Text","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  }
+  html[data-theme="light"]{
+    color-scheme: light;
+    --bg:#f3eee5; --panel:#fffdf8; --panel-2:#faf5ec;
+    --ink:#1b2b32; --ink-2:#42565e; --dim:#7b8b91;
+    --line:rgba(35,60,70,.10); --line-2:rgba(35,60,70,.20);
+    --accent:#1f7f8f; --amber:#a8691f; --green:#3b7a55; --rose:#a94f4f;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font:14px/1.7 var(--sans);-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  header{display:flex;align-items:flex-end;gap:18px;padding:26px 32px 18px}
+  header h1{font:600 24px/1.2 var(--serif);margin:0;letter-spacing:.02em}
+  header .sub{color:var(--dim);font-size:12px;margin-top:6px}
+  .chips{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .chip{font-size:12px;padding:3px 10px;border-radius:999px;color:var(--ink-2);background:var(--panel);border:1px solid var(--line)}
+  .chip.on{color:var(--accent)}
+  .chip.bad{color:var(--rose);border-color:var(--line-2)}
+  button.refresh{font:inherit;font-size:12px;padding:5px 12px;border-radius:8px;border:1px solid var(--line-2);background:transparent;color:var(--ink-2);cursor:pointer}
+  button.refresh:hover{color:var(--accent);border-color:var(--accent)}
+  main{padding:4px 32px 56px;max-width:1420px;margin:0 auto}
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:22px;align-items:start}
+  @media (max-width:980px){.layout{grid-template-columns:1fr}}
+  .block{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin-bottom:18px}
+  .block h2{font:600 12px/1.2 var(--sans);letter-spacing:.14em;color:var(--dim);margin:0 0 16px;display:flex;align-items:center;gap:10px;text-transform:uppercase}
+  .block h2 .note{margin-left:auto;letter-spacing:0;text-transform:none;font-weight:400;font-size:12px;color:var(--dim)}
+  .params{display:grid;grid-template-columns:1fr 1fr;gap:12px 28px}
+  @media (max-width:640px){.params{grid-template-columns:1fr}}
+  .p-row{display:grid;grid-template-columns:52px 1fr 40px;align-items:center;gap:10px;font-size:12px;color:var(--ink-2)}
+  .p-row .track{display:block;height:3px;border-radius:2px;background:var(--line);overflow:hidden}
+  .p-row .fill{display:block;height:100%;border-radius:2px;background:var(--accent)}
+  .p-row .fill.amber{background:var(--amber)}
+  .p-row b{font-weight:500;color:var(--ink-2);text-align:right}
+  .concerns{display:flex;flex-direction:column;gap:10px}
+  .concern{display:flex;gap:8px;align-items:baseline;font-size:13px;min-width:0}
+  .concern .kind{font-size:10px;letter-spacing:.08em;padding:1px 7px;border-radius:999px;border:1px solid var(--line-2);color:var(--dim);flex:none}
+  .concern .kind.task{color:var(--accent)}
+  .concern .kind.worry{color:var(--amber)}
+  .concern .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+  .item{padding:14px 0;border-top:1px solid var(--line)}
+  .item:first-of-type{border-top:0;padding-top:0}
+  .item .head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .item .name{font-size:15px;color:var(--ink)}
+  .item .meta{font-size:12px;color:var(--dim)}
+  .item .body{font-size:13.5px;color:var(--ink-2);margin-top:4px}
+  .quote{margin:8px 0 0;padding:2px 0 2px 12px;border-left:1px solid var(--line-2);font-size:13px;color:var(--ink-2)}
+  details{margin-top:6px}
+  summary{font-size:12px;color:var(--dim);cursor:pointer;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary:before{content:'＋ '}
+  .field{display:grid;grid-template-columns:56px 1fr;gap:10px;font-size:12px;padding:3px 0;color:var(--ink-2)}
+  .field span:first-child{color:var(--dim)}
+  .run{padding:0 0 14px;border-bottom:1px solid var(--line);margin-bottom:14px}
+  .run:last-child{border-bottom:0;margin-bottom:0;padding-bottom:0}
+  .run h3{font:600 14px/1.4 var(--sans);margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .run h3 .tag{font-size:10px;letter-spacing:.06em;color:var(--dim);border:1px solid var(--line-2);border-radius:999px;padding:1px 7px;font-weight:400}
+  .kv{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:3px 0;color:var(--dim)}
+  .kv b{font-weight:500;color:var(--ink-2);text-align:right}
+  .err{font-size:12px;color:var(--rose);padding:6px 0}
+  .empty{font-size:13px;color:var(--dim)}
+  .loading{font-size:13px;color:var(--dim)}
+  /* 嵌入插件时不再重复大标题，只留状态条 */
+  html.embed header{padding:10px 32px 8px}
+  html.embed header h1, html.embed header .sub{display:none}
+  html.embed main{padding-top:16px}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>拾光</h1>
+    <div class="sub">她依据什么回应：状态、证据、后台判断 · 只读</div>
+  </div>
+  <div class="chips" id="chips"><span class="chip">读取中…</span></div>
+  <a class="chip" id="concernChip" href="#" title="去余音查看">挂念</a>
+  <a class="chip" id="memoryChip" href="#" title="去回廊查看">在回廊查看</a>
+  <button class="refresh" id="refresh">刷新</button>
+</header>
+<main>
+  <div class="layout">
+    <div>
+      <section class="block">
+        <h2>状态参数<span class="note">设计参数，非心理测量</span></h2>
+        <div class="params" id="params"><div class="loading">读取中…</div></div>
+      </section>
+      <section class="block" id="tasteBlock"><h2>兴趣证据<span class="note">暂定 / 确认</span></h2><div class="loading">读取中…</div></section>
+      <section class="block" id="selfBlock"><h2>自我记忆<span class="note">fact / impression</span></h2><div class="loading">读取中…</div></section>
+    </div>
+    <aside>
+      <section class="block">
+        <h2>后台判断<span class="note">原因优先</span></h2>
+        <div id="runBody"><div class="loading">读取中…</div></div>
+      </section>
+      <section class="block">
+        <h2>关联<span class="note">只读 · 分数=规则匹配</span></h2>
+        <div id="assocBody"><div class="loading">读取中…</div></div>
+      </section>
+      <section class="block">
+        <h2>最近一轮<span class="note">只记 id 与长度</span></h2>
+        <div id="lastRoundBody"><div class="loading">读取中…</div></div>
+      </section>
+    </aside>
+  </div>
+</main>
+<script>
+const API = '/dsh-feiyu-memory/api/evidence/context';
+const ASSOC = '/dsh-feiyu-memory/api/associations';
+try { if (window.self !== window.top) document.documentElement.classList.add('embed') } catch {}
+function syncTheme(){
+  try{
+    const t = window.parent?.document?.documentElement?.dataset?.theme;
+    if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+  }catch{}
+}
+syncTheme();
+try{
+  const target = window.parent?.document?.documentElement;
+  if (target) new MutationObserver(syncTheme).observe(target, { attributes: true, attributeFilter: ['data-theme'] });
+}catch{}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtTime = (t) => { const n=Number(t); if(!n) return '时间未知'; const d=new Date(n); const p=(x)=>String(x).padStart(2,'0'); return `${d.getMonth()+1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+const label = { autonomy:'自主', competence:'胜任', relatedness:'联结', curiosity:'探索动机' };
+
+function renderParams(goals){
+  const node = document.getElementById('params');
+  if(!goals?.ok){ node.innerHTML = `<div class="err">${esc(goals?.error || '读取失败')}</div>`; return; }
+  node.innerHTML = (goals.data?.goals || []).map((g) => `
+    <div class="p-row">
+      <span>${esc(label[g.id] || g.label || g.id)}</span>
+      <span class="track"><span class="fill ${g.id === 'curiosity' ? 'amber' : ''}" style="width:${Math.round(Math.max(0, Math.min(1, Number(g.weight) || 0)) * 100)}%"></span></span>
+      <b>${Number(g.weight).toFixed(2)}</b>
+    </div>`).join('');
+}
+
+function renderConcerns(cont){
+  // 挂念不再重复列在拾光：只保留一个计数入口，完整内容去「心绪」看。
+  const chip = document.getElementById('concernChip');
+  if(!chip) return;
+  if(!cont?.ok){ chip.textContent = '挂念 · 不可用'; return; }
+  const list = (cont.data?.concerns || []).filter((c) => ['open','paused'].includes(c.status));
+  chip.textContent = `挂念 ${list.length}`;
+  chip.title = list.length ? list.map((c) => c.title).slice(0, 8).join('\n') : '没有开着的挂念';
+}
+
+function renderTaste(taste){
+  const node = document.getElementById('tasteBlock');
+  if(!taste?.ok){ node.innerHTML = `<h2>兴趣证据</h2><div class="err">${esc(taste?.error || '读取失败')}</div>`; return; }
+  const items = taste.data?.items || [];
+  if(!items.length){ node.innerHTML = '<h2>兴趣证据</h2><div class="empty">还没有兴趣记录。</div>'; return; }
+  node.innerHTML = `<h2>兴趣证据<span class="note">暂定 / 确认</span></h2>` + items.map((t) => {
+    const ev = (t.evidence || []).at(-1) || {};
+    const status = Number(t.strength) >= 0.42 ? 'confirmed' : 'provisional';
+    const urls = new Set((t.evidence || []).map((e) => e.url).filter(Boolean));
+    return `<div class="item">
+      <div class="head"><span class="name">${esc(t.topic)}</span><span class="meta">${status} · ${Number(t.strength).toFixed(2)}</span><span class="meta">· ${urls.size} 条独立来源</span></div>
+      ${ev.excerpt ? `<div class="quote">“${esc(ev.excerpt).slice(0, 140)}”</div>` : ''}
+      <details><summary>来源</summary>
+        <div class="field"><span>类型</span><span>${esc(ev.source || t.source || '未知')}</span></div>
+        <div class="field"><span>时间</span><span>${fmtTime(ev.at || t.lastSeenAt)}</span></div>
+        ${ev.url ? `<div class="field"><span>链接</span><span><a href="${esc(ev.url)}" target="_blank" rel="noreferrer">${esc(ev.url)}</a></span></div>` : ''}
+      </details>
+    </div>`;
+  }).join('');
+}
+
+function renderSelf(self, status){
+  const node = document.getElementById('selfBlock');
+  if(!self?.ok){ node.innerHTML = `<h2>自我记忆</h2><div class="err">${esc(self?.error || '读取失败')}</div>`; return; }
+  const items = self.data?.items || [];
+  const head = status?.ok ? `<span class="note">${status.data.migrated}/${status.data.total} 已入向量库</span>` : '';
+  if(!items.length){ node.innerHTML = `<h2>自我记忆${head}</h2><div class="empty">还没有自我记忆。</div>`; return; }
+  node.innerHTML = `<h2>自我记忆${head}</h2>` + items.map((m) => {
+    const kind = m.kind === 'fact' ? 'fact' : 'impression';
+    const hasSourceInfo = Boolean(m.sourceUrl || m.excerpt);
+    const src = m.verified === 'verbatim' ? '来源逐字'
+      : m.verified === 'paraphrase' ? '来源转述'
+      : m.verified === 'unverified' ? '未核实'
+      : hasSourceInfo ? '未关联到对话记录 · 摘录未核验' : '来源未知';
+    const srcClass = (m.verified === 'verbatim' || m.verified === 'paraphrase') ? '' : ' · 不可核';
+    return `<div class="item">
+      <div class="head"><span class="meta">${kind}</span><span class="name">${esc(m.topic || '未分类')}</span><span class="meta">${src}${srcClass} · 置信 ${Number(m.confidence ?? 0).toFixed(2)}</span></div>
+      <div class="body">${esc(m.text)}</div>
+      <details><summary>来源</summary>
+        <div class="field"><span>核验</span><span>${src}${srcClass}</span></div>
+        <div class="field"><span>摘录</span><span>${esc(m.excerpt || '无')}</span></div>
+        <div class="field"><span>来源片段</span><span>${esc(m.episodeId || '未关联')}</span></div>
+        <div class="field"><span>时间</span><span>${fmtTime(m.at)}</span></div>
+        ${m.sourceUrl ? `<div class="field"><span>链接</span><span><a href="${esc(m.sourceUrl)}" target="_blank" rel="noreferrer">${esc(m.sourceUrl)}</a></span></div>` : ''}
+      </details>
+    </div>`;
+  }).join('');
+}
+
+function reasonText(reason){
+  return ({
+    'quiet-hours':'安静时段内跳过', 'daily-runs':'今日次数已用完', 'daily-cost':'今日费用到上限',
+    'not-idle':'还没到空闲门槛', 'goals-low':'驱力权重不够', 'busy':'正在忙别的任务',
+    'disabled':'功能已关闭', 'schedule-off':'定时生成关闭', 'already-running':'已在运行',
+    'ok':'可以运行', 'not-due':'还没到生成条件',
+  })[reason] || reason || '未知';
+}
+
+function renderRun(payload){
+  const ex = payload.explore?.ok ? payload.explore.data : null;
+  const nar = payload.narrative?.ok ? payload.narrative.data : null;
+  const rhy = payload.rhythm?.ok ? payload.rhythm.data : null;
+  document.getElementById('runBody').innerHTML = `
+    <div class="run"><h3>探索 <span class="tag">${ex?.enabled ? '启用' : '关闭'}</span></h3>
+      <div class="kv"><span>最近判定</span><b>${esc(reasonText(ex?.decision?.reason))}</b></div>
+      <div class="kv"><span>今日</span><b>${ex?.budget?.runsToday ?? 0} 次 · ${Number(ex?.budget?.costToday ?? 0).toFixed(4)} 元</b></div>
+      <div class="kv"><span>上次</span><b>${esc(ex?.last?.ok ? (ex.last.topic || '成功') : reasonText(ex?.last?.reason) || '暂无')}</b></div>
+    </div>
+    <div class="run"><h3>叙事 <span class="tag">${nar?.enabled ? '注入中' : '关闭'}</span></h3>
+      <div class="kv"><span>版本</span><b>${esc(String(nar?.current?.id || '无').slice(0, 8))} · ${(nar?.current?.text || '').length} 字</b></div>
+      <div class="kv"><span>定时生成</span><b>${nar?.schedule ? '开启' : '关闭'}</b></div>
+      <div class="kv"><span>今日预算</span><b>${Number(nar?.budget?.spent ?? 0).toFixed(4)} / ${Number(nar?.budget?.cap ?? 0).toFixed(2)} 元</b></div>
+    </div>
+    <div class="run"><h3>节律 <span class="tag">${rhy?.view?.enabled ? '本地规则' : '关闭'}</span></h3>
+      <div class="kv"><span>当前</span><b>${esc(rhy?.view?.time || '—')}${rhy?.view?.quiet ? ' · 安静' : ''}${rhy?.view?.brief ? ' · 简短' : ''}</b></div>
+      <div class="kv"><span>主动消息</span><b>${rhy?.view?.quiet ? '安静时段内不发' : '按原策略'}</b></div>
+      <div class="kv"><span>回复长度</span><b>${rhy?.view?.brief ? '倾向简短' : '不限制'}</b></div>
+    </div>`;
+}
+
+function renderChips(payload){
+  const bridgeOk = Boolean(payload?.goals?.ok);
+  const memOk = Boolean(payload?.selfStatus?.ok);
+  const nar = payload?.narrative?.data || {};
+  document.getElementById('chips').innerHTML = [
+    `<span class="chip${bridgeOk ? ' on' : ' bad'}">${bridgeOk ? '桥接在线' : '桥接不可达'}</span>`,
+    `<span class="chip${memOk ? ' on' : ' bad'}">${memOk ? 'memvec 可用' : 'memvec 不可用'}</span>`,
+    `<span class="chip">${nar.enabled ? '叙事 · 注入中' : '叙事 · 关闭'}</span>`,
+    '<span class="chip">只读</span>',
+    `<span class="chip">更新 ${fmtTime(payload.at)}</span>`,
+  ].join('');
+}
+
+function renderAssoc(data){
+  const node = document.getElementById('assocBody');
+  if(!node) return;
+  if(!data?.ok){ node.innerHTML = `<div class="err">${esc(data?.error || '读取失败')}</div>`; return; }
+  const strong = data.strong || [];
+  const weak = data.weak || [];
+  if(!strong.length && !weak.length){ node.innerHTML = '<div class="empty">没有可展示的关联。</div>'; return; }
+  const typeLabel = { 'same-source': '同源', 'same-episode': '同一段经历' };
+  const rows = [];
+  for(const g of strong){
+    rows.push(`<div class="run"><h3>${typeLabel[g.type] || g.type} <span class="tag">${esc(g.rule)}</span></h3>
+      <div class="kv"><span>匹配度（规则）</span><b>${Number(g.confidence).toFixed(2)}</b></div>
+      ${g.items.map((it) => `<div class="kv"><span>${esc(it.kind)}</span><b title="${esc(it.label)}">${esc(String(it.label).slice(0, 18))}</b></div>`).join('')}
+      <div class="field"><span>说明</span><span>${esc(g.note)}</span></div>
+    </div>`);
+  }
+  for(const c of weak){
+    rows.push(`<div class="run"><h3>候选 <span class="tag">${esc(c.rule)}</span></h3>
+      <div class="kv"><span>匹配度（规则）</span><b>${Number(c.confidence).toFixed(2)}</b></div>
+      ${c.items.map((it) => `<div class="kv"><span>${esc(it.kind)}</span><b title="${esc(it.label)}">${esc(String(it.label).slice(0, 18))}</b></div>`).join('')}
+      <div class="field"><span>依据</span><span>${esc(c.note)}</span></div>
+      <div class="field"><span>操作</span><span><button class="refresh" disabled title="B 阶段只读，写入通道开放后可撤销">撤销（待开放）</button></span></div>
+    </div>`);
+  }
+  node.innerHTML = rows.join('');
+}
+
+function renderLastRound(data){
+  const node = document.getElementById('lastRoundBody');
+  if(!node) return;
+  if(!data?.ok){ node.innerHTML = `<div class="err">${esc(data?.error || '读取失败')}</div>`; return; }
+  const row = (data.rows || [])[0];
+  if(!row){ node.innerHTML = '<div class="empty">还没有 trace（下一轮 owner 私聊后产生）。</div>'; return; }
+  const blocks = (row.blocks || []).map((b) => `<div class="kv"><span>${esc(b.id)}</span><b>${Number(b.chars) || 0} 字</b></div>`).join('');
+  const assoc = row.associations || {};
+  const strong = (assoc.strong || []).map((r) => `<div class="kv"><span>强关联</span><b>${esc(r)}</b></div>`).join('');
+  const weak = (assoc.weak || []).map((r) => `<div class="kv"><span>候选</span><b>${esc(r)}</b></div>`).join('');
+  node.innerHTML = `<div class="run">
+      <h3>装配 <span class="tag">${esc(row.assemblerVersion || '')}</span></h3>
+      ${blocks || '<div class="empty">本轮没有注入块。</div>'}
+    </div>
+    <div class="run">
+      <h3>关联 <span class="tag">${assoc.injected ? '已注入' : '仅考虑'}</span></h3>
+      ${strong}${weak || (strong ? '' : '<div class="empty">没有关联记录。</div>')}
+    </div>
+    <div class="meta">${fmtTime(row.at)}${(row.dropped || []).length ? ` · 丢弃 ${row.dropped.length}` : ''}</div>`;
+}
+
+async function load(){
+  try{
+    const [ctxRes, assocRes, traceRes] = await Promise.all([
+      fetch(API, { cache: 'no-store' }),
+      fetch(ASSOC, { cache: 'no-store' }),
+      fetch('/dsh-feiyu-memory/api/broadcast-trace?limit=1', { cache: 'no-store' }),
+    ]);
+    const payload = await ctxRes.json();
+    if(!payload?.ok) throw new Error(payload?.error || '读取失败');
+    renderChips(payload);
+    renderParams(payload.goals);
+    renderConcerns(payload.continuity);
+    renderTaste(payload.taste);
+    renderSelf(payload.selfMemory, payload.selfStatus);
+    renderRun(payload);
+    if(assocRes.ok){
+      const assoc = await assocRes.json().catch(() => null);
+      if(assoc?.ok) renderAssoc(assoc);
+      else document.getElementById('assocBody').innerHTML = `<div class="err">${esc(assoc?.error || '关联读取失败')}</div>`;
+    }else{
+      document.getElementById('assocBody').innerHTML = '<div class="empty">关联接口未加载（重启后可用）。</div>';
+    }
+    if(traceRes.ok){
+      renderLastRound(await traceRes.json().catch(() => ({ ok: false, error: 'trace 读取失败' })));
+    }else{
+      document.getElementById('lastRoundBody').innerHTML = '<div class="empty">trace 接口未加载（重启后可用）。</div>';
+    }
+  }catch(error){
+    document.getElementById('chips').innerHTML = `<span class="chip bad">读取失败</span><span class="chip">${esc(error.message)}</span>`;
+    for(const id of ['params','concerns','tasteBlock','selfBlock','runBody','assocBody']){
+      const node = document.getElementById(id);
+      if(node) node.innerHTML = `<div class="err">${esc(error.message)}</div>`;
+    }
+  }
+}
+document.getElementById('refresh').addEventListener('click', load);
+document.getElementById('memoryChip').addEventListener('click', (event) => {
+  event.preventDefault();
+  try { window.parent.location.hash = '#/memory' } catch { location.href = '/dsh-feiyu-memory/#/memory' }
+});
+document.getElementById('concernChip').addEventListener('click', (event) => {
+  event.preventDefault();
+  try { window.parent.location.hash = '#/continuity' } catch { location.href = '/dsh-feiyu-memory/#/continuity' }
+});
+load();
+</script>
+</body>
+</html>

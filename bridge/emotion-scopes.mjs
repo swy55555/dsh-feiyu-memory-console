@@ -1,4 +1,4 @@
-import {emptyEmotion,normalizeEmotion,tickEmotion,applyEmotionEvent} from './emotion.js';
+import {emptyEmotion,normalizeEmotion,tickEmotion,applyEmotionEvent,visibleFeelings} from './emotion.js';
 const bounded=(n,lo,hi)=>Math.max(lo,Math.min(hi,Number(n)||0));
 export function emotionScope(key,speaker=''){
   if(/^private:\d+$/.test(String(key)))return key;
@@ -49,7 +49,7 @@ export class EmotionScopes {
       conflictTone=Math.max(conflictTone,s.dynamics.conflict);
       for(const f of s.state.feelings||[]){const old=feelings.get(f.kind);if(!old||old.level<f.level)feelings.set(f.kind,{kind:f.kind,label:f.label,level:f.level});}
     }
-    return {mode:'shared',at:now,valence:bounded(this.baseline.valence+v,-1,1),arousal:bounded(this.baseline.arousal+a,0,1),moodValence:bounded(this.baseline.valence+mv,-1,1),moodArousal:bounded(this.baseline.arousal+ma,0,1),conflictTone,feelings:[...feelings.values()].sort((a,b)=>b.level-a.level).slice(0,2)};
+    return {mode:'shared',at:now,valence:bounded(this.baseline.valence+v,-1,1),arousal:bounded(this.baseline.arousal+a,0,1),moodValence:bounded(this.baseline.valence+mv,-1,1),moodArousal:bounded(this.baseline.arousal+ma,0,1),conflictTone,feelings:visibleFeelings([...feelings.values()])};
   }
   view(chatKey,speaker='',now=this.now(),recovery={}){
     const key=emotionScope(chatKey,speaker),state=tickEmotion(this.get(key),now,recovery);

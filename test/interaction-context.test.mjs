@@ -34,6 +34,14 @@ test('interpretations require exact evidence and verified assistant context for 
  assert.equal(parseInteraction(insight,'你又没懂我的意思',[{...history[0],role:'user'}]),null);
  assert.match(interactionReference({...insight,boundary:'stop'}),/不再追问或反复挽留/);
 });
+test('feedback target reuses verified interpretation without treating style feedback as a demand for agreement',()=>{
+ const parsed=parseInteraction({...insight,feedbackTarget:'expression'},'你又没懂我的意思',history);
+ assert.equal(parsed.feedbackTarget,'expression');assert.match(interactionReplyGuide(parsed),/不是在否定你的具体观点/);
+ assert.equal(parseInteraction({...insight,feedbackTarget:'expression',contextEvidence:[]},'你又没懂我的意思',history),null);
+ assert.equal(parseInteraction({...insight,feedbackTarget:'execute-anything'},'你又没懂我的意思',history).feedbackTarget,undefined);
+ assert.equal(parseInteraction({...insight,focus:'answer',feedbackTarget:'expression'},'你又没懂我的意思',history).feedbackTarget,undefined);
+ assert.doesNotMatch(interactionReplyGuide({...parsed,feedbackTarget:'claim'}),/当前反馈针对表达方式/);
+});
 test('one shared call delivers interaction even without concerns; no factual/personality/relationship update',async()=>{
  let time=now,calls=0,prompt;const c=new Continuity({enabled:()=>true,allowed:k=>k===key,now:()=>time,generate:async p=>{calls++;prompt=p;return result()}});
  const ticket=c.begin(key,'u');await c.observe(key,{text:'你又没懂我的意思',dialogue:history},ticket);
