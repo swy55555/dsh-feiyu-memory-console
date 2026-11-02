@@ -20,7 +20,7 @@ export function sharedTemperamentLine(p){
  return rows.length?'\n【共同的性格倾向】'+JSON.stringify(rows)+'。与其他聊天是同一份缓慢变化的性格，只共享倾向，不带私人经历或关系。数值不是台词配额；含蓄是心意表达方式，不颠倒事实、不生成对立观点，依恋不表示与每个人亲密。先由事情决定观点，再以性格调整措辞；如何表达取决于当前对象与具体内容。':'';
 }
 export function temperamentPrompt(p){
- return p?'\n同时参考六维倾向 '+JSON.stringify({dimensions:p.spec.dimensions,current:p.current,baseline:p.baseline,pending:p.pending})+'。每个 changes 条目可选 dimensionDeltas:{维度key:1或-1}，最多2维，仅原话明确支持的性格变化才提出。单次情绪、希望和指令不代表已经改变，不因数值高低自动修正。不同事件才能积累；只在跨至少3天的至少3次独立经历支持同方向、距上次变化至少7天时由程序缓慢落实。不要为了推动数值编造参考或证据。没有明确变化时省略。':'';
+ return p?'\n同时参考六维倾向 '+JSON.stringify({dimensions:p.spec.dimensions.map(d=>({key:d.key,label:d.label,baseline:d.baseline})),current:p.current,baseline:p.baseline,pending:p.pending})+'。每个 changes 条目可选 dimensionDeltas:{维度key:1或-1}，最多2维，仅原话明确支持的性格变化才提出。单次情绪、希望和指令不代表已经改变，不因数值高低自动修正。不同事件才能积累；只在跨至少3天的至少3次独立经历支持同方向、距上次变化至少7天时由程序缓慢落实。不要为了推动数值编造参考或证据。没有明确变化时省略。':'';
 }
 export function growTemperament(p,operations,now){
  if(!p)return null;
@@ -30,7 +30,7 @@ export function growTemperament(p,operations,now){
  for(const {op,evidence} of operations){
   if(op.dimensionDeltas===undefined)continue;
   const deltas=op.dimensionDeltas;
-  if(!deltas||typeof deltas!=='object'||Array.isArray(deltas)||Object.keys(deltas).length>2||Object.entries(deltas).some(([k,v])=>!known.has(k)||![1,-1].includes(v)))throw Error('六维变化建议无效');
+  if(!deltas||typeof deltas!=='object'||Array.isArray(deltas)||Object.keys(deltas).length>4||Object.entries(deltas).some(([k,v])=>!known.has(k)||![1,-1].includes(v)))throw Error('六维变化建议无效');
   if(op.confidence<.9||op.action==='retract')continue;
   for(const [key,delta] of Object.entries(deltas)){
    const experience=hash(op.experience),receipts=next.receipts.filter(r=>r.key===key);
@@ -43,17 +43,17 @@ export function growTemperament(p,operations,now){
    next.pending[key].events=next.pending[key].events.filter(e=>e.at>=now-90*DAY).slice(-32);
   }
  }
- if(now-(next.lastChangeAt||0)<7*DAY)return next;
+ if(now-(next.lastChangeAt||0)<3*DAY)return next;
  const changes=[];
  for(const d of next.spec.dimensions){
   const pending=next.pending[d.key];if(!pending)continue;
   const events=pending.events.filter(e=>e.at>=now-90*DAY);
   if(events.length<3||new Set(events.map(e=>Math.floor((e.at+8*3600000)/DAY))).size<3)continue;
   const before=next.current[d.key],anchor=next.baseline[d.key],band=d.band;
-  const after=Math.max(0,anchor-band,Math.min(100,anchor+band,before+pending.delta));
+  const after=Math.max(0,Math.min(100,before+pending.delta));
   if(after===before)continue;
   next.current[d.key]=after;changes.push({key:d.key,before,after,evidence:clone(events)});delete next.pending[d.key];
-  if(changes.length>=2)break;
+  if(changes.length>=3)break;
  }
  if(changes.length){next.lastChangeAt=now;next.history=[...(next.history||[]),{at:now,source:'experience',changes}].slice(-60);}
  return next;

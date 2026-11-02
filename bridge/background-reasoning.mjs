@@ -1,7 +1,7 @@
 import {FEATURE_LABELS} from './usage-features.mjs';
 export const EFFORTS = Object.freeze(['low', 'high', 'max']);
 export const BACKGROUND_DEFAULTS = Object.freeze(Object.fromEntries(Object.keys(FEATURE_LABELS).filter(key=>!['style_distillation','expression_teacher'].includes(key)).map(key =>
-  [key, ['event_understanding','emotion_review','idle_association','growth_classroom'].includes(key) ? 'low' : 'high'])));
+  [key, ['event_understanding','emotion_review','idle_association','growth_classroom','narrative'].includes(key) ? 'low' : 'high'])));
 export function validateEffortPatch(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length) throw Error('请选择要调整的模块');
   for (const [key, effort] of Object.entries(value)) {

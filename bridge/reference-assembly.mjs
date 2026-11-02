@@ -1,5 +1,15 @@
 import {createHash} from 'node:crypto';
 
+// 把装配报告压成 trace 用的块/丢弃摘要：只保留 id、长度、原因，不存正文。
+export function summarizeAssembly(report){
+  const decisions=Array.isArray(report?.decisions)?report.decisions:[];
+  const selected=decisions.filter((d)=>d.reason==='selected'||d.reason==='complete-records-only')
+    .map((d)=>({id:d.id,chars:Number(d.selectedChars??d.chars)||0}));
+  const dropped=decisions.filter((d)=>!['selected','complete-records-only'].includes(d.reason))
+    .map((d)=>({id:d.id,chars:Number(d.chars)||0,reason:d.reason}));
+  return {selected,dropped};
+}
+
 // This budgets generated reference blocks, never the current request, tools or persona rules.
 // No semantic similarity guess: only identical text with the same scope, purpose and version.
 export function assembleReferences({key,blocks=[],budgetChars=8000}={}) {

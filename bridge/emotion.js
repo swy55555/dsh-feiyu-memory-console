@@ -184,10 +184,10 @@ export function labelFor(s, feelings=dailyTone(s).active) {
   } else if (level('frustration')>=.15) {
     label = "烦闷";
     key = "frustrated";
-  } else if (v < -0.04 || (old === "不快" && v < 0)) {
+  } else if (v < -0.02 || (old === "不快" && v < 0.02)) {
     label = "不快";
     key = "sad";
-  } else if (v > 0.28 || (old === "愉快" && v > 0.23)) {
+  } else if (v > 0.16 || (old === "愉快" && v > 0.12)) {
     label = "愉快";
     key = "joy";
   }

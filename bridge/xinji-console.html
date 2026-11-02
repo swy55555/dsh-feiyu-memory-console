@@ -1906,6 +1906,8 @@ pre,.code-area { background:var(--surface-sunken);border-color:var(--border);fon
       <button data-view="social-v1" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16c3-15 6 11 10-3s5-2 6-1"/></svg></span>一代仿真<span class="nav-note">V1</span></button>
       <div class="nav-label">管理</div>
       <button data-view="usage" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v17h17M9 15v-4m5 4V6m5 9v-6"/></svg></span>令牌与花费</button>
+      <button data-view="memory-audit" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11l3 3v13H5zM9 9h7M9 13h7M9 17h4"/></svg></span>记忆抽检</button>
+      <button data-view="concerns" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-4.6-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.4-7 10-7 10Z"/></svg></span>挂念与认识</button>
       <button data-view="access" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 8 4v6c0 5-8 10-8 10S4 17 4 12V6l8-4Z"/><path d="m8 12 3 3 5-6"/></svg></span>访问与安全</button>
       <button data-view="operations" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 17h16"/><circle cx="8" cy="7" r="3" fill="var(--sidebar-bg)"/><circle cx="16" cy="17" r="3" fill="var(--sidebar-bg)"/></svg></span>调试与运维</button>
       <button data-view="reference" class="nav-item"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5C9 2 4 3 3 4v16c3-2 6-2 9 0 3-2 6-2 9 0V4c-3-2-6-2-9 1v15"/></svg></span>工具参考</button>
@@ -1984,7 +1986,7 @@ pre,.code-area { background:var(--surface-sunken);border-color:var(--border);fon
       <h2>人格与指令</h2>
       <p>当前自我：<span id="roleText">读取中</span> · <span id="roleModeText">读取中</span></p>
       <div class="layer-note"><strong>六维倾向与自我参考共同参与回应</strong>
-      <p>开启可成长自我参考后，六维保留缓慢变化的性格底色，自我参考记录真实相处带来的理解，旧角色卡不再作为固定身份脚本。未开启时仍沿用原有模式；请到记忆控制台查看当前状态。</p>
+      <p>开启可成长自我参考后，六维保留缓慢变化的性格底色，自我参考记录真实相处带来的理解，旧角色卡不再作为固定身份脚本。<strong>关掉自我参考后不会回退到旧人格卡（卡已下线），她将没有任何身份描述</strong>；除非你确定要这种状态，否则不要关。请到记忆控制台查看当前状态。</p>
       <p><a href="http://127.0.0.1:3080/dsh-feiyu-memory/#/persona">查看六维、自我参考与成长依据 ↗</a> · <a href="http://127.0.0.1:3080/dsh-feiyu-memory/#/continuity">查看当前心绪 ↗</a></p></div>
       <p class="meta">下面保留交流风格、工具和权限的底层指令。修改这些指令不会替代基于经历发展的自我参考。</p>
       <h3 class="layer-heading">仿真提示词（预设内置）<span class="meta" id="simPromptStatus">加载中…</span></h3>
@@ -2210,7 +2212,7 @@ pre,.code-area { background:var(--surface-sunken);border-color:var(--border);fon
         <label style="flex:1">推荐普通消息概率</label><input type="number" id="v2RecProb" step="0.05" min="0" max="1" style="width:80px">
       </div>
       <div class="row">
-        <label style="flex:1">推荐关键词（逗号分隔）</label><input type="text" id="v2RecKeywords" placeholder="小鲸鱼, DeepSeek" style="flex:1">
+        <label style="flex:1">推荐关键词（逗号分隔）</label><input type="text" id="v2RecKeywords" placeholder="小崽神, DeepSeek" style="flex:1">
       </div>
       <div class="row">
         <label style="flex:1">推荐 @ 唤醒</label><input type="checkbox" id="v2RecAt" style="width:auto">
@@ -2536,6 +2538,28 @@ pre,.code-area { background:var(--surface-sunken);border-color:var(--border);fon
         <span class="meta" id="aiNotifyMsg"></span>
       </div>
     </section>
+<section id="section-memory-audit" data-page="memory-audit" class="card span-all">
+      <h2 style="display:flex;align-items:center;gap:10px">记忆抽检
+        <span style="flex:1"></span>
+        <button class="btn" id="memoryAuditRun" type="button">现在抽一次</button>
+        <button class="btn" id="memoryAuditRefresh" type="button">刷新</button>
+      </h2>
+      <div class="meta">每天 4 点后自动抽 10 条，对照「原话 vs 理解栏」。这里只列可疑项：可以<b>降为待核对</b>（不再自动召回，可回滚）或<b>忽略</b>（以后不再提示）。永远不会改原话。</div>
+      <div id="memoryAuditList" class="meta" style="margin-top:12px">读取中…</div>
+    </section>
+
+    <section id="section-concerns" data-page="concerns" class="card span-all">
+      <h2 style="display:flex;align-items:center;gap:10px">挂念与认识
+        <span style="flex:1"></span>
+        <button class="btn" id="concernsRefresh" type="button">刷新</button>
+      </h2>
+      <div class="meta"><b>task</b> 是还没兑现的具体事，相关时她会自然提一句；<b>worry</b> 只是心里记着（24 小时后自己淡掉），不催问。下面的「认识」都可能是错的，看着不对可以驳回。</div>
+      <h3 style="margin:14px 0 6px">挂念</h3>
+      <div id="concernList" class="meta">读取中…</div>
+      <h3 style="margin:14px 0 6px">认识</h3>
+      <div id="beliefList" class="meta">读取中…</div>
+    </section>
+
 <section id="section-usage" data-page="usage" class="card span-all">
       <h2 data-note="每 3 秒自动同步">令牌与花费</h2>
       <div class="meta">数据来源是 DSH 会话事件里的 provider usage。<b>累计总量</b>取 <code>tokenUsage</code> 投影（整条会话日志的权威累计，含桥接启动前的历史）；<b>逐轮明细</b>由 <code>assistant/message</code> 的 usage 折叠而来，能追溯到多深取决于会话开场快照带回的历史条数。金额按 DeepSeek 官方价目表折算，区分高峰 / 空闲时段（高峰单价为空闲的 2 倍）。</div>
@@ -2783,8 +2807,8 @@ async function saveMode(mode) {
   return r;
 }
 
-// ── 人格管理 ────────────────────────────────────────────────────────────────
-// 人格提示词 = roles/<名称>.md，桥接每条消息注入，保存即生效。
+// ── 仿真提示词 ──────────────────────────────────────────────────────────────
+// 人格卡（roles/<名称>.md）已下线；身份走「自我参考」，指令层只剩这些仿真提示词，保存后重启 DSH 生效。
 let simPromptOriginal = '';
 let simPromptPreset = 'qq-chat-v2';
 
@@ -3804,6 +3828,127 @@ async function changeConsoleToken(generate) {
 document.getElementById('consoleTokenSave').addEventListener('click', () => changeConsoleToken(false));
 document.getElementById('consoleTokenRandom').addEventListener('click', () => changeConsoleToken(true));
 
+// ── 记忆抽检（2026-11-02）──────────────────────────────────────────────
+async function loadMemoryAudit() {
+  const box = document.getElementById('memoryAuditList');
+  if (!box) return;
+  box.textContent = '读取中…';
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  try {
+    const data = await api('/api/memory/audit/last');
+    if (!data.ok) { box.textContent = data.error || '读取失败'; return; }
+    const runs = Array.isArray(data.runs) ? data.runs : [];
+    const items = [];
+    for (const run of runs) {
+      const when = new Date(run.at).toLocaleString('zh-CN', { hour12: false });
+      for (const s of run.suspects || []) {
+        const d = (data.details || {})[s.id] || {};
+        if (d.status && d.status !== 'active') continue; // 已降级/已处理的不再显示
+        items.push(`<div style="border:1px solid rgba(128,128,128,.25);border-radius:10px;padding:10px 12px;margin:8px 0">
+          <div class="meta">${esc(when)} · 对象 ${esc(d.subject || '—')}${d.status ? ' · 状态 ' + esc(d.status) : ''}</div>
+          <div>原话：${esc(d.quote || '（取不到，可能已删除）')}</div>
+          <div>理解：${esc(d.understanding || '（无理解栏）')}</div>
+          <div class="meta">原因：${esc(s.reason || '可疑')}</div>
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <button class="btn" data-act="downgrade" data-id="${esc(s.id)}" type="button">降为待核对</button>
+            <button class="btn" data-act="ignore" data-id="${esc(s.id)}" type="button">忽略</button>
+          </div>
+        </div>`);
+      }
+    }
+    box.innerHTML = items.length
+      ? items.join('')
+      : `<div>没有待处理的可疑项。${runs.length ? '' : '还没跑过抽检——点右上角「现在抽一次」。'}</div>`;
+    box.querySelectorAll('button[data-act]').forEach((btn) => btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const r = await api('/api/memory/audit/action', 'POST', { id: btn.dataset.id, action: btn.dataset.act });
+        if (!r.ok) throw new Error(r.error || '操作失败');
+        await loadMemoryAudit();
+      } catch (e) {
+        showConsoleToast('操作失败：' + e.message);
+        btn.disabled = false;
+      }
+    }));
+  } catch (e) {
+    box.textContent = '读取失败：' + e.message;
+  }
+}
+document.getElementById('memoryAuditRefresh')?.addEventListener('click', () => loadMemoryAudit());
+document.getElementById('memoryAuditRun')?.addEventListener('click', async () => {
+  const btn = document.getElementById('memoryAuditRun');
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = '抽检中…';
+  try {
+    const r = await api('/api/memory/audit', 'POST', { limit: 10, apply: false });
+    if (!r.ok) throw new Error(r.error || '抽检失败');
+    showConsoleToast(`抽检 ${r.items} 条，可疑 ${r.suspects} 条`);
+    await loadMemoryAudit();
+  } catch (e) {
+    showConsoleToast('抽检失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label || '现在抽一次';
+  }
+});
+
+// ── 挂念与认识（2026-11-02）────────────────────────────────────────────
+async function loadConcerns() {
+  const box = document.getElementById('concernList');
+  const bbox = document.getElementById('beliefList');
+  if (!box || !bbox) return;
+  box.textContent = '读取中…';
+  bbox.textContent = '读取中…';
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const card = (inner) => `<div style="border:1px solid rgba(128,128,128,.25);border-radius:10px;padding:10px 12px;margin:8px 0">${inner}</div>`;
+  try {
+    const data = await api('/api/continuity');
+    if (!data.ok) { box.textContent = data.error || '读取失败'; return; }
+    const concerns = (data.concerns || []).filter((r) => ['open', 'paused'].includes(r.status));
+    const beliefs = (data.beliefs || []).filter((r) => ['tentative', 'observed'].includes(r.status));
+    const fmt = (t) => (t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '');
+
+    box.innerHTML = concerns.length ? concerns.map((r) => {
+      const kind = r.kind === 'worry' ? '惦记' : '待办';
+      const ev = (r.evidence || []).at(-1) || {};
+      const acts = r.status === 'open'
+        ? `<button class="btn" data-col="concerns" data-act="pause" data-id="${esc(r.id)}" type="button">先放一放</button>
+           <button class="btn" data-col="concerns" data-act="close" data-id="${esc(r.id)}" type="button">关掉</button>`
+        : `<span class="meta">已暂停</span>`;
+      return card(`<div class="meta">${kind} · ${esc(fmt(r.updatedAt))}${r.expiresAt ? ' · 过期 ' + esc(fmt(r.expiresAt)) : ''}</div>
+        <div><b>${esc(r.title)}</b></div>
+        <div>${esc(r.detail || '')}</div>
+        ${ev.quote ? `<div class="meta">原话：${esc(ev.quote)}</div>` : ''}
+        <div style="margin-top:8px;display:flex;gap:8px">${acts}</div>`);
+    }).join('') : '<div>现在没有开着的挂念。</div>';
+
+    bbox.innerHTML = beliefs.length ? beliefs.map((r) => {
+      const ev = (r.evidence || []).at(-1) || {};
+      return card(`<div class="meta">${esc(r.status || '')} · 置信 ${r.confidence != null ? Number(r.confidence).toFixed(2) : '—'}</div>
+        <div>${esc(r.text || '')}</div>
+        ${ev.quote ? `<div class="meta">原话：${esc(ev.quote)}</div>` : ''}
+        <div style="margin-top:8px"><button class="btn" data-col="beliefs" data-act="reject" data-id="${esc(r.id)}" type="button">驳回</button></div>`);
+    }).join('') : '<div>现在没有待验证的认识。</div>';
+
+    document.querySelectorAll('#section-concerns button[data-act]').forEach((btn) => btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const r = await api('/api/continuity', 'POST', { collection: btn.dataset.col, id: btn.dataset.id, action: btn.dataset.act });
+        if (!r.ok) throw new Error(r.error || '操作失败');
+        await loadConcerns();
+      } catch (e) {
+        showConsoleToast('操作失败：' + e.message);
+        btn.disabled = false;
+      }
+    }));
+  } catch (e) {
+    box.textContent = '读取失败：' + e.message;
+    bbox.textContent = '';
+  }
+}
+document.getElementById('concernsRefresh')?.addEventListener('click', () => loadConcerns());
+
 // Presentation layer: keep every existing control mounted so drafts and API contracts survive navigation.
 // Retired bookmarks return to a working page. No retired learner API is queried.
 if(location.hash==='#slang')history.replaceState({},'',location.pathname+location.search+'#overview');
@@ -3814,6 +3959,8 @@ const consolePages = {
   'social-v2': ['二代仿真', '自主参与，恰到好处。', '管理 AI 的工具、唤醒与发言节奏。展开需要调整的分组，修改后保存参数。'],
   'social-v1': ['一代仿真', '为自然对话，设定合适的节奏。', '调整参与概率、活跃周期和分条发送；所有配置项完整保留。'],
   usage: ['令牌与花费', '每一次思考，都算得清楚。', '实时查看 AI 的 token 消耗与花费，可下钻到每个群、每个好友、每一轮对话。'],
+  'memory-audit': ['记忆抽检', '她记下的，是不是你说过的。', '每天抽几条记忆对照原话；可疑的可以降为“待核对”或忽略，不会动原话。'],
+  concerns: ['挂念与认识', '她心里挂着什么。', '待办会自然提；惦记只做底色。认识都可能是错的，可驳回。'],
   access: ['访问与安全', '明确边界，安心连接。', '管理允许对话的对象、管理员权限与控制台访问凭证。'],
   operations: ['调试与运维', '照看连接，也照看日常。', '测试消息、引导 AI，或维护桥接进程与会话工作区。'],
   reference: ['工具参考', '每一种能力，都清晰可见。', '查看桥接提供给 DSH 的 MCP 工具与用途。']
@@ -3845,6 +3992,8 @@ function setConsolePage(page, { updateHash = true, focus = false, target = '' } 
   closeConsoleSearch();
   // 语音库按需加载：进入二代仿真页时才探测（避免每次开控制台都压网关）。
   if (page === 'social-v2' && typeof loadVoiceLibrary === 'function') loadVoiceLibrary();
+  if (page === 'memory-audit' && typeof loadMemoryAudit === 'function') loadMemoryAudit();
+  if (page === 'concerns' && typeof loadConcerns === 'function') loadConcerns();
   if (focus) {
     document.getElementById('mainContent').focus({ preventScroll: true });
     document.getElementById(target || 'mainContent')?.scrollIntoView({ block: 'start', behavior: 'instant' });

@@ -1,4 +1,4 @@
-﻿// Pure policy + bounded background queue. Never sends messages to QQ.
+// Pure policy + bounded background queue. Never sends messages to QQ.
 import { coveragePrompt, parseCoverage } from './memory-coverage.mjs';
 import { ReviewMemo } from './confirmation-review.mjs';
 import { createHash } from 'node:crypto';
@@ -67,8 +67,12 @@ export function memoryAdmission(key, text, { enabled=true, directedAtSelf=false,
   return {queue:directedAtSelf || ['semantic','signals'].includes(policy)};
 }
 
-export function parseMemoryCommand(text) {
-  const s = String(text || '').trim().replace(/^(?:大肥鱼|肥鱼)[，,:：\s]*/, '').replace(/[。！!]+$/, '');
+export function parseMemoryCommand(text, { names = [] } = {}) {
+  // 2026-11-01：旧的「大肥鱼/肥鱼，」前缀写死已删；自称由调用方传入（socialV2.selfNames）。
+  const esc = (n) => String(n ?? '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const prefix = names.map(esc).filter(Boolean).join('|');
+  const raw = String(text || '').trim();
+  const s = (prefix ? raw.replace(new RegExp(`^(?:${prefix})[，,:：\\s]*`), '') : raw).replace(/[。！!]+$/, '');
   if (/^(?:查看(?:我的)?记忆|看看你记住了什么|你记得我什么|我的记忆)$/.test(s)) return {action:'list'};
   let m = s.match(/^(?:忘记|忘掉|删除记忆)[：:\s]*(.+)$/);
   if (m) return {action:'remove',query:m[1].trim()};
@@ -137,6 +141,12 @@ export function memoryCandidates(output, messages, now = Date.now(), related = n
     const src = messages.find(m => String(m.id) === String(row.source_id));
     const quote = typeof row.quote === 'string' ? row.quote.trim() : '';
     if (!src || !src.userId || !quote || quote.length > 200 || !src.text.includes(quote)) throw new Error('记忆条目缺少有效的原文证据');
+    // 2026-11-02 元讨论守卫：像「那边提取出的是我自己做红糖馒头」这种句子，quote 确实是原文子串、
+    // 所有校验都过，但它是在描述“别人/系统怎么记录的”，不是本人的陈述。只要 quote 紧跟在
+    // 「提取出的是 / 识别成 / 写成 / 记成…」这类说法后面，就当转述丢掉，避免把复述的假事实入库。
+    const quoteAt = src.text.indexOf(quote);
+    const lead = src.text.slice(Math.max(0, quoteAt - 24), quoteAt);
+    if (/(?:提取出的是|识别成|识别为|抽取成|抽取为|记成|记为|写成|写为|记录成|记录为|理解成|当成|当是|说成)[，,：:、\s]*$/.test(lead)) return [];
     if (!['preference', 'habit', 'plan', 'episode'].includes(row.kind)) throw new Error('记忆条目种类无效');
     const assessment = row.assessment;
     if (!assessment || !['self','other','uncertain'].includes(assessment.subject) || !['asserted','quoted','hypothetical','joke','uncertain'].includes(assessment.mode) || typeof assessment.sensitive !== 'boolean') throw new Error('记忆条目缺少事实范围判断');
@@ -150,6 +160,18 @@ export function memoryCandidates(output, messages, now = Date.now(), related = n
     const explicitTask = row.kind === 'plan' && /(?:记[为成]|加入|放[进入])待办|完成前.{0,4}(?:记住|别忘)/.test(src.text);
     const tier = confirmed && explicitCore ? 'core' : confirmed && explicitTask ? 'task' : 'normal';
     const aspect = String(row.aspect || '').replace(/[^\p{L}\p{N}_.-]/gu, '').slice(0, 40);
+    // 2026-11-02 动词一致性：真实反馈里出现过「我买了红糖馒头」被记成「主人做了红糖馒头」。
+    // 归一化字段（fact）是模型改写出来的，和原文动词不一致时宁可不要这个字段，
+    // 正文仍然是逐字 quote，不会因此丢掉真实事实。
+    // 注意排除「非自制」这类否定写法，避免把「购买(非自制)」误判成「自制」。
+    const MAKE_RE = /(?<![非并不未])(?:自制|自己做|做了|下厨|煮了|炒了|蒸了|烤了|包了)/;
+    const BUY_RE = /(?:买了|购买|购入|点外卖|叫了外卖)/;
+    let fact = row.fact && typeof row.fact === 'object' ? row.fact : undefined;
+    if (fact) {
+      const claim = `${fact.attribute ?? ''} ${fact.value ?? ''}`;
+      const mismatch = (MAKE_RE.test(claim) && !MAKE_RE.test(quote)) || (BUY_RE.test(claim) && !BUY_RE.test(quote));
+      if (mismatch) fact = undefined;
+    }
     const semantic = {};
     if (related !== null) {
       const target = related.find(r => r.id === row.related_id && String(r.subject_id) === String(src.userId));
@@ -166,7 +188,7 @@ export function memoryCandidates(output, messages, now = Date.now(), related = n
       // without promoting a model extraction to a verified personal fact.
       memory_kind: tier === 'normal' && !['replace','conflict'].includes(semantic.relation)
         && (row.kind === 'episode' || (certainSelf && quote === src.text)) ? 'experience' : 'fact',
-      ...semantic, fact: row.fact, related_fact: row.related_fact, explicit_update: row.explicit_update === true, update_evidence: row.update_evidence, subject_id: src.userId, source_id: src.id, source_text: src.text,
+      ...semantic, fact, related_fact: row.related_fact, explicit_update: row.explicit_update === true, update_evidence: row.update_evidence, subject_id: src.userId, source_id: src.id, source_text: src.text,
       source_time: src.time / 1000, confidence, confirmed,
       fact_key: aspect && ['preference', 'habit'].includes(row.kind) ? `${row.kind}.${aspect}` : '',
       tags: row.kind, tier, importance: tier === 'core' ? 1 : row.kind === 'preference' ? 0.7 : 0.5,
@@ -191,8 +213,13 @@ export function recallBlock(rows, budget = 2400) {
 }
 
 export class DailyMemory {
-  constructor({ extract, verify=extract, save, load, allowed, enabled, log, request, autoConfirmFor, lightContext=()=>[], onLightNotes=()=>{}, modelSignature=()=>null, maxCallsPerDay = 0, queueMax = 5000, priorityKey = '', groupMaxCallsPerDay = 20, sourceBlocked=()=>false, sourceRevision=()=>null, analysisMemo=null }) {
+  constructor({ extract, verify=extract, save, load, allowed, enabled, log, request, autoConfirmFor, lightContext=()=>[], onLightNotes=()=>{}, modelSignature=()=>null, maxCallsPerDay = 0, queueMax = 5000, priorityKey = '', groupMaxCallsPerDay = 20, batchSize = 12, batchMaxWaitMs = 90000, batchMaxChars = 6000, sourceBlocked=()=>false, sourceRevision=()=>null, analysisMemo=null }) {
     Object.assign(this, { extract, verify, save, allowed, enabled, log, request, autoConfirmFor, lightContext, onLightNotes, sourceBlocked });
+    // 2026-11-02：批量参数可配。原来写死「满 12 条或等 90 秒就整理」，一天能跑 140+ 次模型调用；
+    // 调大阈值可以把多次小批量合成一次（记忆入库延迟随之变长）。
+    this.batchSize = Math.min(40, Math.max(1, Number(batchSize) || 12));
+    this.batchMaxWaitMs = Math.min(15 * 60000, Math.max(15000, Number(batchMaxWaitMs) || 90000));
+    this.batchMaxChars = Math.min(20000, Math.max(1000, Number(batchMaxChars) || 6000));
     this.modelSignature=modelSignature;this.sourceRevision=sourceRevision;
     // Exact successful results may be persisted by the injected receipt store; never extend expiry on a hit.
     this.analysisMemo=analysisMemo||new ReviewMemo({maxEntries:16,ttlMs:1800000});
@@ -277,7 +304,7 @@ export class DailyMemory {
             q=q.filter(m=>!(this.state.retries[key]?.outcomeUnknownIds||[]).includes(String(m.id)));
             if (key.startsWith('group:') && this.groupMaxCallsPerDay > 0 && (this.state.groupCalls[key] || 0) >= this.groupMaxCallsPerDay) return false;
             q=q.filter(m=>{if(!this.sourceBlocked(key,m))return true;if(!this.state.processing.some(r=>r.key===key&&r.id===String(m.id)&&r.status==='source-paused'))this.mark(key,m,'source-paused',{reason:'来源已撤回或暂不可核验，暂停提取；队列保留'});return false;});
-            return this.allowed(key) && q.some(m=>m.text.length<=12000) && (q.some(m=>(this.state.progress[key]?.[String(m.id)]||[]).length) || q.length >= 12 || Date.now() - q[q.length-1].time > 90000);
+            return this.allowed(key) && q.some(m=>m.text.length<=12000) && (q.some(m=>(this.state.progress[key]?.[String(m.id)]||[]).length) || q.length >= this.batchSize || Date.now() - q[q.length-1].time > this.batchMaxWaitMs);
           });
           // 老大私聊优先：同一时间只处理一批，先把他的那一格清掉。
           entries.sort((a, b) => (b[0] === this.priorityKey ? 1 : 0) - (a[0] === this.priorityKey ? 1 : 0));
@@ -291,8 +318,8 @@ export class DailyMemory {
     for(const message of q) {
       if(this.sourceBlocked(key,message)){if(!this.state.processing.some(r=>r.key===key&&r.id===String(message.id)&&r.status==='source-paused'))this.mark(key,message,'source-paused',{reason:'来源已撤回或暂不可核验，暂停提取；原队列保留，撤销纠正后可继续'});continue;}
       if(heldIds.has(String(message.id))||message.text.length>12000)continue;
-      if(messages.length && characters+message.text.length>6000)break;
-      messages.push(message);characters+=message.text.length;if(messages.length>=12)break;
+      if(messages.length && characters+message.text.length>this.batchMaxChars)break;
+      messages.push(message);characters+=message.text.length;if(messages.length>=this.batchSize)break;
     }
     if(!messages.length){this.flushSave();return {ok:false,reason:q.some(m=>this.sourceBlocked(key,m))?'source-paused':heldIds.size?'retry-backoff':'needs-review'};}
     const progress = this.state.progress[key] ||= {};

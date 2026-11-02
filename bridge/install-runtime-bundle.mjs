@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.10.1";
+export const RUNTIME_VERSION = "0.11.0";
 const templates = {
   "reference-assembly.mjs": "reference-assembly.mjs",
   "context-efficiency.mjs": "context-efficiency.mjs",
@@ -49,6 +49,22 @@ const templates = {
   "turn-traces.mjs": "turn-traces.mjs",
   "emotion-context.mjs": "emotion-context.mjs",
   "appraisal-budget.mjs": "appraisal-budget.mjs",
+  "initiative.mjs": "initiative.mjs",
+  "openness-drift.mjs": "openness-drift.mjs",
+  "shared-activities.mjs": "shared-activities.mjs",
+  "repair.mjs": "repair.mjs",
+  "linkage-gate.mjs": "linkage-gate.mjs",
+  "explore.mjs": "explore.mjs",
+  "narrative.mjs": "narrative.mjs",
+  "rhythm.mjs": "rhythm.mjs",
+  "taste.mjs": "taste.mjs",
+  "self-memory.mjs": "self-memory.mjs",
+  "self-migrate.mjs": "self-migrate.mjs",
+  "goals.mjs": "goals.mjs",
+  "associations.mjs": "associations.mjs",
+  "persona.js": "persona.js",
+  "state-acl.mjs": "state-acl.mjs",
+  "sensitive.js": "sensitive.js",
 };
 const digest = (b) => crypto.createHash("sha256").update(b).digest("hex");
 const sourceHash = (file) =>

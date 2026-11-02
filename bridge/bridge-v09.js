@@ -1,5 +1,10 @@
 import {AnalysisReceipts} from './analysis-receipts.mjs';
-import {assembleReferences} from './reference-assembly.mjs';
+import {assembleReferences,summarizeAssembly} from './reference-assembly.mjs';
+import {gateLinkage} from './linkage-gate.mjs';
+import {computeInitiatives} from './initiative.mjs';
+import {evaluateOpennessDrift} from './openness-drift.mjs';
+import {normalizeShared,proposeShared,updateShared,recentSharedLine,activeShared} from './shared-activities.mjs';
+import {detectCorrection,repairHint,addRepair,lessonLine,normalizeRepairs} from './repair.mjs';
 import {ContextEfficiency,rotationBlockers} from './context-efficiency.mjs';
 import {ChatClarifications} from './chat-clarification.mjs';
 import {SourceValidity} from './source-validity.mjs';
@@ -10,7 +15,16 @@ import {EmotionScopes,emotionScope} from './emotion-scopes.mjs';
 import {SelfReference} from './self-reference.mjs';
 import {SourceRetention,sourceOwners} from './source-retention.mjs';
 import {ReferenceReuse} from './reference-reuse.mjs';
-import {GrowthClassroom} from './growth-classroom.mjs';
+import {GrowthClassroom,renderNotebook,renderCourseRules} from './growth-classroom.mjs';
+import {buildAuditPrompt,parseAuditVerdicts} from './memory-audit.mjs';
+import {normalizeGoals,applyGoalHits,goalLine,goalPublic,revertGoalEvent,goalView} from './goals.mjs';
+import {rhythmConfig,rhythmView,rhythmPromptLine} from './rhythm.mjs';
+import {planSelfMigration,commitSelfLedger,reconcileSelf,stableSelfKey} from './self-migrate.mjs';
+import {normalizeTaste,tastePage,recordExploration,resetTaste} from './taste.mjs';
+import {normalizeSelfMemory,selfMemoryPage,addSelfMemory} from './self-memory.mjs';
+import {buildAssociations} from './associations.mjs';
+import {exploreConfig,pickTopic,searchUrl,viewUrl,parseSearchResults,parseVideoView,impressionPrompt,parseImpressions,normalizeExplore,budgetState,recordRun,pickCandidates,playerUrl,subtitleRefs,parseSubtitleBody,exploreDecision,nextFocus} from './explore.mjs';
+import {narrativeConfig,normalizeNarrativeState,currentNarrative,narrativeSources,narrativeSourcePool,narrativeDue,narrativePrompt,parseNarrativeOutput,storeNarrative,rollbackNarrative,narrativePromptLine,narrativeUsage,narrativeBudget,recordNarrativeRun} from './narrative.mjs';
 import {SharingPrivacy} from './sharing-privacy.mjs';
 import {ExpressionTeacher} from './expression-teacher.mjs';
 import {DialogueWindow} from './interaction-context.mjs';
@@ -52,7 +66,6 @@ import { DIARY_DEFAULTS, buildDiaryPrompt, collectDiaryMaterial, dayRange, diary
 import { execFileSync } from 'node:child_process';
 import yaml from 'js-yaml';
 import { extractPresetPrefix, presetPromptBlockers, presetPromptWarnings, renderPresetPromptYaml } from './preset-prompt.js';
-import { GEN1_ROLE_LINE_RE, parseRoleSections, roleCharStats, roleSectionReport, selectRoleText } from './role-card.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
 import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken } from './dsh-client.js';
@@ -90,6 +103,7 @@ const SOCIAL_V2_FILE = path.join(STATE_DIR, 'social-v2.json');
 const PERSONA_FILE = path.join(DSH_HOME, 'feiyu-memory-console', 'persona.json');
 const EMOTION_FILE = path.join(DSH_HOME, 'feiyu-memory-console', 'emotion.json');
 const CHAT_PERSONA_FILE = path.join(DSH_HOME, 'feiyu-memory-console', 'chat-persona.json');const EPISODE_FILE = path.join(DSH_HOME, 'feiyu-memory-console', 'episodes.json');
+const NARRATIVE_FILE = path.join(STATE_DIR, 'narrative.json');
 const PRIVATE_VAULT_FILE = path.join(DSH_HOME, 'feiyu-memory-console', 'private-diary.vault.json');
 const PRIVATE_SECRET_FILE = path.join(STATE_DIR, 'private-diary.secret.json');
 const BRIDGE_CAPABILITIES = [
@@ -279,131 +293,9 @@ function readActivityTail(n) {
   }
 }
 
-function listRoles() {
-  try {
-    return fs.readdirSync(path.join(ROOT, 'roles'))
-      .filter((f) => f.endsWith('.md') && f !== 'README.md')
-      .map((f) => f.slice(0, -3))
-      .sort((a, b) => a.localeCompare(b, 'zh-CN'));
-  } catch {
-    return [];
-  }
-}
-
-// ── 人格文件读写 ────────────────────────────────────────────────────────────
-// 人格提示词 = roles/<名称>.md，由桥接在每条消息前注入（热生效，无需重启 DSH）。
-const ROLES_DIR = path.join(ROOT, 'roles');
-const ROLE_NAME_MAX = 40;
-const ROLE_CONTENT_MAX_BYTES = 64 * 1024;
-// 注入上限：**按模式筛完小节之后**再截断，避免另一模式的专属内容白白占掉预算。
-// 默认 6000（沿用历史值，是每条约 4~6k token 的成本护栏），可用 config.json 的
-// role.maxInjectChars 调整（1000~20000）；启动时由 applyRoleInjectLimit() 写入。
-const ROLE_INJECT_MAX_CHARS_DEFAULT = 6000;
-let roleInjectMaxChars = ROLE_INJECT_MAX_CHARS_DEFAULT;
-function applyRoleInjectLimit(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return ROLE_INJECT_MAX_CHARS_DEFAULT;
-  return Math.min(20000, Math.max(1000, Math.round(n)));
-}
-const ROLE_RESERVED_NAMES = new Set(['README']);
-// Windows 保留设备名：roles/CON.md 这类路径会被系统当成设备而不是文件，
-// 写入会失败甚至挂起，因此在人格名层面直接拒绝。
-const WINDOWS_RESERVED_NAMES = new Set([
-  'CON', 'PRN', 'AUX', 'NUL',
-  ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
-  ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`),
-]);
-
-function roleFilePath(name) {
-  return path.join(ROLES_DIR, name + '.md');
-}
-
-function firstMeaningfulLine(content) {
-  for (const line of String(content ?? '').split('\n')) {
-    const t = line.replace(/^#+\s*/, '').replace(/^[-*]\s*/, '').trim();
-    if (t) return t.slice(0, 80);
-  }
-  return '';
-}
-
-function roleWarnings(content, mode = 'v2') {
-  const text = String(content ?? '');
-  const warnings = [];
-  const stats = roleCharStats(text);
-  const injected = mode === 'v1' ? stats.v1 : stats.v2;
-  if (injected > roleInjectMaxChars) {
-    warnings.push(`超出注入上限：当前模式实际注入 ${injected} 字符，只有前 ${roleInjectMaxChars} 字符会进入提示词（可在配置里调 role.maxInjectChars）`);
-  }
-  // 只在「没有用模式标记分开」的小节上提示兜底过滤，避免对已正确标记的卡片误报。
-  const untagged = parseRoleSections(text)
-    .filter((section) => section.mode === 'all')
-    .map((section) => section.lines.join('\n'))
-    .join('\n');
-  if (GEN1_ROLE_LINE_RE.test(untagged)) {
-    warnings.push('未标记的小节里含一代仿真专用指令（[SILENT] / 空格分句 / 自动转发…），二代下这些行会被兜底过滤——建议把它们移到带 〔一代〕 标记的小节里');
-  }
-  if (/回复示例/.test(untagged) && /[\u4e00-\u9fff]\s+[\u4e00-\u9fff]/.test(untagged)) {
-    warnings.push('“回复示例”节里的中文空格会被自动改写成逗号（二代不用空格分条），建议直接写逗号，或把该节标记为 〔一代〕');
-  }
-  return warnings;
-}
-
-function roleSummaries() {
-  return listRoles().map((name) => {
-    const file = roleFilePath(name);
-    try {
-      const stat = fs.statSync(file);
-      const content = fs.readFileSync(file, 'utf8');
-      const stats = roleCharStats(content);
-      return {
-        name,
-        bytes: stat.size,
-        chars: content.length,
-        lines: content.split('\n').length,
-        mtime: stat.mtimeMs,
-        excerpt: firstMeaningfulLine(content),
-        // 两种模式各自实际会注入多少（已按 〔一代〕/〔二代〕 标记筛过）
-        injectedV1: Math.min(stats.v1, roleInjectMaxChars),
-        injectedV2: Math.min(stats.v2, roleInjectMaxChars),
-        charsV1: stats.v1,
-        charsV2: stats.v2,
-        hasModeTags: stats.v1Only > 0 || stats.v2Only > 0,
-        truncated: stats.v1 > roleInjectMaxChars || stats.v2 > roleInjectMaxChars,
-        warnings: roleWarnings(content).length,
-      };
-    } catch {
-      return { name, bytes: 0, chars: 0, lines: 0, mtime: 0, excerpt: '', injectedV1: 0, injectedV2: 0, charsV1: 0, charsV2: 0, hasModeTags: false, truncated: false, warnings: 0 };
-    }
-  });
-}
-
-function validateRoleName(raw) {
-  const name = sanitizeRoleName(raw);
-  if (!name) throw new Error('人格名不能为空（仅限中文 / 字母 / 数字 / 横线）');
-  if (name.length > ROLE_NAME_MAX) throw new Error(`人格名过长（最多 ${ROLE_NAME_MAX} 字）`);
-  if (ROLE_RESERVED_NAMES.has(name)) throw new Error(`「${name}」是保留名称`);
-  if (WINDOWS_RESERVED_NAMES.has(name.toUpperCase())) throw new Error(`「${name}」是系统保留名称（Windows 设备名），请换一个`);
-  return name;
-}
-
-function validateRoleContent(raw) {
-  const content = String(raw ?? '').replace(/\r\n/g, '\n').trim();
-  if (!content) throw new Error('人格内容不能为空');
-  const bytes = Buffer.byteLength(content, 'utf8');
-  if (bytes > ROLE_CONTENT_MAX_BYTES) {
-    throw new Error(`人格内容过长（${(bytes / 1024).toFixed(1)} KB，上限 ${ROLE_CONTENT_MAX_BYTES / 1024} KB）`);
-  }
-  return content;
-}
-
-function readRoleContent(name) {
-  return fs.readFileSync(roleFilePath(name), 'utf8');
-}
-
-function writeRoleContent(name, content) {
-  fs.mkdirSync(ROLES_DIR, { recursive: true });
-  atomicWriteText(roleFilePath(name), content + (content.endsWith('\n') ? '' : '\n'));
-}
+// 2026-11-01：人格卡（roles/<名称>.md）整体下线——身份改由「自我参考」维护
+// （roles/自我参考.md 只是说明文件，真正的状态在 state/self-reference.json）。
+// 旧卡已移到 roles/archive/，桥接不再读写它们。
 
 // ── 二代仿真预设提示词（「仿真」层）────────────────────────────────────────
 // 与「人格」层的边界：
@@ -669,15 +561,13 @@ function appendActivity(line) {
   appendActivityLog(`[${localClock()}] ${redactSensitiveText(String(line).replace(/[\r\n]+/g, ' '))}\n`);
 }
 
-// 读取角色/模式状态：{"role": "傲娇助手", "mode": "active"|"silent"}
+// 只保留「静默/活跃」这一个开关。人格卡已下线（身份走自我参考），role 字段恒为 null。
 function readRoleState() {
-  return readJsonSafe(ROLE_STATE_FILE, { role: null, mode: 'active' });
+  const raw = readJsonSafe(ROLE_STATE_FILE, { mode: 'active' });
+  return { role: null, mode: raw?.mode === 'silent' ? 'silent' : 'active' };
 }
-function writeRoleState(role, mode) {
-  atomicWriteJson(ROLE_STATE_FILE, { role: role ?? null, mode: mode ?? 'active' });
-}
-function sanitizeRoleName(name) {
-  return String(name ?? '').replace(/[^\w\u4e00-\u9fff-]/g, '');
+function writeRoleState(_role, mode) {
+  atomicWriteJson(ROLE_STATE_FILE, { role: null, mode: mode === 'silent' ? 'silent' : 'active' });
 }
 
 // 管理员 QQ（ownerQQ）规范化：空值=未设置；必须是正整数 QQ 号。
@@ -783,7 +673,7 @@ function loadConfig() {
       surrenderProbability: 0,        // 已弃用：桥接不再直接生成退让短句（避免割裂），保留字段兼容旧配置
       // 摘要与展示
       maxReplyChars: 500,             // 单条 QQ 消息安全长度上限（防 AI 出 bug；分句交给 AI 用空格控制）
-      mustReplyKeywords: ['deepseek', '小鲸鱼', '大肥鱼', '鲸鱼', 'd指导', '在吗'],
+      mustReplyKeywords: ['deepseek', '小崽神', '崽崽', 'd指导', '在吗'],
       // 真人式多消息分条发送：按空格分句，AI 用空格表示“这里要分成下一条”
       burstEnabled: true,             // 总开关：是否允许按空格拆成多条 QQ 消息
       burstIntervalMinMs: 1000,       // 条间随机间隔下限（毫秒）
@@ -839,7 +729,7 @@ function loadConfig() {
         recommendedSleepMinMs: 300000,
         recommendedSleepMaxMs: 7200000,
         recommendedProbability: 0.05,
-        recommendedKeywords: ['小鲸鱼', 'DeepSeek', 'deepseek', 'DS', 'D老师', 'd老师', 'D指导', 'd指导', 'D师傅', 'd师傅', '深度求索', '大肥鱼', '鲸鱼', 'DeepSeek V3', 'DeepSeek R1', 'R1'],
+        recommendedKeywords: ['小崽神', '崽崽', 'DeepSeek', 'deepseek', 'DS', 'D老师', 'd老师', 'D指导', 'd指导', 'D师傅', 'd师傅', '深度求索', 'DeepSeek V3', 'DeepSeek R1', 'R1'],
         recommendedAtMention: true,
         recommendedNameMention: true,
         recommendedQuestion: true,
@@ -1024,6 +914,7 @@ function loadConfig() {
     owner: 1.1, group: 1, private: 0.8,
     ...(cfg.socialV2.emotion.weights ?? {}),
   };
+  cfg.socialV2.narrative = narrativeConfig(cfg.socialV2?.narrative);
   cfg.socialV2.ownerTitle = normalizeOwnerTitle(cfg.socialV2.ownerTitle);
 
   // socialV2.voice：语音发送（把准备好的音频文件当 QQ 语音发出去）。
@@ -1091,12 +982,6 @@ function loadConfig() {
     cfg.dsh.reasoningEffort = REASONING_EFFORT_DEFAULT;
   }
 
-  // 人格卡注入上限（字符）。历史硬编码 6000，现在可配：每条约 4~6k token 的成本护栏。
-  cfg.role = { maxInjectChars: ROLE_INJECT_MAX_CHARS_DEFAULT, ...(file.role ?? {}) };
-  roleInjectMaxChars = applyRoleInjectLimit(cfg.role.maxInjectChars);
-  if (roleInjectMaxChars !== cfg.role.maxInjectChars) {
-    log(`人格注入上限已按范围校正为 ${roleInjectMaxChars} 字符（配置值 ${cfg.role.maxInjectChars}，允许 1000~20000）`);
-  }
 
   return cfg;
 }
@@ -1459,11 +1344,371 @@ async function main() {
     log(`[emotion] 迁移前备份：${backup}`);
   }
   let emotionState = normalizeEmotion(storedEmotion);
+  // P0 目标层：四个驱力的强度，天~周级慢变，读时按半衰期向基线回落。
+  const GOALS_FILE = path.join(STATE_DIR, 'goals.json');
+  let goalsState = normalizeGoals(readJsonSafe(GOALS_FILE, null));
+  let narrativeState = normalizeNarrativeState(readJsonSafe(NARRATIVE_FILE, null));
+  const NARRATIVE_USAGE_FILE = path.join(STATE_DIR, 'narrative-usage.json');
+  let narrativeUsageState = narrativeUsage(readJsonSafe(NARRATIVE_USAGE_FILE, null));
+  // scope=self：桥接内部专用。memvec 要求带 x-memvec-self 头（令牌文件只在本机）。
+  const SELF_LEDGER_FILE = path.join(STATE_DIR, 'self-migration.json');
+  function readSelfToken() {
+    try { return fs.readFileSync(path.join(os.homedir(), '.dsh', 'memvec', 'self-token'), 'utf8').trim(); } catch { return ''; }
+  }
+  async function migrateSelfMemories() {
+    const file = path.join(STATE_DIR, 'self-memory.json');
+    if (!fs.existsSync(file)) return { ok: false, reason: 'no-file' };
+    const token = readSelfToken();
+    if (!token) return { ok: false, reason: 'no-token' };
+    const ledger = readJsonSafe(SELF_LEDGER_FILE, { ids: [] });
+    const sm = normalizeSelfMemory(readJsonSafe(file, null));
+    const pending = planSelfMigration(sm.items, ledger);
+    if (!pending.length) return { ok: true, ...reconcileSelf(sm.items, ledger), newlyMigrated: 0 };
+    const done = [];
+    for (const item of pending) {
+      try {
+        await memoryRequest('/add', {
+          text: item.text, scope: 'self', subject_id: 'self', tags: 'self', importance: 0.4,
+          confidence: item.confidence, memory_kind: 'fact', confirmed: true, tier: 'normal',
+          source_id: item.key, source_text: item.excerpt, source_time: item.at / 1000,
+        }, 20000, { 'x-memvec-self': token });
+        done.push(item.key);
+      } catch (error) {
+        log('[self] 迁移失败：', error?.message ?? error);
+      }
+    }
+    if (done.length) atomicWriteJson(SELF_LEDGER_FILE, commitSelfLedger(ledger, done));
+    return { ok: true, ...reconcileSelf(sm.items, readJsonSafe(SELF_LEDGER_FILE, ledger)), newlyMigrated: done.length };
+  }
+  setTimeout(() => {
+    void migrateSelfMemories().then((r) => { if (r?.newlyMigrated) log(`[self] 已迁移 ${r.newlyMigrated} 条自我记忆`); }).catch((e) => log('[self] 迁移异常：', e?.message ?? e));
+  }, 8000);
+  let narrativeRunning = false;
+  let exploreRunning = false;
+  // 拾光 canary：默认关；开了也每天最多一次，跳过不补跑。
+  const exploreTimer = setInterval(() => {
+    void (async () => {
+      try {
+        const conf = exploreConfig(cfg.socialV2?.explore);
+        if (!conf.enabled) return;
+        if (narrativeRunning) return;
+        const ex = normalizeExplore(readJsonSafe(path.join(STATE_DIR, 'explore.json'), null));
+        const last = ex.runs.at(-1);
+        const budget = budgetState(ex.runs);
+        // 更像人的节奏：日内上限照常，但两次之间随机间隔 45–150 分钟，并偶尔跳过。
+        if ((Number(budget.runsToday) || 0) >= Number(conf.maxPerDay || 1)) return;
+        const lastAt = Number(last?.at) || 0;
+        const gapMinutes = 45 + Math.random() * 105;
+        if (lastAt && Date.now() - lastAt < gapMinutes * 60000) return;
+        if (Math.random() < 0.25) return;
+        const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+        const ownerState = ownerKey ? getSocialV2State(ownerKey) : null;
+        const decision = exploreDecision({
+          conf,
+          budget,
+          now: Date.now(),
+          lastActivityAt: ownerState?.lastIncomingAt || 0,
+          goals: goalView(goalsState),
+          busy: !dshReady,
+          running: exploreRunning,
+        });
+        if (!decision.run) return;
+        const port = cfg.consolePort || 3100;
+        const url = `http://127.0.0.1:${port}/api/explore/run${consoleToken ? `?token=${encodeURIComponent(consoleToken)}` : ''}`;
+        const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+        const data = await res.json().catch(() => ({}));
+        log(`[explore] canary -> ${res.status} ${data?.entry?.ok ? 'ok' : (data?.entry?.reason || data?.error || '')}`);
+      } catch (error) {
+        log('[explore] canary 失败', error?.message ?? error);
+      }
+    })();
+  }, 15 * 60 * 1000);
+  exploreTimer.unref?.();
+  // P1 自我驱动决策层：只记录“现在想做什么”，不执行。
+  const INITIATIVE_LOG = path.join(STATE_DIR, 'initiative.jsonl');
+  const CONTACT_OUTBOX = path.join(STATE_DIR, 'contact-outbox.json');
+  function checkContactReceipt() {
+    try {
+      const box = readJsonSafe(CONTACT_OUTBOX, null);
+      if (!box || !Number(box.at)) return;
+      const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+      const st = ownerKey ? getSocialV2State(ownerKey) : null;
+      const lastIn = Number(st?.lastIncomingAt) || 0;
+      const since = Date.now() - Number(box.at);
+      const apply = (dValence, dRelated) => {
+        try {
+          if (emotionState?.state) {
+            emotionState.state.valence = Math.max(-1, Math.min(1, Number(emotionState.state.valence || 0) + dValence));
+            if (emotionState.mood) emotionState.mood.valence = Math.max(-1, Math.min(1, Number(emotionState.mood.valence || 0) + dValence));
+          }
+          const rel = goalsState?.goals?.relatedness;
+          if (rel) {
+            rel.weight = Math.max(0.3, Math.min(1, Number(rel.weight || 0.5) + dRelated));
+            rel.updatedAt = Date.now();
+          }
+          saveEmotionState();
+          saveGoalsState();
+        } catch {}
+      };
+      if (!box.repliedAt && lastIn > Number(box.at)) {
+        box.repliedAt = lastIn;
+        atomicWriteJson(CONTACT_OUTBOX, box);
+        apply(0.03, 0.02); // 回复后轻微回升
+        fs.appendFileSync(INITIATIVE_LOG, `${JSON.stringify({ at: Date.now(), type: 'contact-replied', sentAt: box.at, repliedAt: lastIn })}\n`);
+        return;
+      }
+      if (box.repliedAt) return;
+      // 没回：4h 轻微、12h 再说、24h 更明显；只降不崩，有下限。
+      const stages = [
+        { key: 'h1', ms: 1 * 3600 * 1000, dv: -0.02, dr: -0.005 },
+        { key: 'h4', ms: 4 * 3600 * 1000, dv: -0.04, dr: -0.01 },
+        { key: 'h12', ms: 12 * 3600 * 1000, dv: -0.05, dr: -0.02 },
+        { key: 'h24', ms: 24 * 3600 * 1000, dv: -0.05, dr: -0.03 },
+      ];
+      for (const stage of stages) {
+        if (since < stage.ms) continue;
+        if (box.stage === stage.key || (box.stages || []).includes(stage.key)) continue;
+        box.stages = [...(box.stages || []), stage.key];
+        box.stage = stage.key;
+        atomicWriteJson(CONTACT_OUTBOX, box);
+        apply(stage.dv, stage.dr);
+        fs.appendFileSync(INITIATIVE_LOG, `${JSON.stringify({ at: Date.now(), type: 'contact-unanswered', stage: stage.key, sentAt: box.at })}\n`);
+      }
+    } catch {}
+  }
+  let initiativeLastAt = 0;
+  let contactSentAt = 0;
+  let contactSentToday = 0;
+  let initiativeDay = '';
+  let initiativeCount = 0;
+  try {
+    const lines = fs.readFileSync(INITIATIVE_LOG, 'utf8').trim().split('\n').filter(Boolean);
+    const todayKey = new Date().toLocaleDateString('en-CA');
+    for (const line of lines.slice(-500)) {
+      const row = JSON.parse(line);
+      if (row.chosen) initiativeLastAt = Math.max(initiativeLastAt, Number(row.at) || 0);
+      if (new Date(Number(row.at) || 0).toLocaleDateString('en-CA') === todayKey) initiativeCount += 1;
+    }
+  } catch {}
+  function initiativeDecision() {
+    checkContactReceipt();
+    const conf = cfg.socialV2?.initiative || {};
+    if (conf.enabled === false) return { ok: false, reason: 'disabled' };
+    const todayKey = new Date().toLocaleDateString('en-CA');
+    if (todayKey !== initiativeDay) { initiativeDay = todayKey; initiativeCount = 0; }
+    if (initiativeCount >= Number(conf.maxPerDay || 12)) return { ok: false, reason: 'daily-cap' };
+    const goals = goalView(goalsState);
+    const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+    let concerns = [];
+    try { concerns = continuity.snapshot(ownerKey)?.concerns || []; } catch {}
+    const budget = budgetState(normalizeExplore(readJsonSafe(path.join(STATE_DIR, 'explore.json'), null)).runs);
+    let ownerState = null;
+    try { ownerState = ownerKey ? getSocialV2State(ownerKey) : null; } catch {}
+    const lastIncoming = Number(ownerState?.lastIncomingAt) || 0;
+    const ownerIdleHours = lastIncoming ? (Date.now() - lastIncoming) / 3600000 : 999;
+    const lastContactAt = Math.max(contactSentAt, Number(ownerState?.ownerContact?.lastAt) || 0);
+    const contactCountToday = contactSentToday;
+    const sharedActiveNow = Boolean(activeShared(sharedState));
+    const decision = computeInitiatives({ goals, concerns, now: Date.now(), lastAt: initiativeLastAt, budget, conf, ownerIdleHours, lastContactAt, contactCountToday, hasNewEvidence: false, sharedActive: sharedActiveNow, lastSharedAt: Number(sharedState?.lastProposedAt) || 0 });
+    const entry = {
+      at: decision.at,
+      chosen: decision.chosen,
+      reason: decision.reason,
+      quiet: decision.quiet,
+      candidates: decision.candidates,
+      goals,
+      concerns: concerns.filter((c) => ['open', 'paused'].includes(c.status)).length,
+      dryRun: decision.dryRun,
+    };
+    try { fs.appendFileSync(INITIATIVE_LOG, `${JSON.stringify(entry)}\n`); } catch {}
+    // 共同经历：选中 shared 时，挑最近看过的视频发一条“要不要一起看”。
+    if (conf.dryRun === false && decision.chosen === 'shared' && conf.allowShared !== false) {
+      void (async () => {
+        try {
+          const ownerQQ = Number(cfg.ownerQQ);
+          if (!ownerQQ) return;
+          const taste = normalizeTaste(readJsonSafe(path.join(STATE_DIR, 'taste.json'), null)).topics;
+          const topic = [...taste].sort((a, b) => (Number(b.lastSeenAt) || 0) - (Number(a.lastSeenAt) || 0))[0];
+          const ev = (topic?.evidence || []).slice(-1)[0];
+          if (!ev?.url) return;
+          const title = String(topic?.topic || ev.excerpt || '一个视频').slice(0, 30);
+          const msg = `要不要一起看这个？《${title}》 ${ev.url}`.slice(0, 120);
+          await bot.sendPrivateMessage(ownerQQ, msg);
+          const r = proposeShared(sharedState, { type: 'watch', title, url: ev.url });
+          if (r.ok) { sharedState = r.state; saveSharedState(); }
+          log('[shared] 已发出一起看提议');
+        } catch (error) { log('[shared] 提议失败', error?.message ?? error); }
+      })();
+    }
+    // P3b：选中 contact 且开启发送时，生成一条草稿并发私聊；默认关闭。
+    if (conf.dryRun === false && conf.contactSend === true && decision.chosen === 'contact') {
+      const ownerQQ = Number(cfg.ownerQQ);
+      const openConcern = concerns.find((x) => ['open', 'paused'].includes(x.status));
+      const reasonText = decision.candidates.find((x) => x.type === 'contact')?.reason === 'concern'
+        ? `有一件没放下的事${openConcern?.title ? `（${openConcern.title}）` : ''}`
+        : '很久没说话了';
+      const draftPrompt = [
+        '【场景】普通 QQ 私聊。给老大发一条主动消息，不超过 30 字。',
+        `想找他的理由：${reasonText}`,
+        '要求：像平时说话；不要提熬夜、催睡；不要解释你在做什么；不要写“记录/整理/草稿”这类词。',
+      ].join('\n');
+      void (async () => {
+        try {
+          const raw = await runHeadlessPrompt(draftPrompt, 60000, [], 'contact_draft');
+          let draft = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+          if (!draft || /熬夜|催睡|通宵/.test(draft)) { log('[initiative] 草稿不合适，跳过发送'); return; }
+          if (!ownerQQ) return;
+          await bot.sendPrivateMessage(ownerQQ, draft);
+          contactSentAt = Date.now();
+          contactSentToday += 1;
+          try {
+            fs.appendFileSync(INITIATIVE_LOG, `${JSON.stringify({ at: Date.now(), type: 'contact-sent', draft })}\n`);
+          } catch {}
+          log('[initiative] 已发送主动消息');
+        } catch (error) {
+          log('[initiative] 主动消息发送失败', error?.message ?? error);
+        }
+      })();
+    }
+    // P2：dryRun=false 且选中探索时，才真正触发一次探索。
+    if (conf.dryRun === false && decision.chosen === 'explore') {
+      const port2 = cfg.consolePort || 3100;
+      const actionToken = String(cfg.consoleToken || '').trim() || loadOrCreateConsoleToken();
+      void fetch(`http://127.0.0.1:${port2}/api/explore/run${actionToken ? `?token=${encodeURIComponent(actionToken)}` : ''}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+        .then(async (resp) => { log('[initiative] 探索触发', resp.status, String(await resp.text()).slice(0, 160)); })
+        .catch((error) => log('[initiative] 探索触发失败', error?.message ?? error));
+    }
+    if (decision.chosen) initiativeLastAt = decision.at;
+    initiativeCount += 1;
+    return { ok: true, ...decision };
+  }
+  const initiativeTimer = setInterval(() => {
+    try {
+      if (cfg.socialV2?.initiative?.enabled === false) return;
+      initiativeDecision();
+    } catch (error) { log('[initiative] 决策失败', error?.message ?? error); }
+  }, 15 * 60 * 1000);
+  initiativeTimer.unref?.();
+  // 慢通道：探索倾向 → 轮廓（连续两次满足才自动 +1，最多 +3，可回滚）。
+  const OPENNESS_FILE = path.join(STATE_DIR, 'persona-openness.json');
+  let opennessState = readJsonSafe(OPENNESS_FILE, { proposals: [], lastProposalAt: 0, consecutive: 0, appliedTotal: 0 });
+  function checkOpennessDrift() {
+    try {
+      const taste = normalizeTaste(readJsonSafe(path.join(STATE_DIR, 'taste.json'), null));
+      const r = evaluateOpennessDrift({ taste, now: Date.now(), lastProposalAt: opennessState.lastProposalAt, conf: cfg.socialV2?.opennessDrift });
+      if (!r.eligible) return r;
+      const proposal = { at: Date.now(), delta: r.delta, target: r.target, count: r.count, spanDays: r.spanDays, topics: r.topics, status: 'pending' };
+      const consecutive = (Number(opennessState.consecutive) || 0) + 1;
+      let appliedTotal = Number(opennessState.appliedTotal) || 0;
+      let nextConsecutive = consecutive;
+      if (consecutive >= 2 && appliedTotal < 3) {
+        const before = Number(personaState?.current?.initiative) || 0;
+        const res = applyPersonaProposal(personaState, { deltas: { initiative: 1 } }, Date.now(), PERSONA_DEFAULT_LIMITS);
+        if (res.applied) {
+          personaState = res.state;
+          savePersonaState();
+          proposal.status = 'applied';
+          proposal.before = before;
+          proposal.after = Number(personaState?.current?.initiative) || 0;
+          appliedTotal += 1;
+          nextConsecutive = 0;
+          log('[openness] 连续两次满足，轮廓主动性 +1（可回滚）');
+        }
+      }
+      opennessState = {
+        ...opennessState,
+        proposals: [...(opennessState.proposals || []).slice(-20), proposal],
+        lastProposalAt: proposal.at,
+        consecutive: nextConsecutive,
+        appliedTotal,
+      };
+      atomicWriteJson(OPENNESS_FILE, opennessState);
+      return r;
+    } catch (error) { log('[openness] 检查失败', error?.message ?? error); return null; }
+  }
+  const REPAIRS_FILE = path.join(STATE_DIR, 'repairs.json');
+  let repairState = normalizeRepairs(readJsonSafe(REPAIRS_FILE, null));
+  function saveRepairState() { try { atomicWriteJson(REPAIRS_FILE, repairState); } catch {} }
+  const SHARED_FILE = path.join(STATE_DIR, 'shared-activities.json');
+  let sharedState = normalizeShared(readJsonSafe(SHARED_FILE, null));
+  function saveSharedState() { try { atomicWriteJson(SHARED_FILE, sharedState); } catch {} }
+  function checkSharedResponses() {
+    try {
+      const act = activeShared(sharedState);
+      if (!act) return;
+      const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+      const st = ownerKey ? getSocialV2State(ownerKey) : null;
+      const msgs = (st?.recentMessages || []).filter((m) => !m.isSelf && Number(m.time) > Number(act.proposedAt));
+      if (!msgs.length) return;
+      const text = msgs.map((m) => String(m.text || '')).join(' ');
+      if (act.status === 'proposed' && /好|行|可以|看吧|来吧|看看/.test(text)) {
+        const r = updateShared(sharedState, act.id, 'accepted', { ownerQuote: text.slice(0, 80) });
+        if (r.ok) { sharedState = r.state; saveSharedState(); log('[shared] 已接受一起看'); }
+      } else if (act.status === 'accepted' && /看完了|看过了|看完|聊完/.test(text)) {
+        const r = updateShared(sharedState, act.id, 'done', { ownerQuote: text.slice(0, 80) });
+        if (r.ok) { sharedState = r.state; saveSharedState(); log('[shared] 一起看完成'); }
+      }
+    } catch {}
+  }
+  const opennessTimer = setInterval(checkOpennessDrift, 6 * 3600 * 1000);
+  opennessTimer.unref?.();
+  // 单一写入队列：异步交错会读改写覆盖，原子写只保证文件不坏。
+  let goalWriteQueue = Promise.resolve();
+  function enqueueGoalWrite(fn) {
+    const run = goalWriteQueue.then(() => fn());
+    goalWriteQueue = run.catch((error) => { log('目标写入失败:', error?.message ?? error); });
+    return run;
+  }
+  function saveGoalsState() {
+    try { atomicWriteJson(GOALS_FILE, goalsState); }
+    catch (error) { log('保存目标状态失败:', error?.message ?? error); }
+  }
+  function saveNarrativeState() {
+    try { atomicWriteJson(NARRATIVE_FILE, narrativeState); }
+    catch (error) { log('[narrative] 保存状态失败:', error?.message ?? error); }
+  }
   const emotionOwnerKey=cfg.ownerQQ?'private:'+String(cfg.ownerQQ):'';
   const scopedEmotionFile=path.join(STATE_DIR,'emotion-scopes.json');
+  // 情绪迁移是一次明确的启动步骤：文件有效就直接加载，不再备份、不再迁移。
+  // 只有文件缺失/损坏时才重建；旧状态没有实质内容就不产生备份；写回后立即读回校验。
+  function legacyEmotionHasSubstance(e){
+    if(!e||typeof e!=='object')return false;
+    if(Array.isArray(e.journal?.events)&&e.journal.events.length)return true;
+    if(Array.isArray(e.drifts)&&e.drifts.length)return true;
+    const s=e.state||{};
+    if(Array.isArray(s.feelings)&&s.feelings.length)return true;
+    const b=e.baseline||{};
+    const dev=Math.abs((Number(s.valence)||0)-(Number(b.valence)||0))+Math.abs((Number(s.arousal)||0)-(Number(b.arousal)||0));
+    return dev>0.02;
+  }
+  let scopedRaw=null,scopedInvalid='';
+  try{
+    scopedRaw=JSON.parse(fs.readFileSync(scopedEmotionFile,'utf8'));
+    if(!(scopedRaw?.version===1&&Array.isArray(scopedRaw.states)))scopedInvalid='shape';
+  }catch(error){
+    scopedInvalid=fs.existsSync(scopedEmotionFile)?`parse:${error?.message||error}`:'missing';
+  }
   const emotionLanes=new EmotionScopes({ownerKey:emotionOwnerKey,legacy:storedEmotion,
-    load:()=>readJsonSafe(scopedEmotionFile,null),save:data=>atomicWriteJson(scopedEmotionFile,data)});
-  if(emotionLanes.migrated&&storedEmotion&&fs.existsSync(EMOTION_FILE))fs.copyFileSync(EMOTION_FILE,EMOTION_FILE+'.scope-backup-'+Date.now(),fs.constants.COPYFILE_EXCL);
+    load:()=>scopedInvalid?null:scopedRaw,save:data=>atomicWriteJson(scopedEmotionFile,data)});
+  if(scopedInvalid){
+    log(`[emotion] scoped 状态无效（${scopedInvalid}），从旧 emotion.json 重建`);
+    let backupPath='';
+    if(legacyEmotionHasSubstance(storedEmotion)&&fs.existsSync(EMOTION_FILE)){
+      backupPath=`${EMOTION_FILE}.scope-backup-${Date.now()}`;
+      fs.copyFileSync(EMOTION_FILE,backupPath,fs.constants.COPYFILE_EXCL);
+    }
+    try{
+      emotionLanes.persist();
+      const verify=JSON.parse(fs.readFileSync(scopedEmotionFile,'utf8'));
+      if(!(verify?.version===1&&Array.isArray(verify.states)))throw Error('读回校验失败：结构不符');
+      log(`[emotion] 迁移完成 reason=${scopedInvalid} states=${verify.states.length} backup=${backupPath||'(无实体备份)'} verify=ok`);
+    }catch(error){
+      console.error(`[emotion] 迁移写入/校验失败：${error?.message||error}；停止启动，避免反复迁移`);
+      process.exit(2);
+    }
+  }else{
+    log(`[emotion] scoped 状态已加载 version=1 states=${scopedRaw.states.length}（未迁移、无备份）`);
+  }
   emotionState=emotionLanes.owner();
   function emotionViewFor(key,speaker=''){return emotionLanes.view(key,speaker,Date.now(),emotionRecoveryCfg());}
   function commitEmotionLane(lane,state){emotionLanes.set(lane,state);emotionState=emotionLanes.owner();saveEmotionState();}
@@ -1634,6 +1879,7 @@ async function main() {
     const emotionInput = { appraisal: sharedAppraisal || undefined, source, text: body, directed, weight, kind, chatKey: key, key, speakerId, messageId, replyToId, replyTarget, recentMessages,
       deferToModel: cfg.socialV2?.emotion?.appraisalModel?.enabled === true && source === 'owner' && key.startsWith('private:'), eventId, at: now };
     laneState = applyEmotionEvent(laneState, emotionInput, now, emotionRecoveryCfg());
+  try { recordDailyImpact(laneState, key, beforeEmotion); } catch {}
     ap = laneState.lastEvent;
     if (ap.correction?.status === 'replayed') reconcileEmotionCorrection(ap.correction);
     if(sharedAppraisal)laneState.lastEvent.review={status:'shared-event'};
@@ -2893,7 +3139,12 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
       const hasImage = texts.some((t) => /\[图片\]|\[表情\]/.test(String(t)));
       pendingMemeCandidates.set(key, candidates);
       log(`[meme] 候选 ${candidates.map((m) => m.title).join('/')} ${key}`);
-      const imageHint = imageDesc ? `\n\n【图里看到】${imageDesc}` : (hasImage ? '\n\n【图里有梗】最近这条消息带图片/表情。如果图里像梗图，先调用 qq_get_message_images 看一眼再决定接不接；别假装看见了。' : '');
+      // 图片识别结果只给她**自己看**用，不进对话。
+      // 以前这里是裸的「【图里看到】…」，模型会照着描述一遍，像在给表情包做解说——
+      // 真人不会这么说话。所以这里明确写成「内部理解、不要复述」，并给出禁用清单。
+      const imageHint = imageDesc
+        ? `\n\n【图里看到（只供你自己理解，严禁复述）】${imageDesc}\n【看图规矩】你已经看见了，不用说出来。除对方明确问「这图是什么/什么意思」，否则**不要**描述画面、不要报图上的字、不要说这是什么表情包、不要解释它的含义或出处。就当自己早就看见了，正常接话。`
+        : (hasImage ? '\n\n【图里有梗】最近这条消息带图片/表情。如果图里像梗图，先调用 qq_get_message_images 看一眼再决定接不接；别假装看见了。看完照样别描述画面。' : '');
       return renderMemeBlock(candidates, usedTitles) + imageHint + '\n\n' + promptText;
     } catch {
       return promptText;
@@ -3262,13 +3513,101 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
   function recordRetrievalTrace(data) {
     try { fs.appendFileSync(retrievalTraceFile, JSON.stringify({ at: Date.now(), ...data }) + '\n'); } catch {}
   }
+  // C 阶段：每轮广播 trace。只记 id / 长度 / 版本，不存正文。
+  const ASSEMBLER_VERSION = 'ctx-v1';
+  let associationSnapshotCache = { at: 0, value: null };
+  function associationSnapshot() {
+    if (Date.now() - associationSnapshotCache.at < 300000 && associationSnapshotCache.value) return associationSnapshotCache.value;
+    try {
+      const taste = normalizeTaste(readJsonSafe(path.join(STATE_DIR, 'taste.json'), null)).topics;
+      const selfMemory = normalizeSelfMemory(readJsonSafe(path.join(STATE_DIR, 'self-memory.json'), null)).items;
+      let concerns = [];
+      try { concerns = continuity.snapshot(`private:${String(cfg.ownerQQ || '')}`)?.concerns || []; } catch {}
+      associationSnapshotCache = { at: Date.now(), value: buildAssociations({ taste, selfMemory, concerns }) };
+    } catch {
+      associationSnapshotCache = { at: Date.now(), value: { strong: [], weak: [] } };
+    }
+    return associationSnapshotCache.value;
+  }
+  function appendBroadcastTrace(entry) {
+    try {
+      const line = JSON.stringify(entry);
+      if (line.length <= 2048) fs.appendFileSync(path.join(STATE_DIR, 'broadcast-trace.jsonl'), `${line}\n`);
+    } catch {}
+  }
+  // D 阶段：跨模块注入（兴趣 + 强关联）。默认关闭，只有显式开启才进上下文。
+  function buildLinkageBlock(message, boundaryAt = 0, overrides = {}) {
+    try {
+      const taste = Array.isArray(overrides.taste) ? overrides.taste : normalizeTaste(readJsonSafe(path.join(STATE_DIR, 'taste.json'), null)).topics;
+      const selfMemory = Array.isArray(overrides.selfMemory) ? overrides.selfMemory : normalizeSelfMemory(readJsonSafe(path.join(STATE_DIR, 'self-memory.json'), null)).items;
+      const gate = gateLinkage({ message, taste, selfMemory, boundaryAt });
+      return { text: gate.hit ? renderLinkage(gate, taste, selfMemory) : '', gate };
+    } catch {
+      return { text: '', gate: { available: false, hit: false, reason: 'error', matches: [] } };
+    }
+  }
+  function renderLinkage(gate, taste, selfMemory) {
+    const out = [];
+    const seen = new Set();
+    for (const m of gate.matches) {
+      const dedupe = m.text.slice(0, 40);
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      if (m.kind === 'taste') {
+        const row = taste.find((t) => String(t.topic || '') === m.text);
+        const sources = Array.isArray(row?.evidence) ? row.evidence.length : 0;
+        out.push(`- 兴趣：${m.text.slice(0, 20)}（${Number(row?.strength) < 0.42 ? '暂定' : '确认'}；来源：B站 ${sources} 条）`);
+      } else {
+        out.push(`- 自我记忆：${m.text.slice(0, 50)}`);
+      }
+    }
+    return out.length
+      ? `\n【拾光证据（只读）】\n${out.join('\n')}\n（只在对方话题与它对得上时顺口提一句；不要借此提挂念、催睡或其他话题。）\n`
+      : '';
+  }
 
   async function withMemoryContext(key, promptText, context = {}) {
     context.traceId = crypto.randomUUID();
     const workspaceOn = context.allowIdleAssociation === true && typeof mindWorkspaceEnabled === 'function' && mindWorkspaceEnabled(key);
     context.requireUnderstanding = mindAllowed(key) && cfg.socialV2?.continuity?.enabled === true;
     if(workspaceOn && !context.continuityMessageId)context.continuityMessageId=mindWorkspaces.current.get(key)||'';
-    const continuityBlock = context.allowIdleAssociation === true && typeof continuity !== 'undefined' ? continuity.prompt(key, context) : '';
+    const goalBlock = cfg.socialV2?.goals?.enabled === false ? '' : goalLine(goalsState);
+    const rhythmBlock = rhythmPromptLine(rhythmView(cfg.socialV2?.rhythm));
+    const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+    // scope=self 只注入 owner 私聊；群聊和其他用户不读这些印象。
+    let selfBlock = '';
+    if (key === ownerKey && cfg.socialV2?.selfMemory?.recall !== false && promptText) {
+      try {
+        const token = readSelfToken();
+        if (token) {
+          const j = await memoryRequest('/search', { query: String(promptText).slice(0, 200), scope: 'self', k: 2, min_score: 0.45 }, 8000, { 'x-memvec-self': token });
+          const rows = (j.results || []).filter((r) => r && r.text).slice(0, 2);
+          if (rows.length) {
+            selfBlock = `\n【你自己记着的（来源提到，未经核实）】\n${rows.map((r) => `- ${String(r.text).slice(0, 160)}（来源 ${String(r.source_id || r.id || '未记录').slice(0, 24)}；不确定）`).join('\n')}\n`;
+          }
+        }
+      } catch {}
+    }
+    const sharedLine = key === ownerKey ? recentSharedLine(sharedState) : '';
+    const repairEnabled = cfg.socialV2?.repair?.enabled !== false;
+    const correction = (repairEnabled && key === ownerKey) ? detectCorrection(promptText) : { isCorrection: false };
+    if (repairEnabled && correction.isCorrection) {
+      repairState = addRepair(repairState, { cue: correction.cue, text: String(promptText).slice(0, 200) });
+      saveRepairState();
+    }
+    const repairLine = (repairEnabled && correction.isCorrection) ? repairHint({ cue: correction.cue }) : '';
+    const lesson = (repairEnabled && key === ownerKey) ? lessonLine(repairState) : '';
+    const continuityPart = (context.disableContinuity !== true && context.allowIdleAssociation === true && typeof continuity !== 'undefined')
+      ? continuity.prompt(key, context) : '';
+    const continuityBlock = continuityPart + goalBlock + rhythmBlock + selfBlock + sharedLine + repairLine + lesson;
+    const narrativeBlock = cfg.socialV2?.narrative?.enabled === true && key === ownerKey
+      ? narrativePromptLine(narrativeState) : '';
+    const linkageInfo = ((context.forceLinkageInject === true || cfg.socialV2?.linkageInject?.enabled === true) && key === ownerKey && context.disableLinkageInject !== true)
+      ? buildLinkageBlock(promptText, Number(context.linkageBoundaryAt) || 0, context.linkageOverrides || {})
+      : { text: '', gate: null };
+    const linkageBlock = linkageInfo.text;
+    if (context.evalCapture) context.evalCapture.linkage = linkageInfo.gate;
+    context.linkageGate = linkageInfo.gate;
     let idleBlock = '';
     let recapRows=[];
     const recapText=()=>recapRows.length?'【其他聊天的可分享经历】以下为确实参与过的聊天摘要片段，已过滤私密。可自行选择讲述、简述或不谈，不强制向管理员汇报；没有记录的部分不要编造。\n'+recapRows.map(r=>JSON.stringify(r)).join('\n')+'\n':'';
@@ -3288,6 +3627,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     const currentMessage = prefix && latestQuery.startsWith(prefix) ? latestQuery.slice(prefix.length) : '';
     const traceSelected = [];
     let contextBundle={messages:[],summaries:[]};
+    let assemblyReport = null;
     const assembled=(parts)=>{
       const blocks=[{id:'summary',scope:key,purpose:'summary',text:summaryBlock,priority:30,fit:n=>buildSummaryBlock(contextBundle.summaries,{maxChars:n})},
         {id:'history',scope:key,purpose:'history',text:sessionBlock,priority:40,fit:n=>buildSessionBlock(contextBundle.messages,{maxChars:n})},
@@ -3298,16 +3638,26 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
         :{text:blocks.map(b=>b.text).join(''),blocks,report:{enabled:false}};
       context.referenceBlocks=result.blocks.filter(b=>['summary','history'].includes(b.id));
       context.referenceAssembly=result.report;
+      assemblyReport=result.report||null;
+      if(context.evalCapture) context.evalCapture.assembly=result.report||null;
       if(typeof contextEfficiency!=='undefined')contextEfficiency.record(key,'assembly',{...result.report,enabled});
       return result.text+promptText;
     };
+    const contextEmotionView = cfg.socialV2?.emotion?.enabled === false ? null : withSubjectiveFeeling(emotionViewFor(key), idleAssociations.feeling(key), Date.now(), emotionRecoveryCfg());
+    const contextEmotionLine = cfg.socialV2?.emotion?.enabled === false ? '' : emotionPromptLine(contextEmotionView, { isOwner: true, compact: true });
     const finish = (memoryBlock = '', memoryRows = []) => {
+      if (context.disableMemory === true) { memoryBlock = ''; memoryRows = []; }
       memoryRows = recallForCurrentContext(memoryRows,context);
       if(context.styleIntent==='feedback'&&!workspaceOn)memoryBlock=buildHumanContext({key,subjectId,currentMessage,searchRows:memoryRows,options:humanOptions});
       if(!workspaceOn)return assembled([
         {id:'memory',text:memoryBlock,priority:90,required:true},
         {id:'shared-recap',text:recapText(),priority:60},
+        ...(narrativeBlock?[{id:'narrative',text:narrativeBlock,priority:68,reason:'owner 私聊的近期叙事，含来源 episode，可按预算裁剪'}]:[]),
+        ...(linkageBlock?[{id:'linkage',text:linkageBlock,priority:70,reason:'D 阶段跨模块注入：兴趣与强关联'}]:[]),
         {id:'continuity',text:continuityBlock,priority:100,required:true},
+        ...(contextEmotionLine?[{id:'emotion',text:contextEmotionLine,priority:95}]:[]),
+        ...(repairLine?[{id:'repair',text:repairLine,priority:98}]:[]),
+        ...(lesson?[{id:'lesson',text:lesson,priority:97}]:[]),
         {id:'idle',text:idleBlock,priority:20}]);
       const emotionView=cfg.socialV2?.emotion?.enabled===false?null:withSubjectiveFeeling(emotionViewFor(key),idleAssociations.feeling(key),Date.now(),emotionRecoveryCfg());
       const emotionLine=cfg.socialV2?.emotion?.enabled===false?'':emotionPromptLine(emotionView,{isOwner:true,compact:true});
@@ -3331,7 +3681,15 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
         if(!work.selected.some(r=>r.id==='idle:'+context.idleAssociation.ideaId))delete context.idleAssociation;
       }
       context.mindWorkspace={key,messageId:context.continuityMessageId,ids:work.selected.map(r=>r.id)};
-      return assembled([{id:'workspace',text:work.text,priority:100,required:true}]);
+      return assembled([
+        {id:'workspace',text:work.text,priority:100,required:true},
+        ...(sharedLine?[{id:'shared',text:sharedLine,priority:96,reason:'共同经历，只作回忆线索'}]:[]),
+        ...(contextEmotionLine?[{id:'emotion',text:contextEmotionLine,priority:95}]:[]),
+        ...(repairLine?[{id:'repair',text:repairLine,priority:98}]:[]),
+        ...(lesson?[{id:'lesson',text:lesson,priority:97}]:[]),
+        ...(narrativeBlock?[{id:'narrative',text:narrativeBlock,priority:68,reason:'owner 私聊的近期叙事，含来源 episode，可按预算裁剪'}]:[]),
+        ...(linkageBlock?[{id:'linkage',text:linkageBlock,priority:70,reason:'D 阶段跨模块注入：兴趣与强关联'}]:[]),
+      ]);
     };
     const compose = (priorityRows = [], searchRows = []) => {
       traceSelected.length = 0;
@@ -3357,6 +3715,53 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
       summaryBlock = buildSummaryBlock(bundle.summaries, { maxChars: summaryChars });
       sessionBlock = buildSessionBlock(bundle.messages, { maxChars: budgetChars });
       if (sessionBlock || summaryBlock) log(`session context injected: ${bundle.messages.length} 条原文，${bundle.summaries.length} 条摘要`);
+    }
+    // 叙事注入观察：记下每次注入的长度、是否同时有会话摘要，方便判断重叠与增益。
+    if (key === ownerKey) {
+      const assoc = associationSnapshot();
+      appendBroadcastTrace({
+        at: Date.now(),
+        key,
+        assemblerVersion: ASSEMBLER_VERSION,
+        blocks: (() => {
+          const summary = summarizeAssembly(assemblyReport);
+          if (!summary.selected.length) {
+            return [
+              { id: 'continuity', chars: continuityBlock.length },
+              { id: 'narrative', chars: narrativeBlock.length, versionId: (currentNarrative(narrativeState) || {}).id || '' },
+              { id: 'summary', chars: summaryBlock.length },
+              { id: 'session', chars: sessionBlock.length },
+            ].filter((b) => b.chars > 0);
+          }
+          return summary.selected.map((b) => ({
+            ...b,
+            ...(b.id === 'narrative' ? { versionId: (currentNarrative(narrativeState) || {}).id || '' } : {}),
+          }));
+        })(),
+        // 关联目前只“被考虑”，没有注入；injected:false 明确记录这一点。
+        associations: {
+          strong: [...new Set(assoc.strong.map((g) => `${g.type}:${g.rule}`))],
+          weak: [...new Set(assoc.weak.map((g) => `${g.type}:${g.rule}`))],
+          injected: false,
+        },
+        // 相关性门槛：是否注入、是否命中、命中理由。
+        linkage: context.linkageGate ? {
+          available: context.linkageGate.available,
+          hit: context.linkageGate.hit,
+          reason: context.linkageGate.reason,
+        } : null,
+        // 只记被丢弃候选的 id、原始长度和原因（budget / scope-mismatch / exact-duplicate），不存正文。
+        dropped: summarizeAssembly(assemblyReport).dropped,
+      });
+    }
+    if (narrativeBlock) {
+      try {
+        const current = currentNarrative(narrativeState) || {};
+        fs.appendFileSync(
+          path.join(STATE_DIR, 'narrative-injections.jsonl'),
+          `${JSON.stringify({ at: Date.now(), key, chars: narrativeBlock.length, hasSummary: Boolean(summaryBlock), summaryChars: summaryBlock.length, versionId: current.id || '' })}\n`,
+        );
+      } catch {}
     }
     if (human && !shouldRecallMemory(currentMessage)) { recordTrace({key, query: currentMessage, reason:'not-needed', candidates:[], injected:[]}); return compose(); }
     if (cfg.socialV2?.memoryRecall?.enabled === false) { recordTrace({key, query: currentMessage, reason:'disabled', candidates:[], injected:[]}); return human ? compose() : finish(); }
@@ -3455,9 +3860,9 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
 
   const dailyRecallQueries = new Map();
   const dailyMemorySubjects = new Map();
-  async function memoryRequest(route, body, timeoutMs = 20000) {
+  async function memoryRequest(route, body, timeoutMs = 20000, extraHeaders = {}) {
     const res = await fetch(`http://127.0.0.1:${cfg.socialV2?.memoryRecall?.port ?? 9881}${route}`, {
-      method: 'POST', headers: { 'content-type': 'application/json', ...(route.startsWith('/sources/clarification/')?{'x-source-correction':'1'}:{}) }, body: JSON.stringify(body),
+      method: 'POST', headers: { 'content-type': 'application/json', ...(route.startsWith('/sources/clarification/')?{'x-source-correction':'1'}:{}), ...extraHeaders }, body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs)
     });
     const data = await res.json();
@@ -3471,18 +3876,18 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     return reviewMemo.get(kind,context,signature,run);
   }
   const pendingBackgroundStops = new Map();
-  async function runHeadlessPrompt(prompt, timeoutMs = 90000, images = [], feature = 'other') {
+  async function runHeadlessPrompt(prompt, timeoutMs = 90000, images = [], feature = 'other', presetId = 'qq-memory') {
     // A failed cancellation blocks new paid work until the old session is stopped.
     for (const [sid, cleanup] of pendingBackgroundStops) {
       try { await api.stopSessionWork(sid); await cleanup(); pendingBackgroundStops.delete(sid); }
       catch { throw new Error('后台任务尚未停止，暂停新的后台调用'); }
     }
     const { presets } = unwrap(await api.agentPresets.list({}), 'memory presets');
-    if (!presets.some(p => p.id === 'qq-memory')) throw new Error('qq-memory preset 尚未加载，请重启 DSH');
+    if (!presets.some(p => p.id === presetId)) throw new Error(`${presetId} preset 尚未加载，请重启 DSH`);
     const dir = path.join(STATE_DIR, 'memory-agent');
     fs.mkdirSync(dir, { recursive: true });
     const ws = unwrap(await api.workspace.create({ path: dir }), 'memory workspace');
-    const { sessionId } = unwrap(await api.sessions.create({ workspaceId: ws.workspace.workspaceId, agentPreset: 'qq-memory' }), 'memory session');
+    const { sessionId } = unwrap(await api.sessions.create({ workspaceId: ws.workspace.workspaceId, agentPreset: presetId }), 'memory session');
     learnerSessions.add(sessionId);
     learnerFeatures.set(sessionId, featureKey(feature));
     api.events.follow(sessionId);
@@ -3513,6 +3918,84 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
       }
     });
   }
+  // P1 最近叙事：只处理 owner 私聊 episode，默认关闭；失败后持久化退避，避免定时重试烧 token。
+  async function runNarrativeOnce({ manual = false } = {}) {
+      const conf = narrativeConfig(cfg.socialV2?.narrative);
+      if ((!manual && (!conf.enabled || !conf.schedule)) || cfg.socialV2?.enabled === false || !dshReady || socialV2.paused || narrativeRunning || exploreRunning) {
+        return { ok: false, reason: !dshReady ? 'dsh-offline' : (narrativeRunning || exploreRunning) ? 'busy' : 'disabled-or-paused' };
+      }
+      const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+      if (!ownerKey) return { ok: false, reason: 'no-owner' };
+      const startedAt = Date.now();
+      const now = startedAt;
+      if (!manual) {
+        const due = narrativeDue(narrativeState, episodes, ownerKey, conf, now);
+        if (!due.due) return { ok: false, reason: due.reason };
+      }
+      // 费用保护：日上限挡不住单次超支，所以调用前按「预留一次」判断；失败不自动重试。
+      const budget = narrativeBudget(narrativeUsageState, conf, now);
+      if (!budget.allowed) {
+        log(`[narrative] 跳过：${budget.reason}（今日 ${budget.attempts} 次，花费 ${budget.spent.toFixed(4)} 元）`);
+        return { ok: false, reason: budget.reason, budget };
+      }
+      const sources = narrativeSourcePool(episodes, ownerKey, {
+        limit: conf.maxSourceEpisodes,
+        lookbackDays: conf.lookbackDays,
+        buckets: conf.buckets,
+        now,
+      });
+      if (sources.length < 5) {
+        narrativeState = { ...narrativeState, lastAttemptAt: now, lastError: 'too-few-safe-sources', updatedAt: now };
+        saveNarrativeState();
+        log('[narrative] 可用且不含敏感信息的 episode 不足，跳过本次生成');
+        return { ok: false, reason: 'too-few-safe-sources' };
+      }
+      narrativeRunning = true;
+      narrativeState = { ...narrativeState, lastAttemptAt: now, lastError: '', updatedAt: now };
+      saveNarrativeState();
+      let cost = 0;
+      try {
+        const raw = await runHeadlessPrompt(narrativePrompt(sources), 120000, [], 'narrative');
+        cost = measureFeatureCost(startedAt, ':narrative');
+        const parsed = parseNarrativeOutput(raw, sources);
+        if (!parsed.ok) throw new Error(`narrative validation: ${parsed.reason}${parsed.chars === undefined ? '' : `(${parsed.chars}字)`}`);
+        const stored = storeNarrative(narrativeState, parsed, { now, maxVersions: conf.maxVersions });
+        if (!stored.ok) throw new Error(stored.reason || 'narrative store failed');
+        narrativeState = stored.state;
+        saveNarrativeState();
+        narrativeUsageState = recordNarrativeRun(narrativeUsageState, { cost, ok: true, reason: 'ok' }, Date.now());
+        try { atomicWriteJson(NARRATIVE_USAGE_FILE, narrativeUsageState); } catch {}
+        log(`[narrative] 已生成版本 ${stored.entry.id}，引用 ${stored.entry.sourceEpisodeIds.length} 条 episode，花费 ${cost.toFixed(4)} 元`);
+        return { ok: true, entry: stored.entry, cost };
+      } catch (error) {
+        if (!cost) cost = measureFeatureCost(startedAt, ':narrative');
+        narrativeState = { ...narrativeState, lastError: String(error?.message || error).slice(0, 160), updatedAt: Date.now() };
+        saveNarrativeState();
+        narrativeUsageState = recordNarrativeRun(narrativeUsageState, { cost, ok: false, reason: String(error?.message || error).slice(0, 120) }, Date.now());
+        try { atomicWriteJson(NARRATIVE_USAGE_FILE, narrativeUsageState); } catch {}
+        log('[narrative] 本次生成未替换现有版本：', error?.message ?? error);
+        return { ok: false, reason: String(error?.message || error).slice(0, 160), cost };
+      } finally {
+        narrativeRunning = false;
+      }
+  }
+  function measureFeatureCost(since, keyPart) {
+    let sum = 0;
+    try {
+      const rows = fs.readFileSync(path.join(STATE_DIR, 'token-usage.jsonl'), 'utf8').trim().split('\n');
+      for (const line of rows) {
+        let row = null;
+        try { row = JSON.parse(line); } catch { continue; }
+        if (row.k !== 'turn' || Number(row.t) < since || !String(row.key || '').includes(keyPart)) continue;
+        sum += ((row.b?.cacheMiss || 0) * 1 + (row.b?.cacheHit || 0) * 0.02 + (row.b?.output || 0) * 4) / 1e6;
+      }
+    } catch {}
+    return Math.round(sum * 10000) / 10000;
+  }
+  const narrativeTimer = setInterval(() => {
+    void runNarrativeOnce().catch((error) => log('[narrative] 调度异常：', error?.message ?? error));
+  }, 15 * 60 * 1000);
+  narrativeTimer.unref?.();
   // Admission follows authorized conversation participation, not content vocabulary.
   function memoryDecision(key, text, { directedAtSelf = false, sender = '' } = {}) {
     return memoryAdmission(key, text, { enabled: cfg.socialV2?.dailyMemory?.enabled !== false,
@@ -3542,6 +4025,9 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     queueMax: cfg.socialV2?.dailyMemory?.queueMax ?? 0,
     priorityKey: cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '',
     groupMaxCallsPerDay: cfg.socialV2?.dailyMemory?.groupMaxCallsPerDay ?? 20,
+    batchSize: cfg.socialV2?.dailyMemory?.batchSize ?? 24,
+    batchMaxWaitMs: cfg.socialV2?.dailyMemory?.batchMaxWaitMs ?? 180000,
+    batchMaxChars: cfg.socialV2?.dailyMemory?.batchMaxChars ?? 9000,
     log, request: memoryRequest,
     // DailyMemory 会把 key 作为第二个参数传进来；这里必须只接 prompt，
     // 否则 key 会被当成 timeoutMs（setTimeout 收到字符串 → 0ms，必然超时）。
@@ -3549,10 +4035,106 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     verify: (prompt) => runHeadlessPrompt(prompt, 60000, [], 'coverage_check')
   });
 
+  // ── 记忆抽检（第二层，2026-11-02）────────────────────────────────────
+  // 每天挑少量记忆，让一次模型调用对照「原话 vs 理解栏」，找出歪曲/选错片段的条目。
+  // 默认只报告（mode='report'）；mode='apply' 才把可疑条降级为 candidate（不再召回，可回滚）。
+  const MEMORY_AUDIT_FILE = path.join(STATE_DIR, 'memory-audit.json');
+  const memoryAuditCfg = () => ({ enabled: true, mode: 'report', limit: 10, hour: 4, ...(cfg.socialV2?.memoryAudit ?? {}) });
+  function readMemoryAuditState() {
+    return readJsonSafe(MEMORY_AUDIT_FILE, { runs: [] });
+  }
+  async function runMemoryAudit({ limit, apply } = {}) {
+    const conf = memoryAuditCfg();
+    if (!conf.enabled) return { items: 0, suspects: [], reason: 'disabled' };
+    const lim = Math.min(20, Math.max(1, Number(limit) || Number(conf.limit) || 10));
+    const dbPath = conf.dbPath || path.join(os.homedir(), '.dsh', 'memvec', 'memories.db');
+    if (!fs.existsSync(dbPath)) return { items: 0, suspects: [], reason: 'no-db' };
+    let rows = [];
+    try {
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      const cutoff = Date.now() / 1000 - 48 * 3600;
+      rows = db.prepare("SELECT id,text,fact_meta,source_text,source_time FROM memories WHERE status='active' AND COALESCE(source_time,created_at)>=? ORDER BY RANDOM() LIMIT ?").all(cutoff, lim * 4);
+      db.close();
+    } catch (error) {
+      return { items: 0, suspects: [], reason: 'db-error', error: error?.message ?? String(error) };
+    }
+    // 有「理解栏」的优先查——那才是会歪的地方。
+    const score = (r) => (r.fact_meta && r.fact_meta !== '{}' ? 1 : 0);
+    rows.sort((a, b) => score(b) - score(a));
+    const items = rows.slice(0, lim).map((r) => {
+      let fact = {};
+      try { fact = JSON.parse(r.fact_meta || '{}'); } catch {}
+      return { id: r.id, source: r.source_text, quote: String(r.text || '').replace(/^.*曾说：/, ''), understanding: fact?.value || '' };
+    });
+    if (!items.length) return { items: 0, suspects: [] };
+    const raw = await runHeadlessPrompt(buildAuditPrompt(items), 60000, [], 'memory_audit');
+    const verdicts = parseAuditVerdicts(raw, items.map((i) => i.id));
+    const suspects = verdicts.filter((v) => v.verdict === 'suspect');
+    const doApply = apply === undefined ? conf.mode === 'apply' : apply === true;
+    if (doApply && suspects.length) {
+      try {
+        const db = new DatabaseSync(dbPath);
+        const stmt = db.prepare("UPDATE memories SET status='candidate', confidence=MIN(confidence,0.5) WHERE id=? AND status='active'");
+        for (const s of suspects) stmt.run(s.id);
+        db.close();
+        // 让 memvec 清一次缓存（/manage 入口会清矩阵缓存），确保降级立刻生效。
+        try { await memoryRequest('/manage', { scope: `private:${cfg.ownerQQ}`, subject_id: String(cfg.ownerQQ), action: 'list' }, 5000); } catch {}
+      } catch (error) {
+        log(`记忆抽检：降级失败 ${error?.message ?? error}`);
+      }
+    }
+    const record = { at: Date.now(), items: items.length, suspects, applied: doApply };
+    const prev = readMemoryAuditState();
+    prev.runs = [...(Array.isArray(prev.runs) ? prev.runs : []), record].slice(-30);
+    try { atomicWriteJson(MEMORY_AUDIT_FILE, prev); } catch {}
+    // 默认不往 QQ 里发（用户明确要求：抽检结果不要出现在消息栏）。
+    // 结果只写 state/memory-audit.json，用 `node scripts/memory-review.mjs --last-audit` 看。
+    // 只有配置里显式打开 memoryAudit.notify 才会私聊提醒。
+    if (suspects.length && conf.notify === true && cfg.ownerQQ) {
+      const lines = suspects.slice(0, 3).map((s) => `· ${s.reason || '可疑'}`).join('\n');
+      try {
+        await sendToQQ(`private:${String(cfg.ownerQQ)}`, `记忆抽检：${suspects.length}/${items.length} 条可疑${doApply ? '（已降级为待核对）' : '（仅报告）'}\n${lines}`);
+      } catch {}
+    }
+    return { items: items.length, suspects: suspects.length, applied: doApply, detail: suspects };
+  }
+  const memoryAuditTimer = setInterval(() => {
+    void (async () => {
+      try {
+        const conf = memoryAuditCfg();
+        if (!conf.enabled) return;
+        if (new Date().getHours() < (Number(conf.hour) || 4)) return;
+        const st = readMemoryAuditState();
+        const last = Array.isArray(st.runs) ? st.runs.at(-1) : null;
+        const today = new Date().toLocaleDateString('en-CA');
+        if (last && new Date(last.at).toLocaleDateString('en-CA') === today) return;
+        await runMemoryAudit({});
+      } catch (error) {
+        log(`记忆抽检失败：${error?.message ?? error}`);
+      }
+    })();
+  }, 30 * 60 * 1000);
+  memoryAuditTimer.unref?.();
+
   const mindAllowed = key => Boolean(cfg.ownerQQ) && key === `private:${String(cfg.ownerQQ)}` && isSessionAllowedInCurrentMode(key);
   const dialogueWindow=new DialogueWindow();
   function mindWorkspaceEnabled(key) { return mindAllowed(key) && cfg.socialV2?.mind?.enabled !== false; }
   function selfReferenceEnabled() { return cfg.socialV2?.selfReference?.enabled === true; }
+  // 当前自称（socialV2.selfNames）。旧人格名（大肥鱼/小鲸鱼…）已废弃，不再写死在判断里。
+  function selfNamesList() {
+    const list = Array.isArray(cfg.socialV2?.selfNames) ? cfg.socialV2.selfNames : [];
+    return [...new Set(list.map((n) => String(n ?? '').trim()).filter(Boolean))];
+  }
+  let selfNamePrefixCache = { key: null, re: /^$/ };
+  function selfNamePrefixRe() {
+    const names = selfNamesList();
+    const key = names.join('\u0000');
+    if (selfNamePrefixCache.key !== key) {
+      const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      selfNamePrefixCache = { key, re: names.length ? new RegExp(`^(?:${names.map(esc).join('|')})`) : /^$/ };
+    }
+    return selfNamePrefixCache.re;
+  }
   const selfReference = new SelfReference({
     enabled: selfReferenceEnabled, allowed: mindAllowed,
     sourceBlocked:refs=>sourceValidity.blocked(`private:${String(cfg.ownerQQ||'')}`,refs),sourceRevision:()=>sourceValidity.revision(),
@@ -4622,6 +5204,21 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
                 wc.triggers = Object.assign({}, wc.triggers, { anyMessage: false, probability: 0, question: false });
               }
             }
+            // 老大私聊开机也收口成活跃：她可能在关机前把自己设成潜水，
+            // 重启后老大发普通消息就没人应，表现成「又不回我了」。
+            if (cfg.ownerQQ && key === `private:${String(cfg.ownerQQ)}`) {
+              const ost = socialV2.conversations.get(key);
+              if (ost && ost.wakeConfig) {
+                const owc = ost.wakeConfig;
+                if (owc.mode !== 'active' || !owc.triggers?.anyMessage) {
+                  log(`[reserved2] 开机收口老大私聊 ${key}: ${owc.mode}/任意消息=${owc.triggers?.anyMessage} -> active`);
+                }
+                owc.mode = 'active';
+                owc.infinite = true;
+                owc.sleepUntil = null;
+                owc.triggers = Object.assign({}, owc.triggers, { anyMessage: true, atMention: true, nameMention: true, poke: true });
+              }
+            }
             setupSleepTimerV2(key);
             scheduleProactiveCheckV2(key);
           }
@@ -5005,7 +5602,9 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
         return crypto.timingSafeEqual(a, b);
       })();
       const staticConsolePage = req.method === 'GET' && url.pathname === '/';
-      if (!tokenMatches && !staticConsolePage) {
+      // 名字同步是纯补空缺的低风险操作，且只监听回环；允许控制台页面不带宽令牌直接触发。
+      const publicLabelSync = req.method === 'GET' && (url.pathname === '/api/labels/sync' || url.pathname === '/api/emotion/impact');
+      if (!tokenMatches && !staticConsolePage && !publicLabelSync) {
         sendJson({ ok: false, error: '未授权：请提供控制台访问令牌' }, 401);
         return;
       }
@@ -5172,22 +5771,670 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
           if(body.action==='grant'&&!isSessionAllowedInCurrentMode(body.target_scope)){sendJson({ok:false,error:'目标聊天不在允许范围'},403);return;}
           const result=await memoryRequest('/sharing',body,3000);sendJson(result);return;
         }
+        if (req.method === 'POST' && url.pathname === '/api/memory/audit') {
+          // 手动触发一次记忆抽检（默认只报告，不降级；apply:true 才降级）。
+          const body = await readBody();
+          try {
+            const result = await runMemoryAudit({ limit: body.limit, apply: body.apply === true });
+            sendJson({ ok: true, ...result });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '抽检失败' }, 500);
+          }
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/memory/audit/last') {
+          // 给控制台「记忆抽检」页用：最近几次抽检结果 + 可疑条目的原话/理解栏。
+          const st = readMemoryAuditState();
+          const ignored = new Set(Array.isArray(st.ignored) ? st.ignored : []);
+          const conf = memoryAuditCfg();
+          const dbPath = conf.dbPath || path.join(os.homedir(), '.dsh', 'memvec', 'memories.db');
+          const runs = (Array.isArray(st.runs) ? st.runs : []).slice(-5).reverse();
+          const ids = [...new Set(runs.flatMap((r) => (r.suspects || []).map((s) => s.id)))].filter((id) => !ignored.has(id));
+          const details = {};
+          if (ids.length && fs.existsSync(dbPath)) {
+            try {
+              const db = new DatabaseSync(dbPath, { readOnly: true });
+              const q = db.prepare(`SELECT id,text,fact_meta,source_text,source_time,subject_id,status,tier FROM memories WHERE id IN (${ids.map(() => '?').join(',')})`);
+              for (const row of q.all(...ids)) {
+                let fact = {};
+                try { fact = JSON.parse(row.fact_meta || '{}'); } catch {}
+                details[row.id] = {
+                  quote: String(row.text || '').replace(/^.*曾说：/, ''),
+                  understanding: fact?.value || '',
+                  source: String(row.source_text || '').slice(0, 200),
+                  subject: row.subject_id,
+                  status: row.status,
+                  tier: row.tier,
+                };
+              }
+              db.close();
+            } catch {}
+          }
+          sendJson({
+            ok: true,
+            enabled: conf.enabled !== false,
+            mode: conf.mode || 'report',
+            runs: runs.map((r) => ({ at: r.at, items: r.items, applied: r.applied, suspects: (r.suspects || []).filter((s) => !ignored.has(s.id)) })),
+            details,
+          });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/memory/audit/action') {
+          // 单条处理：downgrade=降为待核对（不再召回，可回滚）；ignore=以后不再提示这条。
+          const body = await readBody();
+          const id = String(body.id || '').trim();
+          const action = String(body.action || '');
+          if (!id || !['downgrade', 'ignore'].includes(action)) { sendJson({ ok: false, error: '参数无效' }, 400); return; }
+          if (action === 'ignore') {
+            const st = readMemoryAuditState();
+            st.ignored = [...new Set([...(Array.isArray(st.ignored) ? st.ignored : []), id])].slice(-500);
+            atomicWriteJson(MEMORY_AUDIT_FILE, st);
+            sendJson({ ok: true, id, action });
+            return;
+          }
+          const conf = memoryAuditCfg();
+          const dbPath = conf.dbPath || path.join(os.homedir(), '.dsh', 'memvec', 'memories.db');
+          try {
+            const db = new DatabaseSync(dbPath);
+            const changed = db.prepare("UPDATE memories SET status='candidate', confidence=MIN(confidence,0.5) WHERE id=? AND status='active'").run(id).changes;
+            db.close();
+            try { await memoryRequest('/manage', { scope: `private:${cfg.ownerQQ}`, subject_id: String(cfg.ownerQQ), action: 'list' }, 5000); } catch {}
+            sendJson({ ok: true, id, action, changed });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '操作失败' }, 500);
+          }
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/explore/status') {
+          // 只读：canary 的当前决策与预算（不触发探索）。
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可查看' }, 403);
+            return;
+          }
+          const conf = exploreConfig(cfg.socialV2?.explore);
+          const ex = normalizeExplore(readJsonSafe(path.join(STATE_DIR, 'explore.json'), null));
+          const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+          const ownerState = ownerKey ? getSocialV2State(ownerKey) : null;
+          const budget = budgetState(ex.runs);
+          const decision = exploreDecision({
+            conf, budget, now: Date.now(),
+            lastActivityAt: ownerState?.lastIncomingAt || 0,
+            goals: goalView(goalsState),
+            busy: !dshReady, running: exploreRunning,
+          });
+          sendJson({ ok: true, enabled: conf.enabled, decision, budget, last: ex.runs.at(-1) || null, runs: ex.runs.length });
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/narrative') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可查看' }, 403);
+            return;
+          }
+          const conf = narrativeConfig(cfg.socialV2?.narrative);
+          const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+          const decision = !conf.enabled ? { due: false, reason: 'disabled' }
+            : !conf.schedule ? { due: false, reason: 'schedule-off' }
+            : !ownerKey ? { due: false, reason: 'no-owner' }
+              : !dshReady ? { due: false, reason: 'dsh-offline' }
+                : socialV2.paused ? { due: false, reason: 'paused' }
+                  : narrativeRunning ? { due: false, reason: 'running' }
+                    : narrativeDue(narrativeState, episodes, ownerKey, conf, Date.now());
+          sendJson({
+            ok: true,
+            enabled: conf.enabled,
+            schedule: conf.schedule,
+            decision,
+            budget: narrativeBudget(narrativeUsageState, conf, Date.now()),
+            current: currentNarrative(narrativeState),
+            versions: narrativeState.versions,
+            lastAttemptAt: narrativeState.lastAttemptAt,
+            lastError: narrativeState.lastError,
+          });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/narrative/run') {
+          // 管理端手动预览可在 enabled=false 时生成；此时正文不会注入聊天上下文。
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可触发' }, 403);
+            return;
+          }
+          const result = await runNarrativeOnce({ manual: true });
+          if (!result?.ok) {
+            sendJson({ ok: false, reason: result?.reason || 'not-run', current: currentNarrative(narrativeState) }, 409);
+            return;
+          }
+          const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+          const cur = currentNarrative(narrativeState);
+          const srcMap = new Map(narrativeSources(episodes, ownerKey, { limit: 50 }).map((e) => [String(e.id), e]));
+          const evidence = (cur?.evidence || []).map((e) => ({
+            episodeId: e.episodeId,
+            quote: e.quote,
+            source: srcMap.get(String(e.episodeId)) || null,
+          }));
+          sendJson({ ok: true, current: cur, evidence, lastError: narrativeState.lastError });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/narrative/rollback') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可回滚' }, 403);
+            return;
+          }
+          const body = await readBody();
+          const result = rollbackNarrative(narrativeState, body.id, Date.now());
+          if (!result.ok) {
+            sendJson({ ok: false, error: result.reason }, 400);
+            return;
+          }
+          narrativeState = result.state;
+          saveNarrativeState();
+          sendJson({ ok: true, current: result.current, versions: narrativeState.versions });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/explore/run') {
+          // 手动触发一轮探索：只读抓取 + 证据校验 + 写入 taste/self-memory。
+          // 定时调度由 socialV2.explore.enabled 控制（默认关），这里不受它影响。
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可触发探索' }, 403);
+            return;
+          }
+          if (exploreRunning || narrativeRunning) { sendJson({ ok: false, error: '已有一轮后台探索或叙事整理在跑' }, 409); return; }
+          exploreRunning = true;
+          const startedAt = Date.now();
+          try {
+            const conf = exploreConfig(cfg.socialV2?.explore);
+            const exploreFile = path.join(STATE_DIR, 'explore.json');
+            const tasteFile = path.join(STATE_DIR, 'taste.json');
+            const selfFile = path.join(STATE_DIR, 'self-memory.json');
+            let ex = normalizeExplore(readJsonSafe(exploreFile, null));
+            const budget = budgetState(ex.runs);
+            if (budget.runsToday >= conf.maxPerDay) { sendJson({ ok: false, error: '今天的探索次数已用完', code: 'daily-runs', budget }, 429); return; }
+            if (budget.costToday >= conf.maxCostPerDay) { sendJson({ ok: false, error: '今天的探索费用已到上限', code: 'daily-cost', budget }, 429); return; }
+            const tasteState = normalizeTaste(readJsonSafe(tasteFile, null));
+            const focus = ex.focus && Number(ex.focus.runsLeft) > 0 ? ex.focus : null;
+            const avoidTopics = [...new Set((ex.runs || []).slice(-4).map((r) => r.topic).filter(Boolean))];
+            const pick = focus ? { topic: focus.topic, basis: 'focus' } : pickTopic({ taste: tasteState, avoidTopics });
+            const headers = { 'user-agent': 'Mozilla/5.0', referer: 'https://search.bilibili.com/' };
+            // AI 字幕需要登录态：只读复用已有 B 站凭据（不写入、不上传）。
+            try {
+              const credPath = cfg.socialV2?.explore?.credentialPath || path.join(os.homedir(), '.dsh', 'bili-duty', 'bili_credential.json');
+              const cred = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+              const cookie = [
+                cred.sessdata ? `SESSDATA=${cred.sessdata}` : '',
+                cred.bili_jct ? `bili_jct=${cred.bili_jct}` : '',
+                cred.buvid3 ? `buvid3=${cred.buvid3}` : '',
+                cred.dedeuserid ? `DedeUserID=${cred.dedeuserid}` : '',
+              ].filter(Boolean).join('; ');
+              if (cookie) headers.cookie = cookie;
+            } catch {}
+            const searchRaw = await (await fetch(searchUrl(pick.topic), { headers })).json().catch(() => null);
+            const seenBvids = new Set((ex.runs || []).flatMap((r) => [r.video?.bvid, ...(r.tried || []).map((x) => x.bvid)]).filter(Boolean));
+            const results = parseSearchResults(searchRaw).filter((r) => !seenBvids.has(r.bvid));
+            if (!results.length) {
+              const entry = { at: Date.now(), ok: false, reason: 'no-results', topic: pick.topic, basis: pick.basis, cost: 0 };
+              ex = recordRun(ex, entry); atomicWriteJson(exploreFile, ex);
+              sendJson({ ok: true, entry });
+              return;
+            }
+            const candidates = pickCandidates(results, { seed: pick.seed, limit: 3 });
+            if (!candidates.length) {
+              const entry = { at: Date.now(), ok: false, reason: 'only-teaching-results', topic: pick.topic, basis: pick.basis, cost: 0 };
+              ex = recordRun(ex, entry); atomicWriteJson(exploreFile, ex);
+              sendJson({ ok: true, entry });
+              return;
+            }
+            // WBI 需要的两把 key（游客可用）
+            const navRaw = await (await fetch('https://api.bilibili.com/x/web-interface/nav', { headers })).json().catch(() => null);
+            const keyOf = (url) => String(url || '').split('/').pop().replace(/\.\w+$/, '');
+            const imgKey = keyOf(navRaw?.data?.wbi_img?.img_url);
+            const subKey = keyOf(navRaw?.data?.wbi_img?.sub_url);
+            let picked = null;
+            let content = '';
+            const tried = [];
+            for (const cand of candidates) {
+              const viewRaw = await (await fetch(viewUrl(cand.bvid), { headers })).json().catch(() => null);
+              const view = parseVideoView(viewRaw);
+              if (!view) { tried.push({ bvid: cand.bvid, reason: 'view-failed' }); continue; }
+              let text = '';
+              try {
+                const playerRaw = await (await fetch(playerUrl({ bvid: view.bvid, cid: viewRaw?.data?.cid, imgKey, subKey }), { headers })).json();
+                for (const ref of subtitleRefs(playerRaw).slice(0, 1)) {
+                  const subRaw = await (await fetch(ref.url, { headers })).json().catch(() => null);
+                  text = parseSubtitleBody(subRaw);
+                }
+              } catch (error) { log('探索：读取字幕失败', error?.message ?? error); }
+              if (text.trim().length >= 100) { picked = { view, play: cand.play }; content = text.slice(0, conf.maxCharsPerRun); break; }
+              tried.push({ bvid: cand.bvid, reason: 'no-subtitle' });
+            }
+            if (!picked) {
+              const entry = { at: Date.now(), ok: false, reason: 'no-readable-content', topic: pick.topic, basis: pick.basis, tried, cost: 0 };
+              ex = recordRun(ex, entry); atomicWriteJson(exploreFile, ex);
+              sendJson({ ok: true, entry });
+              return;
+            }
+            const view = picked.view;
+            const excerpt = `${view.title}\n${content}`.slice(0, conf.maxCharsPerRun);
+            let raw = '';
+            try { raw = await runHeadlessPrompt(impressionPrompt({ topic: pick.topic, title: view.title, desc: content.slice(0, 4000) }), 60000, [], 'explore'); }
+            catch (error) { raw = ''; log('探索：提炼失败', error?.message ?? error); }
+            const impressions = parseImpressions(raw, { excerpt, topic: pick.topic });
+            const writes = [];
+            let tasteStatus = 'none';
+            if (impressions.length) {
+              // 只有真的读到字幕/正文，才记兴趣；一次只算暂定，两条独立内容才升到 0.42。
+              const t = recordExploration(tasteState, {
+                topic: pick.topic,
+                evidence: { url: view.url, excerpt: impressions[0].quote, at: Date.now(), author: view.author },
+              });
+              if (t.ok) { atomicWriteJson(tasteFile, t.state); tasteStatus = t.status; }
+              let sm = normalizeSelfMemory(readJsonSafe(selfFile, null));
+              for (const im of impressions) {
+                const text = `视频里提到：${im.text}`;
+                const r = addSelfMemory(sm, { text, kind: im.kind, topic: im.topic, sourceUrl: view.url, excerpt: im.quote, verified: 'verbatim', episodeId: String(view.id || ''), confidence: im.kind === 'fact' ? 0.7 : 0.5 });
+                if (r.ok) { sm = r.state; writes.push({ text, kind: im.kind, quote: im.quote }); }
+              }
+              if (writes.length) atomicWriteJson(selfFile, sm);
+            }
+            // 实际成本：从账本里取这一轮 explore 的调用
+            let cost = 0;
+            try {
+              const lines = fs.readFileSync(path.join(STATE_DIR, 'token-usage.jsonl'), 'utf8').trim().split('\n');
+              for (const line of lines) {
+                let row = null; try { row = JSON.parse(line); } catch { continue; }
+                if (row.k !== 'turn' || Number(row.t) < startedAt || !String(row.key || '').includes(':explore')) continue;
+                cost += ((row.b?.cacheMiss || 0) * 1 + (row.b?.cacheHit || 0) * 0.02 + (row.b?.output || 0) * 4) / 1e6;
+              }
+            } catch {}
+            const entry = {
+              at: Date.now(), ok: true, topic: pick.topic, basis: pick.basis,
+              video: { bvid: view.bvid, title: view.title, author: view.author, url: view.url, play: picked.play },
+              contentRead: true, contentChars: content.length, tried,
+              chars: excerpt.length, calls: 2 + tried.length, pages: tried.length + 1, impressions, writes, tasteStatus,
+              cost: Math.round(cost * 10000) / 10000,
+            };
+            ex.focus = nextFocus(ex.focus, pick, Number(cfg.socialV2?.explore?.focusRuns) || 2);
+            ex = recordRun(ex, entry);
+            atomicWriteJson(exploreFile, ex);
+            sendJson({ ok: true, entry, budget: { ...budgetState(ex.runs) } });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '探索失败' }, 500);
+          } finally {
+            exploreRunning = false;
+          }
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/self-memory/status') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可访问' }, 403);
+            return;
+          }
+          const sm = normalizeSelfMemory(readJsonSafe(path.join(STATE_DIR, 'self-memory.json'), null));
+          const ledger = readJsonSafe(SELF_LEDGER_FILE, { ids: [] });
+          sendJson({ ok: true, ...reconcileSelf(sm.items, ledger), ledger: Array.isArray(ledger.ids) ? ledger.ids.length : 0, tokenReady: Boolean(readSelfToken()) });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/self-memory/migrate') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可访问' }, 403);
+            return;
+          }
+          const result = await migrateSelfMemories();
+          sendJson(result, result.ok ? 200 : 400);
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/self-memory/reset') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可访问' }, 403);
+            return;
+          }
+          const token = readSelfToken();
+          if (!token) { sendJson({ ok: false, error: '缺少 self 令牌' }, 400); return; }
+          try {
+            const j = await memoryRequest('/self/reset', {}, 20000, { 'x-memvec-self': token });
+            atomicWriteJson(`${SELF_LEDGER_FILE}.bak-${Date.now()}`, readJsonSafe(SELF_LEDGER_FILE, { ids: [] }));
+            atomicWriteJson(SELF_LEDGER_FILE, { version: 1, ids: [], updatedAt: Date.now() });
+            sendJson({ ok: true, deleted: j.deleted ?? 0 });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '重置失败' }, 500);
+          }
+          return;
+        }
+        if (req.method === 'GET' && (url.pathname === '/api/taste' || url.pathname === '/api/self-memory')) {
+          // 只读查看：仅管理端；代理调用一律 403。分页，不做管理界面。
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可访问' }, 403);
+            return;
+          }
+          const offset = Number(url.searchParams.get('offset') || 0);
+          const limit = Number(url.searchParams.get('limit') || 20);
+          if (url.pathname === '/api/taste') {
+            const state = normalizeTaste(readJsonSafe(path.join(STATE_DIR, 'taste.json'), null));
+            sendJson({ ok: true, ...tastePage(state, { offset, limit }) });
+          } else {
+            const state = normalizeSelfMemory(readJsonSafe(path.join(STATE_DIR, 'self-memory.json'), null));
+            sendJson({
+              ok: true,
+              ...selfMemoryPage(state, {
+                offset, limit,
+                kind: url.searchParams.get('kind') || '',
+                topic: url.searchParams.get('topic') || '',
+                q: url.searchParams.get('q') || '',
+              }),
+            });
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/taste/reset') {
+          // 清空旧兴趣：先备份，再重置；仅管理端。
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可访问' }, 403);
+            return;
+          }
+          const file = path.join(STATE_DIR, 'taste.json');
+          try {
+            if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.bak-${Date.now()}`);
+            atomicWriteJson(file, resetTaste());
+            sendJson({ ok: true, cleared: true });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '重置失败' }, 500);
+          }
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/associations') {
+          // B 阶段：只读候选关联，不写状态文件。
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可访问' }, 403);
+            return;
+          }
+          const taste = normalizeTaste(readJsonSafe(path.join(STATE_DIR, 'taste.json'), null)).topics;
+          const selfMemory = normalizeSelfMemory(readJsonSafe(path.join(STATE_DIR, 'self-memory.json'), null)).items;
+          const key = `private:${String(cfg.ownerQQ || '')}`;
+          let concerns = [];
+          try { concerns = continuity.snapshot(key)?.concerns || []; } catch {}
+          sendJson({ ok: true, ...buildAssociations({ taste, selfMemory, concerns }) });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/eval/build-prompt') {
+          // D 阶段：用生产装配器构建两臂 prompt；只构建，不调用模型。
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可访问' }, 403);
+            return;
+          }
+          const body = await readBody();
+          const key = String(body.key || `private:${cfg.ownerQQ || ''}`);
+          const text = String(body.text || '');
+          const inject = body.inject !== false;
+          const capture = {};
+          try {
+            const prompt = await withMemoryContext(key, text, {
+              allowIdleAssociation: body.noWorkspace !== true,
+              disableMemory: body.noMemory === true,
+              disableLinkageInject: !inject,
+              forceLinkageInject: inject,
+              disableContinuity: body.noContinuity === true,
+              linkageBoundaryAt: Number(body.boundaryAt) || 0,
+              linkageOverrides: { taste: Array.isArray(body.taste) ? body.taste : undefined, selfMemory: Array.isArray(body.selfMemory) ? body.selfMemory : undefined },
+              evalCapture: capture,
+            });
+            sendJson({
+              ok: true,
+              inject,
+              chars: prompt.length,
+              prompt,
+              assembly: capture.assembly ? summarizeAssembly(capture.assembly) : null,
+              linkage: capture.linkage || null,
+            });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '构建失败' }, 500);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/eval/respond') {
+          // D 阶段模拟：只给评估用，走无工具后台会话；管理端限定。
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可访问' }, 403);
+            return;
+          }
+          const body = await readBody();
+          const prompt = String(body.prompt || '').slice(0, 20000);
+          if (!prompt) { sendJson({ ok: false, error: 'prompt 不能为空' }, 400); return; }
+          try {
+            const presetId = 'qq-memory';
+            // 近似聊天：明确要求直接回复，不进入记忆整理格式。
+            const chatPrompt = [
+              '【场景】普通 QQ 私聊。直接回复对方，像平时聊天那样。',
+              '不要整理记忆、不要输出“事实/证据/草稿/未发送”等格式，不要列字段清单，不要解释你在做什么。',
+              '',
+              prompt,
+            ].join('\n');
+            const out = await runHeadlessPrompt(chatPrompt, 120000, [], 'eval_sim', presetId);
+            sendJson({ ok: true, text: typeof out === 'string' ? out : String(out?.text || '') });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '回复失败' }, 500);
+          }
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/broadcast-trace') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可访问' }, 403);
+            return;
+          }
+          const limit = Math.max(1, Math.min(50, Number(url.searchParams.get('limit') || 10)));
+          let rows = [];
+          try {
+            const file = path.join(STATE_DIR, 'broadcast-trace.jsonl');
+            rows = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).slice(-limit)
+              .map((line) => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
+          } catch {}
+          sendJson({ ok: true, rows, assemblerVersion: ASSEMBLER_VERSION });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/initiative/contact-test') {
+          // 强制生成一条主动消息并真实发送：只给管理端测试用。
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可访问' }, 403);
+            return;
+          }
+          const ownerQQ = Number(cfg.ownerQQ);
+          if (!ownerQQ) { sendJson({ ok: false, error: '未配置 ownerQQ' }, 400); return; }
+          try {
+            let openTitle = '';
+            try { openTitle = continuity.snapshot(`private:${ownerQQ}`)?.concerns?.find((x) => ['open', 'paused'].includes(x.status))?.title || ''; } catch {}
+            const reasonText = openTitle ? `有一件没放下的事（${openTitle}）` : '很久没说话了';
+            const draftPrompt = [
+              '【场景】普通 QQ 私聊。给老大发一条主动消息，不超过 30 字。',
+              `想找他的理由：${reasonText}`,
+              '要求：像平时说话；不要提熬夜、催睡；不要解释你在做什么；不要写“记录/整理/草稿”这类词。',
+            ].join('\n');
+            const raw = await runHeadlessPrompt(draftPrompt, 60000, [], 'contact_draft');
+            const draft = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+            if (!draft || /熬夜|催睡|通宵/.test(draft)) {
+              sendJson({ ok: false, error: '草稿未通过安全闸', draft }, 422);
+              return;
+            }
+            const result = await bot.sendPrivateMessage(ownerQQ, draft);
+            contactSentAt = Date.now();
+            try {
+              fs.appendFileSync(INITIATIVE_LOG, `${JSON.stringify({ at: Date.now(), type: 'contact-test-sent', draft })}\n`);
+            } catch {}
+            sendJson({ ok: true, draft, message_id: result?.message_id ?? result ?? null });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '发送失败' }, 500);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/persona/openness/rollback') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) { sendJson({ ok: false, error: '仅管理端可访问' }, 403); return; }
+          const list = opennessState.proposals || [];
+          const target = [...list].reverse().find((p) => p.status === 'applied');
+          if (!target) { sendJson({ ok: false, error: '没有可回滚的提案' }, 400); return; }
+          const res = applyPersonaProposal(personaState, { deltas: { initiative: -Number(target.delta || 1) } }, Date.now(), PERSONA_DEFAULT_LIMITS);
+          if (!res.applied) { sendJson({ ok: false, error: '回滚未生效' }, 400); return; }
+          personaState = res.state;
+          savePersonaState();
+          target.status = 'rolled-back';
+          opennessState.appliedTotal = Math.max(0, (Number(opennessState.appliedTotal) || 0) - 1);
+          atomicWriteJson(OPENNESS_FILE, opennessState);
+          sendJson({ ok: true, rolledBack: target.at, before: target.before, after: Number(personaState?.current?.initiative) || 0 });
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/repairs') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) { sendJson({ ok: false, error: '仅管理端可访问' }, 403); return; }
+          sendJson({ ok: true, ...repairState });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/repairs/lesson') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) { sendJson({ ok: false, error: '仅管理端可访问' }, 403); return; }
+          const body = await readBody();
+          repairState = addRepair(repairState, { lesson: String(body.lesson || '') });
+          saveRepairState();
+          sendJson({ ok: true, lessons: repairState.lessons });
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/shared') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) { sendJson({ ok: false, error: '仅管理端可访问' }, 403); return; }
+          sendJson({ ok: true, ...sharedState, active: activeShared(sharedState) });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/shared/propose') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) { sendJson({ ok: false, error: '仅管理端可访问' }, 403); return; }
+          const body = await readBody();
+          const r = proposeShared(sharedState, { type: body.type, title: body.title, url: body.url, draft: body.draft });
+          if (!r.ok) { sendJson({ ok: false, error: r.reason }, 409); return; }
+          sharedState = r.state; saveSharedState();
+          sendJson({ ok: true, activity: r.activity });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/shared/status') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) { sendJson({ ok: false, error: '仅管理端可访问' }, 403); return; }
+          const body = await readBody();
+          const r = updateShared(sharedState, String(body.id || ''), String(body.status || ''), { ownerQuote: body.ownerQuote, herNotes: body.herNotes, versions: body.versions });
+          if (!r.ok) { sendJson({ ok: false, error: r.reason }, 400); return; }
+          sharedState = r.state; saveSharedState();
+          sendJson({ ok: true, activity: r.activity });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/persona/openness/check') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) { sendJson({ ok: false, error: '仅管理端可访问' }, 403); return; }
+          const body2 = await readBody().catch(() => ({}));
+          if (body2 && body2.reset === true) opennessState = readJsonSafe(OPENNESS_FILE, { proposals: [], lastProposalAt: 0, consecutive: 0, appliedTotal: 0 });
+          const r = checkOpennessDrift();
+          sendJson({ ok: true, result: r, state: opennessState });
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/persona/openness') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) { sendJson({ ok: false, error: '仅管理端可访问' }, 403); return; }
+          const taste = normalizeTaste(readJsonSafe(path.join(STATE_DIR, 'taste.json'), null));
+          const current = evaluateOpennessDrift({ taste, now: Date.now(), lastProposalAt: opennessState.lastProposalAt, conf: cfg.socialV2?.opennessDrift });
+          sendJson({ ok: true, current, proposals: opennessState.proposals || [] });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/initiative/decide') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可访问' }, 403);
+            return;
+          }
+          const decision = initiativeDecision();
+          sendJson(decision.ok ? { ...decision } : { ok: false, error: decision.reason }, decision.ok ? 200 : 400);
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/rhythm') {
+          if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
+            sendJson({ ok: false, error: '仅管理端可查看' }, 403);
+            return;
+          }
+          const conf = rhythmConfig(cfg.socialV2?.rhythm);
+          sendJson({ ok: true, config: conf, view: rhythmView(conf, Date.now()) });
+          return;
+        }
+        if (url.pathname === '/api/goals' && (req.method === 'GET' || req.method === 'POST')) {
+          // 查看/撤销目标变化。GET 返回当前四个驱力 + 最近变更；POST {eventId} 撤销一次事件。
+          if (req.method === 'POST') {
+            const body = await readBody();
+            let payload = null;
+            await enqueueGoalWrite(() => {
+              const result = revertGoalEvent(goalsState, body.eventId, { now: Date.now() });
+              if (result.reason !== 'ok') { payload = { ok: false, error: result.reason }; return; }
+              goalsState = result.state;
+              saveGoalsState();
+              payload = { ok: true, reverted: result.reverted, goals: goalPublic(goalsState) };
+            });
+            sendJson(payload?.ok ? payload : payload || { ok: false, error: 'rollback-failed' }, payload?.ok ? 200 : 400);
+            return;
+          }
+          sendJson({
+            ok: true,
+            enabled: cfg.socialV2?.goals?.enabled !== false,
+            goals: goalPublic(goalsState),
+            changelog: (Array.isArray(goalsState.changelog) ? goalsState.changelog : []).slice(-20),
+          });
+          return;
+        }
         if (req.method === 'POST' && url.pathname === '/api/memory/fact-review') {
           const body = await readBody();
           const review = await memoizedReview('relations',{...body.context,operation:body.operation||'confirm'},'fact_review',()=>reviewMemoryFacts(body.context, (prompt, timeout) => runHeadlessPrompt(prompt, timeout, [], 'fact_review')));
           sendJson({ ok: true, review });
           return;
         }
+        try { res.setHeader('Access-Control-Allow-Origin', '*'); } catch {}
+        if (url.pathname === '/api/emotion/impact') {
+          try { res.setHeader('Access-Control-Allow-Origin', '*'); } catch {}
+          try {
+            const days = Math.max(1, Math.min(7, Number(url.searchParams.get('days')) || 1));
+            const rawEmotion = JSON.parse(fs.readFileSync(path.join(STATE_DIR, 'emotion-scopes.json'), 'utf8').replace(/^\uFEFF/, ''));
+            const lanes = Array.isArray(rawEmotion && rawEmotion.states) ? rawEmotion.states : Object.entries((rawEmotion && rawEmotion.states) || {});
+            const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+            const merged = {};
+            for (const [, lane] of lanes) {
+              const impact = lane && lane.dailyImpact;
+              if (!impact || typeof impact !== 'object') continue;
+              for (const [day, rows] of Object.entries(impact)) {
+                if (day < cutoff) continue;
+                for (const [key, row] of Object.entries(rows || {})) {
+                  if (!/^(private|group):\d+$/.test(key)) continue;
+                  const cur = merged[key] || (merged[key] = { key, dv: 0, da: 0, events: 0 });
+                  cur.dv += Number(row.dv) || 0;
+                  cur.da += Number(row.da) || 0;
+                  cur.events += Number(row.events) || 0;
+                }
+              }
+            }
+            const ownerKey = cfg.ownerQQ ? 'private:' + String(cfg.ownerQQ) : '';
+            const items = Object.values(merged).map((r) => ({
+              key: r.key,
+              dv: Number(r.dv.toFixed(4)),
+              da: Number(r.da.toFixed(4)),
+              events: r.events,
+              impact: Number((Math.abs(r.dv) * Math.log(1 + r.events)).toFixed(4)),
+            })).sort((a, b) => b.impact - a.impact);
+            sendJson({ ok: true, days, owner: ownerKey, ownerItems: items.filter((i) => i.key === ownerKey), others: items.filter((i) => i.key !== ownerKey) });
+          } catch (error) {
+            sendJson({ ok: false, error: String(error && error.message || error).slice(0, 120) }, 500);
+          }
+          return;
+        }
+        if (url.pathname === '/api/labels/sync') {
+          try {
+            const added = await (globalThis.syncScopeLabels ? globalThis.syncScopeLabels() : Promise.resolve(0))
+            sendJson({ ok: true, added: Number(added) || 0 })
+          } catch (error) {
+            sendJson({ ok: false, error: String(error && error.message || error).slice(0, 120) }, 500)
+          }
+          return
+        }
         if (url.pathname === '/api/classroom') {
           if(req.headers['x-agent-call']!==undefined||req.headers['x-agent-token']!==undefined){sendJson({ok:false,error:'仅管理端可设置课程'},403);return;}
           const key=`private:${String(cfg.ownerQQ||'')}`;let result={};
           if(req.method==='POST'){
             const body=await readBody();
-            try{result=body.action==='generate'?growthClassroom.start(key,body.id):growthClassroom.edit(key,body);}
+            try{
+              if(body.action==='homework-ask')result=await growthClassroom.homeworkAnswer(key,body.id,body.scenario);
+              else if(body.action==='self-quiz')result=await growthClassroom.selfQuiz(key,body.id);
+              else result=body.action==='generate'?growthClassroom.start(key,body.id):growthClassroom.edit(key,body);
+            }
             catch(error){sendJson({ok:false,error:String(error.message||error)},400);return;}
             mindWorkspaces.invalidate();continuity.invalidate();
           }else if(req.method!=='GET'){sendJson({ok:false,error:'method not allowed'},405);return;}
-          sendJson({ok:true,...growthClassroom.view(key),model:String(cfg.dsh?.model||'deepseek-flash'),effort:backgroundEffort(cfg,'growth_classroom'),continuityEnabled:cfg.socialV2?.continuity?.enabled===true,workspaceEnabled:cfg.socialV2?.mind?.enabled!==false,legacy:expressionTeacher.view(key),reused:result.reused===true});return;
+          sendJson({ok:true,...growthClassroom.view(key),...(result&&result.answer?{homeworkAnswer:result}:{}),model:String(cfg.dsh?.model||'deepseek-flash'),effort:backgroundEffort(cfg,'growth_classroom'),continuityEnabled:cfg.socialV2?.continuity?.enabled===true,workspaceEnabled:cfg.socialV2?.mind?.enabled!==false,legacy:expressionTeacher.view(key),reused:result.reused===true});return;
         }
         if (url.pathname === '/api/mind') {
           if(req.headers['x-agent-call']!==undefined||req.headers['x-agent-token']!==undefined){sendJson({ok:false,error:'仅管理端可访问心绪中枢'},403);return;}
@@ -5351,25 +6598,6 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
           sendJson({ ok: true, mode: requestedMode, closedAgentPreset: next.closedAgentPreset, dshSynced });
           return;
         }
-        if (req.method === 'POST' && url.pathname === '/api/role') {
-          const body = await readBody();
-          const rs = readRoleState();
-          if (body.role && typeof body.role === 'string') {
-            const name = sanitizeRoleName(body.role);
-            if (!fs.existsSync(path.join(ROOT, 'roles', name + '.md'))) {
-              sendJson({ ok: false, error: `角色「${name}」不存在（roles/${name}.md）` }, 400);
-              return;
-            }
-            writeRoleState(name, rs.mode);
-            log(`控制台：角色已设置为 ${name}`);
-            sendJson({ ok: true, role: name });
-          } else {
-            writeRoleState(null, rs.mode);
-            log('控制台：角色已清除');
-            sendJson({ ok: true, role: null });
-          }
-          return;
-        }
         if (req.method === 'POST' && url.pathname === '/api/role-mode') {
           const body = await readBody();
           const rs = readRoleState();
@@ -5377,103 +6605,6 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
           writeRoleState(rs.role, mode);
           log(`控制台：静默模式 ${mode === 'silent' ? '开启' : '关闭'}`);
           sendJson({ ok: true, roleMode: mode });
-          return;
-        }
-        // ── 人格管理 ──────────────────────────────────────────────────────────
-        if (req.method === 'GET' && url.pathname === '/api/roles') {
-          const rs = readRoleState();
-          const summaries = roleSummaries();
-          sendJson({
-            // roles 保持「人格名字符串数组」的既有契约（scripts/test-console.mjs 等调用方依赖它）；
-            // 富信息放在 summaries 里，新老调用方互不影响。
-            roles: summaries.map((role) => role.name),
-            summaries,
-            current: rs.role ?? null,
-            limits: { nameMax: ROLE_NAME_MAX, contentMaxBytes: ROLE_CONTENT_MAX_BYTES, injectMaxChars: roleInjectMaxChars },
-          });
-          return;
-        }
-        if (req.method === 'GET' && url.pathname === '/api/roles/content') {
-          let name;
-          try { name = validateRoleName(url.searchParams.get('name')); } catch (error) { sendJson({ ok: false, error: error.message }, 400); return; }
-          if (!fs.existsSync(roleFilePath(name))) { sendJson({ ok: false, error: `人格「${name}」不存在` }, 404); return; }
-          const content = readRoleContent(name);
-          sendJson({
-            ok: true,
-            name,
-            content,
-            chars: content.length,
-            bytes: Buffer.byteLength(content, 'utf8'),
-            warnings: roleWarnings(content),
-            limits: { injectMaxChars: roleInjectMaxChars },
-            stats: roleCharStats(content),
-            // 每个小节在各模式下是否会被注入，供控制台预览「这条规则到底生不生效」
-            sections: { v1: roleSectionReport(content, 'v1'), v2: roleSectionReport(content, 'v2') },
-          });
-          return;
-        }
-        if (req.method === 'POST' && url.pathname === '/api/roles/limit') {
-          const body = await readBody();
-          const next = applyRoleInjectLimit(body.maxInjectChars);
-          const configFile = path.join(ROOT, 'config.json');
-          const file = readConfigObject(configFile);
-          file.role = { ...(file.role ?? {}), maxInjectChars: next };
-          atomicWriteJson(configFile, file);
-          cfg.role = { ...(cfg.role ?? {}), maxInjectChars: next };
-          roleInjectMaxChars = next;
-          log(`控制台：人格注入上限已设为 ${next} 字符（下一条消息生效）`);
-          sendJson({ ok: true, maxInjectChars: next, limits: { injectMaxChars: next } });
-          return;
-        }
-        if (req.method === 'POST' && url.pathname === '/api/roles/create') {
-          const body = await readBody();
-          let name; let content;
-          try { name = validateRoleName(body.name); content = validateRoleContent(body.content); }
-          catch (error) { sendJson({ ok: false, error: error.message }, 400); return; }
-          if (fs.existsSync(roleFilePath(name))) { sendJson({ ok: false, error: `人格「${name}」已存在` }, 400); return; }
-          writeRoleContent(name, content);
-          log(`控制台：创建人格「${name}」（${content.length} 字符）`);
-          sendJson({ ok: true, role: name, warnings: roleWarnings(content) });
-          return;
-        }
-        if (req.method === 'POST' && url.pathname === '/api/roles/update') {
-          const body = await readBody();
-          let name; let content;
-          try { name = validateRoleName(body.name); content = validateRoleContent(body.content); }
-          catch (error) { sendJson({ ok: false, error: error.message }, 400); return; }
-          if (!fs.existsSync(roleFilePath(name))) { sendJson({ ok: false, error: `人格「${name}」不存在` }, 404); return; }
-          writeRoleContent(name, content);
-          log(`控制台：更新人格「${name}」（${content.length} 字符）`);
-          sendJson({ ok: true, role: name, chars: content.length, warnings: roleWarnings(content) });
-          return;
-        }
-        if (req.method === 'POST' && url.pathname === '/api/roles/rename') {
-          const body = await readBody();
-          let from; let to;
-          try { from = validateRoleName(body.from); to = validateRoleName(body.to); }
-          catch (error) { sendJson({ ok: false, error: error.message }, 400); return; }
-          if (from === to) { sendJson({ ok: true, role: to, renamed: false }); return; }
-          if (!fs.existsSync(roleFilePath(from))) { sendJson({ ok: false, error: `人格「${from}」不存在` }, 404); return; }
-          if (fs.existsSync(roleFilePath(to))) { sendJson({ ok: false, error: `人格「${to}」已存在` }, 400); return; }
-          fs.renameSync(roleFilePath(from), roleFilePath(to));
-          const rs = readRoleState();
-          const switched = rs.role === from;
-          if (switched) writeRoleState(to, rs.mode);
-          log(`控制台：人格重命名「${from}」→「${to}」${switched ? '（当前启用中，已跟随切换）' : ''}`);
-          sendJson({ ok: true, role: to, renamed: true, currentFollowed: switched });
-          return;
-        }
-        if (req.method === 'POST' && url.pathname === '/api/roles/delete') {
-          const body = await readBody();
-          let name;
-          try { name = validateRoleName(body.name); } catch (error) { sendJson({ ok: false, error: error.message }, 400); return; }
-          if (!fs.existsSync(roleFilePath(name))) { sendJson({ ok: false, error: `人格「${name}」不存在` }, 404); return; }
-          fs.rmSync(roleFilePath(name));
-          const rs = readRoleState();
-          const cleared = rs.role === name;
-          if (cleared) writeRoleState(null, rs.mode);
-          log(`控制台：删除人格「${name}」${cleared ? '（该人格正在启用，已同时清除当前人格）' : ''}`);
-          sendJson({ ok: true, deleted: name, clearedCurrent: cleared });
           return;
         }
 
@@ -5987,7 +7118,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
           const current = fileV2 ?? ((cfg.socialV2 && typeof cfg.socialV2 === 'object') ? cfg.socialV2 : {});
           const merged = { ...current, ...body };
           // 子对象必须是非 null 对象；null/数组/基本类型会覆盖默认值导致工具开关被绕过，这里直接保留当前值。
-          for (const sub of ['tools', 'wake', 'send', 'wait', 'proactive', 'sticker', 'feedback', 'context']) {
+          for (const sub of ['tools', 'wake', 'send', 'wait', 'proactive', 'sticker', 'feedback', 'context', 'narrative']) {
             if (body[sub] !== undefined && (body[sub] === null || typeof body[sub] !== 'object' || Array.isArray(body[sub]))) {
               merged[sub] = current[sub] ?? {};
             }
@@ -6223,6 +7354,9 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
               merged.feedback.maxLength = Number.isFinite(n) ? Math.max(1, Math.round(n)) : current.feedback?.maxLength ?? 500;
             }
             if (merged.feedback.notifyOwnerOnError !== undefined) merged.feedback.notifyOwnerOnError = merged.feedback.notifyOwnerOnError === true;
+          }
+          if (body.narrative && typeof body.narrative === 'object') {
+            merged.narrative = narrativeConfig({ ...(current.narrative ?? {}), ...body.narrative });
           }
           // context：数值归一化
           if (body.context && typeof body.context === 'object') {
@@ -6609,6 +7743,27 @@ ${roleText.slice(0, 9000)}`;
           });
           return;
         }
+        // 只读：给她回看自己的成长课堂作业本（qq_read_classroom）。
+        // 2026-11-02：她没有任何本地工具，读不到 state 文件，所以走这个只读端点把文本递给她。
+        // 只允许管理员私聊，其他会话一律 403。
+        if (req.method === 'GET' && url.pathname === '/api/socialV2/classroom-notebook') {
+          const key = String(url.searchParams.get('key') ?? '').trim();
+          if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
+          if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) {
+            sendJson({ ok: false, error: 'agent token 无效' }, 403); return;
+          }
+          const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+          if (!ownerKey || key !== ownerKey) {
+            sendJson({ ok: false, error: '作业本只在管理员私聊里可读' }, 403); return;
+          }
+          if (!req.headers['x-agent-token']) { sendJson({ ok: false, error: '缺少会话令牌' }, 403); return; }
+          const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit')) || 20));
+          const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
+          const course = String(url.searchParams.get('course') ?? '').trim().slice(0, 40);
+          const notebook = renderNotebook(growthClassroom.state, { limit, offset, course });
+          sendJson({ ok: true, key, ...notebook, text: notebook.text });
+          return;
+        }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/prompt') {
           const key = String(url.searchParams.get('key') ?? '').trim();
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
@@ -6659,7 +7814,8 @@ ${roleText.slice(0, 9000)}`;
             collectSticker: 'qq_collect_sticker',
             getSelfImage: 'qq_get_self_image',
             sendVoice: 'qq_send_voice / qq_list_voices',
-            personaNote: 'qq_persona_note'
+            personaNote: 'qq_persona_note',
+            classroomNotebook: 'qq_read_classroom'
           };
           const tools = cfg.socialV2?.tools ?? {};
           const stickerToolFlags = new Set(['listStickers', 'getStickerImage', 'sendSticker', 'setStickerRemark', 'stickerNote', 'collectSticker']);
@@ -6671,7 +7827,7 @@ ${roleText.slice(0, 9000)}`;
             ok: true,
             key,
             time: new Date().toISOString(),
-            role: { name: selfReferenceEnabled() ? '自我参考' : roleState.role ?? null, hint: selfReferenceEnabled() ? selfReference.render(key) : currentMode === 'reserved2' ? currentRoleHintV2(key) : currentRoleHint(key) },
+            role: { name: '自我参考', hint: selfReference.render(key) },
             recommended: cfg.socialV2?.provideRecommendations === false ? null : {
               wake: cfg.socialV2?.wake ?? {},
               send: cfg.socialV2?.send ?? {},
@@ -6688,6 +7844,10 @@ ${roleText.slice(0, 9000)}`;
             // role.hint already carries the full self reference; retain only emotion here.
             persona: personaBlockFor(key, false, !selfReferenceEnabled()),
             participation: formatParticipationV2(st),
+            // 方便核对「课堂要求」到底有没有进她的提示词（只读，不额外调用）。
+            courseRules: growthClassroom.state.enabled
+              ? renderCourseRules(growthClassroom.state.courses)
+              : '',
             stickers: {
               enabled: cfg.socialV2?.sticker?.enabled !== false,
               total: stickerEntries.length,
@@ -6772,7 +7932,13 @@ ${roleText.slice(0, 9000)}`;
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('markRead')) { sendJson({ ok: false, error: '工具未启用：qq_mark_read' }, 403); return; }
           const st = getSocialV2State(key);
-          const throughSeq = requestedReadThroughSeqV2(st, body, !!req.headers['x-agent-token']);
+          let throughSeq;
+          try {
+            throughSeq = requestedReadThroughSeqV2(st, body, !!req.headers['x-agent-token'], { required: true });
+          } catch (error) {
+            sendJson({ ok: false, error: error.message, code: error.code, readThroughSeq: error.readThroughSeq ?? readThroughSeqV2(st) }, error.statusCode || 400);
+            return;
+          }
           // 如果当前已经是“潜水”唤醒配置，且最近还有对话/刚被唤醒，不允许用 mark_read 直接回到潜水；
           // 必须先等够沉睡前观察窗口，避免“聊两句又去潜水”。
           // 例外：群聊已经是「强制潜水 + 被点才醒」，她本来就没法待在活跃态，
@@ -6822,7 +7988,13 @@ ${roleText.slice(0, 9000)}`;
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('setWakeConfig')) { sendJson({ ok: false, error: '工具未启用：qq_set_wake_config' }, 403); return; }
           const st = getSocialV2State(key);
-          const throughSeq = requestedReadThroughSeqV2(st, body, !!req.headers['x-agent-token']);
+          let throughSeq;
+          try {
+            throughSeq = requestedReadThroughSeqV2(st, body, !!req.headers['x-agent-token']);
+          } catch (error) {
+            sendJson({ ok: false, error: error.message, code: error.code, readThroughSeq: error.readThroughSeq ?? readThroughSeqV2(st) }, error.statusCode || 400);
+            return;
+          }
           // Preserve the deployed behavior: with markRead disabled, update wake configuration only.
           const acknowledgeOnClose = throughSeq !== null && v2ToolEnabled('markRead');
           const input = body.config && typeof body.config === 'object' && !Array.isArray(body.config) ? body.config : {};
@@ -6865,6 +8037,21 @@ ${roleText.slice(0, 9000)}`;
             next.infinite = true;
             next.sleepUntil = null;
             next.triggers.anyMessage = true;
+          }
+          // 老大私聊永久活跃：她每轮收尾会把自己设成潜水，之后老大发普通消息就叫不醒，
+          // 表现成「又不回我了」。这里对老大私聊的 agent 调用做收口，必须 active + anyMessage。
+          // 放在沉睡前观察之前，否则会先被那条闸门 400 掉。
+          {
+            const ownerKeyForce = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+            if (req.headers['x-agent-token'] && ownerKeyForce && key === ownerKeyForce) {
+              if (next.mode !== 'active' || !next.triggers.anyMessage) {
+                log(`[reserved2] 老大私聊唤醒配置收口 ${key}: mode ${next.mode}->active, anyMessage->true`);
+              }
+              next.mode = 'active';
+              next.infinite = true;
+              next.sleepUntil = null;
+              next.triggers.anyMessage = true;
+            }
           }
           if (typeof input.infinite === 'boolean' && next.mode !== 'active') next.infinite = input.infinite;
           if (next.infinite) {
@@ -8642,6 +9829,20 @@ ${roleText.slice(0, 9000)}`;
           if (req.headers['x-agent-token'] && !v2ToolEnabled('memory')) { sendJson({ ok: false, error: '工具未启用：qq_memory_append' }, 403); return; }
           const st = getSocialV2State(key);
           appendMemoryV2(st, category, content, extra);
+          if (category === 'memberImpression') {
+            const _t = String(extra.target || '').trim();
+            const _im = _t && st.memberImpressions ? st.memberImpressions[_t] : null;
+            if (_im && Array.isArray(_im.traits) && _im.traits.length > 6 && !_im.compressing) {
+              _im.compressing = true;
+              void consolidateImpressions(key, _t).catch(() => {}).finally(() => {
+                try {
+                  const s2 = getSocialV2State(key);
+                  const c2 = s2 && s2.memberImpressions ? s2.memberImpressions[_t] : null;
+                  if (c2 && c2.compressing) { delete c2.compressing; saveSocialV2State(); }
+                } catch {}
+              });
+            }
+          }
           sendJson({ ok: true, key, category, content, memory: formatMemoryV2(st) });
           return;
         }
@@ -10540,7 +11741,108 @@ ${roleText.slice(0, 9000)}`;
     return [guide, lines.join('\n')].filter(Boolean).join('\n');
   }
 
-  function appendMemoryV2(st, category, content, extra = {}) {
+  // 印象压缩：某人的零散印象超过 6 条时，合并成 3 条，原文进 archive。
+// 只压缩，不删除；模型失败就保持原样。
+// 把群名/昵称同步到控制台的 labels.json（只补空缺，不覆盖用户手改的）。
+// 启动时跑一次，之后每 6 小时一次；失败静默。
+globalThis.syncScopeLabels = async function syncScopeLabels() {
+  try {
+    const labelFile = path.join(os.homedir(), '.dsh', 'feiyu-memory-console', 'labels.json');
+    let labels = {};
+    try { labels = JSON.parse(fs.readFileSync(labelFile, 'utf8').replace(/^\uFEFF/, '')); } catch {}
+    if (!labels || typeof labels !== 'object') labels = {};
+    let added = 0;
+    const call = async (p) => {
+      const res = await fetch(cfg.snowluma.httpUrl.replace(/\/+$/, '') + p, {
+        headers: cfg.snowluma.accessToken ? { authorization: 'Bearer ' + cfg.snowluma.accessToken } : {},
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    };
+    try {
+      const gl = await call('/get_group_list');
+      const rows = Array.isArray(gl && gl.data) ? gl.data : Array.isArray(gl) ? gl : [];
+      for (const g of rows) {
+        const key = 'group:' + String(g.group_id);
+        const name = String(g.group_name || '').trim();
+        if (name && !labels[key]) { labels[key] = name; added++; }
+      }
+    } catch {}
+    for (const key of socialV2.conversations.keys()) {
+      if (!key.startsWith('private:') || labels[key]) continue;
+      const id = key.slice('private:'.length);
+      try {
+        const info = await call('/get_stranger_info?user_id=' + id + '&no_cache=false');
+        const d = (info && info.data) || info || {};
+        const name = String(d.nickname || d.remark || '').trim();
+        if (name) { labels[key] = name; added++; }
+      } catch {}
+    }
+    if (cfg.ownerQQ && !labels['private:' + String(cfg.ownerQQ)]) { labels['private:' + String(cfg.ownerQQ)] = '老大'; added++; }
+    if (added) {
+      fs.mkdirSync(path.dirname(labelFile), { recursive: true });
+      fs.writeFileSync(labelFile, JSON.stringify(labels, null, 2) + '\n', 'utf8');
+      log('[labels] 同步了 ' + added + ' 个名字');
+    }
+    return added;
+  } catch (error) {
+    log('[labels] 同步失败: ' + String(error && error.message || error).slice(0, 100));
+  }
+};
+
+async function consolidateImpressions(key, target) {
+  const st = getSocialV2State(key);
+  const im = st && st.memberImpressions ? st.memberImpressions[target] : null;
+  if (!im || !Array.isArray(im.traits) || im.traits.length <= 6) return false;
+  const list = im.traits.slice(-10);
+  const prompt = `把下面这些关于同一个人的零散印象，合并成最多 3 条。每条不超过 60 字，只保留稳定特征、重要经历和最近的变化，去掉重复和过期细节，不要编造没出现过的事。
+只输出 JSON：{"traits":["…","…"]}
+原印象：${JSON.stringify(list)}`;
+  let raw = '';
+  try {
+    raw = String(await runHeadlessPrompt(prompt, 60000, [], 'impression_compress') || '');
+  } catch (error) {
+    log('[memory] 印象压缩调用失败: ' + String(error && error.message || error).slice(0, 120));
+    return false;
+  }
+  log('[memory] 印象压缩原始输出: ' + raw.slice(0, 200));
+  let v = null;
+  try { v = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')); } catch {}
+  const merged = (Array.isArray(v && v.traits) ? v.traits : []).map((t) => String(t || '').trim().slice(0, 60)).filter(Boolean).slice(0, 3);
+  if (!merged.length) return false;
+  const live = getSocialV2State(key);
+  const cur = live && live.memberImpressions ? live.memberImpressions[target] : null;
+  if (!cur) return false;
+  cur.archive = [...(Array.isArray(cur.archive) ? cur.archive : []), ...cur.traits].slice(-40);
+  cur.traits = merged;
+  cur.compressedAt = Date.now();
+  saveSocialV2State();
+  log(`[memory] 印象压缩 ${target}: ${list.length} 条 → ${merged.length} 条`);
+  return true;
+}
+
+// 每天、每个聊天记一笔情绪净变化，用于"今天谁影响了她"排行。
+// 只复用已有事件结果，不额外调用模型。
+function recordDailyImpact(state, key, beforeEmotion) {
+  if (!key || !state) return;
+  const last = state.lastEvent;
+  if (!last) return;
+  const dv = Number(last.deltaV ?? (Number(state.state?.valence) - Number(beforeEmotion?.state?.valence ?? 0))) || 0;
+  const da = Number(last.deltaA ?? (Number(state.state?.arousal) - Number(beforeEmotion?.state?.arousal ?? 0))) || 0;
+  if (!dv && !da) return;
+  const day = new Date().toISOString().slice(0, 10);
+  const impact = state.dailyImpact && typeof state.dailyImpact === "object" ? state.dailyImpact : (state.dailyImpact = {});
+  const today = impact[day] && typeof impact[day] === "object" ? impact[day] : (impact[day] = {});
+  const row = today[key] && typeof today[key] === "object" ? today[key] : (today[key] = { dv: 0, da: 0, events: 0 });
+  row.dv = Number((Number(row.dv || 0) + dv).toFixed(4));
+  row.da = Number((Number(row.da || 0) + da).toFixed(4));
+  row.events = Number(row.events || 0) + 1;
+  const days = Object.keys(impact).sort();
+  while (days.length > 7) { const old = days.shift(); delete impact[old]; }
+}
+
+function appendMemoryV2(st, category, content, extra = {}) {
     if (!st) return;
     const text = redactKnownTokensOnly(String(content ?? '')).trim();
     const cat = String(category || '').trim();
@@ -10592,7 +11894,7 @@ ${roleText.slice(0, 9000)}`;
       if (!st.memberImpressions || typeof st.memberImpressions !== 'object') st.memberImpressions = {};
       const old = st.memberImpressions[target] || {};
       const traits = Array.isArray(old.traits) ? old.traits.slice(0, 10) : [];
-      if (text && !traits.includes(text.slice(0, 50))) traits.push(text.slice(0, 50));
+      if (text && !traits.includes(text.slice(0, 60))) traits.push(text.slice(0, 60));
       st.memberImpressions[target] = {
         traits,
         interactionCount: (Number(old.interactionCount) || 0) + 1,
@@ -10814,7 +12116,7 @@ ${roleText.slice(0, 9000)}`;
   // 是否"直接针对 AI"的提问/挑战：提到 AI 相关词且带疑问/比较，或对"你"开火，或追问催促
   function isDirectedAtAi(textContent) {
     const lower = String(textContent ?? '').toLowerCase();
-    const aiMention = /deepseek|claude|chatgpt|gpt|大肥鱼|小鲸鱼|鲸鱼|d指导|d老师|d师傅|深度求索|\bds\b|ai|人工智障|机器人|模型/.test(lower);
+    const aiMention = /deepseek|claude|chatgpt|gpt|d指导|d老师|d师傅|深度求索|\bds\b|ai|人工智障|机器人|模型/.test(lower);
     const challenge = /强|弱|行不行|能不能|会不会|是不是|一半|水平|垃圾|废物|白嫖|菜|不如|厉害|赢|输|比.*强|比.*弱/.test(lower);
     const question = /[?？吗呢吧]|怎么|为什么|哪|谁/.test(lower);
     if (aiMention && (question || challenge)) return true;
@@ -10951,7 +12253,19 @@ ${roleText.slice(0, 9000)}`;
 
   function buildContextBlock(key) {
     const ctx = (social.recentMessages.get(key) ?? []).slice(-Number(cfg.social?.contextWindow ?? 15));
-    return ctx.map((m) => `${m.isOwner ? '【管理员】' : ''}${m.sender}：${m.text}${mediaHintFor(key, m.messageId, m.media)}`).join('\n') || '（无）';
+    const ago = (m) => {
+      const t = Number(m.time || 0);
+      if (!t) return "";
+      const d = Date.now() - t;
+      if (d < 0) return "";
+      const min = Math.round(d / 60000);
+      if (min < 1) return "（刚刚）";
+      if (min < 60) return `（${min} 分钟前）`;
+      const h = Math.round(min / 60);
+      if (h < 24) return `（${h} 小时前）`;
+      return `（${Math.round(h / 24)} 天前）`;
+    };
+    return ctx.map((m) => `${m.isOwner ? '【管理员】' : ''}${m.sender}：${m.text}${mediaHintFor(key, m.messageId, m.media)}${ago(m)}`).join('\n') || '（无）';
   }
 
   // 触发进入活跃（启动阶段 → 活跃阶段）
@@ -11393,56 +12707,15 @@ ${roleText.slice(0, 9000)}`;
     startSocialLoop();
   }
 
-  // 当前角色扮演提示：读 state/current-role.json + roles/<角色>.md，
-  // 由桥接注入到 QQ 群消息（群友无法通过对话修改，只能由管理端写该文件）。
-  // 缓存 key 为两个文件的 mtime，mtime 未变时直接返回，避免每次同步读文件。
-  let roleHintCache = { key: '', raw: '' };
-  // 原始人格卡（按 mtime 缓存，不截断）。
-  function roleRawContent(key) {
-    if (selfReferenceEnabled()) return selfReference.render(key);
-    try {
-      const rs = readRoleState();
-      if (!rs.role) return '';
-      // 读取点也必须校验人格名：写入点（控制台 /role 命令）都过 sanitizeRoleName，
-      // 但 state/current-role.json 是**用户可直接编辑**的文件。没有这道校验时，
-      // {"role":"../../../../Users/Public/x"} 会让 roles/ 之外的文件被读进来并注入每一条提示词。
-      const safeName = sanitizeRoleName(rs.role);
-      if (!safeName || safeName.includes('..')) return '';
-      const roleFile = path.join(ROLES_DIR, safeName + '.md');
-      const resolved = path.resolve(roleFile);
-      if (!resolved.startsWith(path.resolve(ROLES_DIR) + path.sep)) return '';
-      if (!fs.existsSync(resolved)) return '';
-      const stateStat = fs.statSync(ROLE_STATE_FILE);
-      const roleStat = fs.statSync(roleFile);
-      // 缓存 key 必须带上**文件名与文件大小**，不能只看 mtime：
-      // ① 有些文件系统 mtime 只有秒级粒度（或时钟回拨），同一 tick 内把角色卡重写成新人格，
-      //    两个 mtime 完全相同 → 缓存命中 → 注入的还是旧人格，而且是每条提示词都错；
-      //    带上名字后，切换角色（例如 a.md → b.md）永远不会误命中。
-      // ② 同名的原地重写若长度变了（大多数编辑都会变），size 变化也能击穿缓存。
-      // 代价只是多几次 stat，比"热注入路径上一直发旧人格"划算得多。
-      const cacheKey = `${safeName}:${stateStat.mtimeMs}:${stateStat.size}:${roleStat.mtimeMs}:${roleStat.size}`;
-      if (roleHintCache.key === cacheKey) return roleHintCache.raw;
-      const raw = fs.readFileSync(roleFile, 'utf8');
-      roleHintCache = { key: cacheKey, raw };
-      return raw;
-    } catch {
-      return '';
-    }
-  }
-  // 按仿真模式取用：先用标题里的 〔一代〕/〔二代〕 标记筛掉另一模式的专属小节，
-  // **再**按上限截断——这样另一模式的内容不会白白占掉本次的注入预算。
-  function roleHintForMode(mode,key) {
-    const selected = selectRoleText(roleRawContent(key), mode);
-    if (!selected) return '';
-    return selected.length > roleInjectMaxChars ? truncateText(selected, roleInjectMaxChars) : selected;
-  }
-  function currentRoleHint(key) {
-    return roleHintForMode('v1',key);
-  }
+  // 2026-11-01：人格卡已下线（身份走「自我参考」）。保留两个空实现只为兼容既有调用点：
+  // 万一 selfReference 被关掉，这里返回空串，不再去读 roles/*.md。
+  function currentRoleHint() { return ''; }
+  function currentRoleHintV2() { return ''; }
 
-  // 二代仿真模式专用角色提示：去掉一代的 [SILENT] / 空格分句等状态机指令，避免与工具协议冲突。
-  // 为了不削减原角色卡内容，示例节不整体删除，而是把“用空格分条”的示范改写成“用逗号表示停顿”，
-  // 让二代 AI 既保留原有人格示例，又不会照抄单条消息里的中文空格。
+  // ── 发送内容的两条软提醒 ────────────────────────────────────────────────
+  // 2026-11-01：这三个函数原来和角色卡提示挤在同一段里，拆卡时被一起删掉，
+  // 但发送路径仍在调用 → qq_send_message 直接抛 "findCjkSpaceWarning is not defined"。
+  // 现在按职责单独放回来（与角色卡无关，属于发送质量检查）。
   function isCjkLikeChar(ch) {
     if (!ch) return false;
     const code = ch.codePointAt(0);
@@ -11454,34 +12727,7 @@ ${roleText.slice(0, 9000)}`;
     );
   }
 
-  // 仅用于二代角色卡“回复示例”节：把示例里用于分条的中文空格改写成中文逗号。
-  // 空格两侧只要有一侧是中文/中文标点，且另一侧不是 / \ ( ) [ ] { } " ' < > | 等符号，就转成逗号。
-  // 这样能保留示例内容，同时避免把英文/URL/斜杠周围的空间改坏。
-  function convertExampleSpacesToComma(line) {
-    const chars = Array.from(String(line ?? ''));
-    const NO_REPLACE = new Set(['/', '\\', '(', ')', '[', ']', '{', '}', '"', "'", '<', '>', '|', '&', '=', ':', ';', ',', '.', '。', '，', '、']);
-    let out = '';
-    for (let i = 0; i < chars.length; i++) {
-      const ch = chars[i];
-      if (ch === ' ' || ch === '\t') {
-        const prev = chars[i - 1];
-        const next = chars[i + 1];
-        const prevCjk = !!prev && isCjkLikeChar(prev);
-        const nextCjk = !!next && isCjkLikeChar(next);
-        const prevBlocked = !!prev && NO_REPLACE.has(prev);
-        const nextBlocked = !!next && NO_REPLACE.has(next);
-        if ((prevCjk || nextCjk) && !prevBlocked && !nextBlocked) {
-          out += '，';
-          continue;
-        }
-      }
-      out += ch;
-    }
-    return out;
-  }
-
-  // 检测二代发送内容里“中文之间用空格”的不自然写法，用于给 AI 返回软提醒。
-  // 只检测空格两侧都是中文/中文标点的情况，避免误伤英文单词间隔（如 DeepSeek V3）。
+  // 检测“中文之间用空格”的不自然写法（只提示，不拦截）；英文单词间隔不算。
   function findCjkSpaceWarning(messages) {
     const bad = [];
     for (let i = 0; i < (messages || []).length; i++) {
@@ -11503,13 +12749,10 @@ ${roleText.slice(0, 9000)}`;
     return `${label}消息内部有中文空格，真人一般不这么打；可删掉空格用标点，或拆成数组多条。`;
   }
 
-  // 检测二代发送内容里“分条断点不自然”的情况：某条消息以逗号/顿号等非终止标点结尾，
-  // 或以“的/了/吗/呢/吧/是/在/把/被/让/给”等通常需要接后续成分的词结尾，下一条又紧跟中文内容，
-  // 说明 AI 很可能把同一句话拆到了两条消息里。这里只做软提醒，不拦截、不改写。
+  // 检测分条断点不自然：某条以非终止标点/半句词结尾，下一条又紧跟中文内容 → 可能把一句话拆碎了。
   function findSplitBoundaryWarning(messages) {
     if (!Array.isArray(messages) || messages.length <= 1) return null;
     const INCOMPLETE_TAIL_RE = /(?:的|了|吗|呢|吧|啊|呀|嘛|是|在|把|被|让|给|从|对|向|和|与|或|而|但|然|就|都|还|又|也|很|太|最|更|不|没|有|这|那|哪|啥|什么|怎么|为什么|因为|所以|但是|然后|我|你|他|她|它)$/;
-    // 这些是常见“短句但完整”的结尾，不应因为以“的/了”等结尾就被当成半句话。
     const COMPLETE_SHORT = new Set(['好的', '行了', '算了', '知道了', '可以了', '没事了', '走了', '睡了', '来了', '懂了', '明白了', '抱歉', '没事', '好吧', '行吧', '算了吧', '好', '行', '嗯', '哦']);
     const bad = [];
     for (let i = 0; i < messages.length - 1; i++) {
@@ -11525,36 +12768,6 @@ ${roleText.slice(0, 9000)}`;
     }
     if (!bad.length) return null;
     return `第 ${bad.join('，')} 条之间像是把同一句话拆开了；如果两条拼起来才完整，请合并成一条，或把断点移到完整句子的边界。`;
-  }
-
-  function currentRoleHintV2(key) {
-    // 先按 〔二代〕/〔一代〕 标记筛小节；下面的逐行过滤只是给「没标记的老卡片」兜底。
-    const raw = roleHintForMode('v2',key);
-    if (!raw) return '';
-    // 一代仿真模式专用指令整行过滤，避免污染二代工具协议。
-    // 用 role-card.js 导出的那份（文件顶部已 import）：这里原先又抄了一份同源正则，
-    // 两份"哪行算一代指令"的安全相关过滤器一旦漂移，就会出现"selectRoleText 认为是二代内容、
-    // 这里却把一代指令漏进二代提示词"这种只在特定角色卡上复现的错。
-    const lines = raw.split('\n');
-    const kept = [];
-    let inExampleSection = false;
-    for (const line of lines) {
-      if (/^##\s*.*回复示例/.test(line)) {
-        inExampleSection = true;
-        // 保留标题，但把“空格代表分条”的一代语义改写成二代语义
-        kept.push(line.replace(/（空格代表前后分两条消息回答）/, '（示例中已用逗号表示停顿；想分多条请用数组）'));
-        continue;
-      }
-      if (inExampleSection && /^##\s/.test(line)) {
-        inExampleSection = false;
-      }
-      if (inExampleSection) {
-        kept.push(convertExampleSpacesToComma(line));
-      } else if (!GEN1_ROLE_LINE_RE.test(line)) {
-        kept.push(line);
-      }
-    }
-    return kept.join('\n');
   }
 
   // QQ 群成员名片/昵称缓存：@ 段解析用，避免每条消息都调一次 OneBot API。
@@ -12092,23 +13305,35 @@ ${roleText.slice(0, 9000)}`;
     return readThroughSeqV2(st);
   }
 
-  function requestedReadThroughSeqV2(st, body, isAgent) {
-    if (!Object.prototype.hasOwnProperty.call(body, 'throughSeq')) return null;
-    const seq = body.throughSeq;
+  function requestedReadThroughSeqV2(st, body, isAgent, { required = false } = {}) {
+    const hasOwn = Object.prototype.hasOwnProperty.call(body, 'throughSeq');
     const max = isAgent ? readThroughSeqV2(st) : st.lastUnreadSeq;
-    if (!Number.isSafeInteger(seq) || seq < 0) {
-      const error = new Error('throughSeq 必须是非负安全整数；请先读取未读消息并使用返回的 readThroughSeq');
+    if (!hasOwn) {
+      // 控制台旧行为（清空全部）只留给明确的控制台操作；代理调用必须给水位。
+      if (!isAgent) return null;
+      if (!required) return null;
+      const error = new Error(`代理调用必须带 throughSeq；当前安全水位是 ${max}（只允许标记已展示给模型的消息）`);
       error.statusCode = 400;
+      error.code = 'throughSeq-required';
+      error.readThroughSeq = max;
       throw error;
     }
-    // 传超水位时**夹到上限**而不是直接拒。
-    // 为什么改：以前一律 400，AI 拿到报错就换个值再试，经常连续失败（实测今天 4 次），
-    // 未读因此永远清不掉，越积越多 —— 她醒来看到一堆陈年未读，反而判断「这是旧话题」不回话。
-    // 夹到上限是安全的方向：只会少标已读，绝不会把没展示过的消息误标成已读。
-    if (seq > max || seq > st.lastUnreadSeq) {
-      const clamped = Math.min(max, st.lastUnreadSeq);
-      log(`[reserved2] throughSeq ${seq} 超过水位，夹到 ${clamped}（${isAgent ? 'agent' : 'console'}）`);
-      return clamped;
+    const seq = body.throughSeq;
+    if (!Number.isSafeInteger(seq) || seq < 0) {
+      const error = new Error(`throughSeq 必须是非负安全整数；当前安全水位是 ${max}`);
+      error.statusCode = 400;
+      error.code = 'throughSeq-invalid';
+      error.readThroughSeq = max;
+      throw error;
+    }
+    // 方案 B：越过“实际展示给模型”的水位一律拒绝，不再夹到上限。
+    // 夹到上限会让代理误以为清掉了陈年未读，而真实未展示的消息仍然留着。
+    if (seq > max) {
+      const error = new Error(`throughSeq(${seq}) 超过安全水位(${max})：只允许标记确实进入模型上下文的消息`);
+      error.statusCode = 400;
+      error.code = 'throughSeq-beyond-watermark';
+      error.readThroughSeq = max;
+      throw error;
     }
     return seq;
   }
@@ -12219,7 +13444,13 @@ ${roleText.slice(0, 9000)}`;
     if (wcTr.anyMessage) wcTriggers.push('任意消息');
     if (Number(wcTr.probability) > 0) wcTriggers.push(`概率${wcTr.probability}`);
     const wakeLine = `【当前唤醒】${wcMode}，${wcTime}${wcTriggers.length ? `；触发：${wcTriggers.join('/')}` : ''}\n\n`;
-    const base = roleLine + tokenLine + antiAiLine + proactiveLine + stickerLine + personaLine + replyLine + statusLine + wakeLine + memoryLine + participationLine + preSleepLine;
+    // 2026-11-02：成长课堂原来只在 continuity 选中课程时注入一次（没留下任何命中痕迹），等于没教。
+    // 现在把已启用课程的「适用/要求/避免」作为常驻块放进唤醒提示，私聊和群聊都生效。
+    // 课程文本只含通用行为要求（已核对不含人名/私事），所以群聊注入不涉及隐私。
+    const courseRules = growthClassroom.state.enabled
+      ? renderCourseRules(growthClassroom.state.courses)
+      : '';
+    const base = roleLine + tokenLine + antiAiLine + proactiveLine + stickerLine + personaLine + courseRules + replyLine + statusLine + wakeLine + memoryLine + participationLine + preSleepLine;
     if (reason === 'bootstrap') {
       return `${base}【引导唤醒】你已接入 QQ 会话 ${key}。\n当前是二代仿真模式：你的文本输出不会自动发送到 QQ，所有发言必须通过工具完成。\n请先调用 qq_get_prompt 查看角色、推荐值、可用工具和状态；有待回应的消息先按首回复节奏处理，最后才用 qq_set_wake_config 设置你希望如何被唤醒。`;
     }
@@ -12255,7 +13486,8 @@ ${roleText.slice(0, 9000)}`;
     }
     if (reason === 'proactiveCheck') {
       if (String(key).startsWith('private:')) {
-        return `${base}【主动机会】${key}\n原因：这个私聊已经安静了一段时间，这是一次你可以主动找对方说话的机会。\n优先接着上次没聊完的事、分享一个刚想到的、或问一句对方最近怎么样；对方一直没回时别连着追问。想不出自然的话就安静收尾（qq_mark_read 或 qq_set_wake_config）。`;
+        const why = st.proactiveReason && st.proactiveReason !== 'group' ? `\n【这次的由头】${st.proactiveReason}\n顺着这个由头开口，别写成问候模板；由头本身不自然就安静收尾。` : '';
+        return `${base}【主动机会】${key}\n原因：这个私聊已经安静了一段时间，这是一次你可以主动找对方说话的机会。\n优先接着上次没聊完的事、分享一个刚想到的、或问一句对方最近怎么样；对方一直没回时别连着追问。想不出自然的话就安静收尾（qq_mark_read 或 qq_set_wake_config）。${why}`;
       }
       return `${base}【主动机会】${key}\n原因：群里已经安静了一段时间，这是一次你可以主动冒泡的机会。\n优先主动开个话题、追问上次没聊完的事、分享一个刚想到的想法；如果一时想不到，可以用 mcp__web-search-safe__web_search 搜一下当前热点/时事/网络热梗，再结合记忆里的群友兴趣挑一个自然角度。只要内容自然，就大胆开口；如果实在没话想说，再安静收尾（qq_mark_read 或 qq_set_wake_config）。`;
     }
@@ -12465,7 +13697,7 @@ ${roleText.slice(0, 9000)}`;
     proactiveCheck: 20
   };
 
-  // 唤醒原因可能带子类型（如 keyword:小鲸鱼、speaker:昵称），取冒号前的基名计算优先级。
+  // 唤醒原因可能带子类型（如 keyword:小崽神、speaker:昵称），取冒号前的基名计算优先级。
   function wakePriorityV2(reason) {
     const base = String(reason ?? '').split(':')[0];
     return WAKE_PRIORITY[base] ?? 0;
@@ -12657,6 +13889,8 @@ ${roleText.slice(0, 9000)}`;
   async function checkOwnerContact() {
     const conf = ownerContactCfg();
     if (!conf.enabled) return;
+    // P2 节律：安静时段不主动联系（只回应来消息）。
+    if (rhythmView(cfg.socialV2?.rhythm).quiet) return;
     if (currentMode !== 'reserved2' || socialV2.paused || cfg.socialV2?.enabled === false) return;
     const ownerQQ = Number(cfg.ownerQQ);
     if (!ownerQQ) return;
@@ -12822,8 +14056,29 @@ ${roleText.slice(0, 9000)}`;
     }
   }
 
+  // 「有由头才开口」：主动找老大之前先看有没有具体事由，有就把它写进提示词。
+  // 没有由头就不发「在吗」这类空话——那种消息比不发更伤人。
+  function proactiveReasonV2(key, st) {
+    // 1) 挂念里还有没说出口的话
+    const thoughts = Array.isArray(st.pendingThoughts)
+      ? st.pendingThoughts.filter((t) => t && (!t.expiresAt || Date.now() < Number(t.expiresAt)))
+      : [];
+    if (thoughts.length) return `你之前有个念头一直没说出口：${String(thoughts[0]?.text || thoughts[0] || '').slice(0, 120)}`;
+    // 2) 话头没接完
+    const recent = Array.isArray(st.recentMessages) ? st.recentMessages.slice(-8) : [];
+    const last = [...recent].reverse().find((m) => m && String(m.plain || m.text || '').trim());
+    if (last) {
+      const txt = String(last.plain || last.text || '').trim();
+      if (last.isSelf && /[?？]\s*$/.test(txt)) return `你上一句问了他「${txt.slice(0, 80)}」，他还没回`;
+      if (!last.isSelf && /(回头|待会|等下|明天|稍后|晚点|一会儿)/.test(txt)) return `他之前说「${txt.slice(0, 80)}」，可以问一句后话`;
+    }
+    return null;
+  }
+
   function scheduleProactiveCheckV2(key) {
     if (cfg.socialV2?.proactive?.enabled === false) return;
+    // P2 节律：安静时段不主动发消息（只回应来消息）。
+    if (rhythmView(cfg.socialV2?.rhythm).quiet) return;
     // 老大的私聊交给 ownerContact 定点调度；这里不再叠一层随机主动，避免双重打扰。
     if (ownerContactCfg().enabled && key === `private:${Number(cfg.ownerQQ)}`) return;
     if (socialV2.paused || currentMode !== 'reserved2') return;
@@ -12864,6 +14119,21 @@ ${roleText.slice(0, 9000)}`;
       const idle = Date.now() - (st.lastIncomingAt || 0);
       const probBase = Number(p.probability);
       let prob = Math.min(1, Math.max(0, Number.isFinite(probBase) ? probBase : 0.4));
+      // 好感度：信任为主、熟悉为辅，未解决的张力扣分。越亲近越可能主动找。
+      let affinity = 0.5;
+      try {
+        const raw = JSON.parse(fs.readFileSync(path.join(STATE_DIR, 'continuity.json'), 'utf8').replace(/^\uFEFF/, ''));
+        const rows = Array.isArray(raw.chats) ? raw.chats : Object.entries(raw.chats || {});
+        for (const [k, v] of rows) {
+          if (k !== key || !v || !v.relation) continue;
+          const t = Number(v.relation.trust);
+          const f = Number(v.relation.familiarity);
+          const ten = Number(v.relation.tension);
+          affinity = Math.max(0, Math.min(1, (Number.isFinite(t) ? t : 0.5) * 0.65 + (Number.isFinite(f) ? f : 0) * 0.35 - (Number.isFinite(ten) ? ten : 0) * 0.5));
+          break;
+        }
+      } catch {}
+      prob = Math.min(1, prob * (0.35 + 1.3 * affinity));
       const pendingThoughts = Array.isArray(st.pendingThoughts) ? st.pendingThoughts.filter((t) => t && (!t.expiresAt || Date.now() < Number(t.expiresAt))).length : 0;
       if (pendingThoughts > 0) prob = Math.min(1, prob * 1.4);
       if (st.lastAiReplyAt && Date.now() - Number(st.lastAiReplyAt) < 30 * 60 * 1000) {
@@ -12880,7 +14150,14 @@ ${roleText.slice(0, 9000)}`;
       const aiCount = recent.filter((m) => m && m.isSelf && Date.now() - Number(m.time || 0) < 60 * 60 * 1000).length;
       if (aiCount >= 5) prob *= 0.3;
       if (idle >= idleThreshold && Math.random() < prob && !isConversationBusyV2(key, st)) {
-        void sendWakePromptV2(key, 'proactiveCheck').catch((error) => log(`[reserved2] proactive 唤醒异常 ${key}:`, error?.message ?? error));
+        const ownerKey = `private:${Number(cfg.ownerQQ)}`;
+        const reason = key === ownerKey ? proactiveReasonV2(key, st) : 'group';
+        if (key === ownerKey && !reason) {
+          log(`[reserved2] 主动检查跳过 ${key}：没有由头（无挂念、话头已了）`);
+        } else {
+          st.proactiveReason = reason;
+          void sendWakePromptV2(key, 'proactiveCheck').catch((error) => log(`[reserved2] proactive 唤醒异常 ${key}:`, error?.message ?? error));
+        }
       }
       scheduleProactiveCheckV2(key);
     }, delay);
@@ -13134,23 +14411,12 @@ ${roleText.slice(0, 9000)}`;
       }
       if (plainContent === '/status') {
         const rs = readRoleState();
-        await sendToQQ(key, `会话 ${state.sessions[key] ?? '未创建'}；白名单 ${allowed(kind, id, cfg) ? '通过' : '拦截'}；角色 ${rs.role ?? '无'}；模式 ${rs.mode}`);
+        await sendToQQ(key, `会话 ${state.sessions[key] ?? '未创建'}；白名单 ${allowed(kind, id, cfg) ? '通过' : '拦截'}；模式 ${rs.mode}`);
         return;
       }
+      // 2026-11-01：人格卡已下线，保留命令是为了给个明确答复，不再切卡。
       if (plainContent === '/role' || plainContent.startsWith('/role ')) {
-        const name = sanitizeRoleName(plainContent.slice(5).trim());
-        if (!name || name === 'off' || name === 'clear') {
-          writeRoleState(null, roleState.mode);
-          await sendToQQ(key, '已清除角色，恢复正常人格。');
-        } else {
-          const roleFile = path.join(ROOT, 'roles', name + '.md');
-          if (!fs.existsSync(roleFile)) {
-            await sendToQQ(key, `角色「${name}」不存在。角色文件放 qq-bridge/roles/ 目录。`);
-          } else {
-            writeRoleState(name, roleState.mode);
-            await sendToQQ(key, `已切换角色：${name}。`);
-          }
-        }
+        await sendToQQ(key, '人格卡已经下线了，现在用的是「自我参考」，会在相处里慢慢变。');
         return;
       }
       if (plainContent === '/persona' && isOwner) {
@@ -13201,8 +14467,8 @@ ${roleText.slice(0, 9000)}`;
     }
 
     // Personal memory commands use the authenticated QQ sender, never a model-supplied ID.
-    const memoryCommand = parseMemoryCommand(plainContent);
-    const memoryAddressed = kind !== 'group' || /^(?:大肥鱼|肥鱼)/.test(plainContent.trim()) || quoteTargetIsSelf ||
+    const memoryCommand = parseMemoryCommand(plainContent, { names: selfNamesList() });
+    const memoryAddressed = kind !== 'group' || selfNamePrefixRe().test(plainContent.trim()) || quoteTargetIsSelf ||
       (event.message || []).some(segment => segment.type === 'at' && String(segment.data?.qq) === String(event.self_id));
     if (memoryCommand && memoryAddressed) {
       try {
@@ -13253,6 +14519,16 @@ ${roleText.slice(0, 9000)}`;
           if(chatClarifications.enabled(key))await memorySourceStored; // Reuse the existing bounded original write; never issue a second write.
           const recentDialogue=dialogueWindow.snapshot(key,(getSocialV2State(key).recentMessages||[]).filter(row=>!SENSITIVE_RE.test(String(row.plain||row.text||''))),continuityTicket?.messageId);
           const understood = await continuity.observe(key, {text:plainContent,...emotionMeta,dialogue:recentDialogue}, continuityTicket);
+          // P0 目标层：事件理解给的 goalHits 落到四个驱力上。
+          if (understood?.goalHits?.length && cfg.socialV2?.goals?.enabled !== false) {
+            try {
+              await enqueueGoalWrite(() => {
+                const applied = applyGoalHits(goalsState, understood.goalHits, { now: Date.now(), eventId: understood.id });
+                goalsState = applied.state;
+                if (applied.applied.length) saveGoalsState();
+              });
+            } catch (error) { log('目标更新失败:', error?.message ?? error); }
+          }
           if (!continuityTicket || continuity.isCurrent(key, continuityTicket)) {
             const actualEmotion = await noteEmotion({ ...emotionMeta, semanticAppraisal: understood?.appraisal, source: 'owner', text: plainContent, weight: cfg.socialV2?.emotion?.weights?.owner ?? 1.1, key });
             continuity.outcome(key, understood?.id, actualEmotion);
@@ -14424,6 +15700,8 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 process.on('exit', () => releaseLock());
+setTimeout(() => { try { globalThis.syncScopeLabels?.() } catch {} }, 20000);
+setInterval(() => { try { globalThis.syncScopeLabels?.() } catch {} }, 6 * 60 * 60 * 1000).unref?.();
 
 main().catch((error) => {
   console.error('[bridge] 启动失败:', error);
