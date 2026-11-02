@@ -24,7 +24,7 @@ test('shared access policy preserves deny precedence, numeric IDs and second-gen
 test('engine inspection never executes an adapter or creates state; absent modules are explicit',t=>{
   const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'xinji-check-'));t.after(()=>fs.rmSync(tmp,{recursive:true,force:true}));
   fs.writeFileSync(path.join(tmp,'bridge-v09.js'),"import {x} from './missing.js';\nthrow Error('must never execute');");
-  assert.deepEqual(inspectRuntime(tmp).missing,['missing.js']);
+  assert.deepEqual(inspectRuntime(tmp).missing,['mcp-host-server.js','mcp-snowluma-safe.js','mcp-web-search-safe.js','missing.js']);
   assert.deepEqual(fs.readdirSync(tmp),['bridge-v09.js']);
   const child=spawnSync(process.execPath,[new URL('../bridge/xinji-engine.mjs',import.meta.url).pathname.replace(/^\/(\w:)/,'$1'),'--describe'],{encoding:'utf8',windowsHide:true});
   assert.equal(child.status,0);assert.equal(JSON.parse(child.stdout).engine,'xinji');

@@ -1,6 +1,6 @@
 # 安装、升级与工程运维
 
-适用：0.11.1。本文件面向部署者。功能、费用和操作见 [用户手册](manual/USER_GUIDE.md)，机制见 [技术手册](docs/TECHNICAL_MANUAL.md)。本项目不包含 DSH、QQ 登录环境和模型服务，不是一键搭建全部环境的安装器。
+适用：0.11.2。本文件面向部署者。功能、费用和操作见 [用户手册](manual/USER_GUIDE.md)，机制见 [技术手册](docs/TECHNICAL_MANUAL.md)。本项目不包含 DSH、QQ 登录环境和模型服务，不是一键搭建全部环境的安装器。
 
 ## 1. 环境与边界
 
@@ -10,7 +10,7 @@
 | Python | 3.10 或更新；memvec 需要 numpy、fastembed，依赖见 `memvec/requirements.txt` |
 | DSH | 支持当前本地插件接口；发布验证不覆盖任意历史版本 |
 | QQ 接入 | 自行配置 SnowLuma / OneBot、账号和允许范围 |
-| 基础桥接 | 已有受支持的 QQ 桥接目录及其基础适配模块；本包更新其运行时，不独立打包所有 QQ 基础实现 |
+| 心迹桥接 | 0.11.2 起包含基础适配源码、三个 MCP、预设、npm 清单与锁文件，可初始化空目录；npm 依赖仍需联网安装 |
 | 模型 | DSH 内已配置可用聊天模型及正确权限 |
 | 浏览器测试 | 需要 Playwright 和浏览器；运行插件本身不要求安装它们 |
 
@@ -46,13 +46,43 @@ node bin/doctor.mjs
 
 目录联接可以导致多条路径指向同一数据。核对真实目标，不要仅比较盘符。不要移动整个 Electron 用户数据目录来代替插件数据迁移；宿主可能要求其中某些位置必须是真实目录。
 
-## 3. 安装包与插件注册
+## 3. 首次安装：回响插件 + 心迹桥接
 
-从对应 Release 下载 `.tgz` 或源码 ZIP，验证 SHA-256。源码 ZIP 用于开发／检查；`.tgz` 是插件包，不包含账号配置、真实记忆、模型缓存和运行环境。
+**新用户请使用 0.11.2 或更新的完整发布包。0.11.1 缺少首次安装所需的基础桥接文件。** 本版包含本项目运行时源码、依赖锁文件、QQ MCP、三个 Agent 预设、安全守卫及 DSH 注册脚本；不包含 DSH 软件、SnowLuma 登录环境、账号、模型额度、语音库和私人记忆。包内使用的上游代码保留原 MIT 许可；其他依赖与外部服务遵循各自条款。
 
-按当前 DSH 版本支持的本地插件安装方式加载包或解压目录。必须能读到根 `package.json` 并注册插件；仅把文件拷入一个随意目录不保证宿主自动加载。DSH NEXT 的 UI 与 Profile 安装方式可能随版本变化，按宿主实际入口操作。
+从对应 Release 下载 `.tgz` 与 `SHA256SUMS-0.11.2.txt`，核对 SHA-256，解压后将 `package` 目录放在稳定位置。下面路径只是示例：**先确认实际 DSH_HOME 和活动 profile，不能照抄盘符，更不能把已有 E 盘数据迁回 C 盘。**
 
-加载后访问本机 `/dsh-feiyu-memory/`。独立预览可用 `npm start`，但预览不等于 QQ、DSH 模型会话及桥接已配置。
+```powershell
+$env:DSH_HOME = 'E:\dsh-home'
+$pluginDir = 'E:\dsh\plugin\feiyu-memory-console'
+$bridgeDir = Join-Path $env:DSH_HOME 'qq-bridge'
+$dshProfile = 'desktop' # 必须核实，部分部署是 web
+Set-Location $pluginDir
+node bin/init-bridge.mjs --target $bridgeDir --check
+node bin/init-bridge.mjs --target $bridgeDir --apply
+Set-Location $bridgeDir
+npm ci --no-audit --no-fund
+node src/bridge.js --check --dependencies
+node scripts/setup-dsh.mjs $dshProfile --plugin $pluginDir --check
+node scripts/setup-dsh.mjs $dshProfile --plugin $pluginDir --apply
+```
+
+初始化仅接受空目录，生成独立管理令牌和关闭主动行为的配置，不读取其他桥接的账号或私人数据。重复初始化会验证原文件并保留配置；发现已有运行时或源码修改时拒绝覆盖，改走升级流程。`npm ci` 按锁文件安装依赖，其 postinstall 修补 SnowLuma SDK 的相对导入扩展名，仅修改这个桥接的 node_modules。
+
+注册脚本只操作**已存在且明确指定**的 Profile：挂载回响、模式控制与预设三个 bundle，以及三个 MCP；保存变更前备份，保留不相关配置。不同安装占用的目录/链接会报错，需先人工核对。脚本不启动/重启 DSH，也不宣称宿主已加载成功。备份位置为桥接目录 `.setup-backups`，其中 manifest.json 记录每个被改文件的来源与备份。
+
+接着配置桥接目录的 `config.json`：填入实际 DSH 地址、模型 provider/model、管理员 QQ、SnowLuma HTTP/WS 地址与令牌，只添加明确允许的私聊/群。空白名单默认不响应任何 QQ 消息。模型 ID 从自己的 DSH 模型目录选择，不能照抄开发者的模型名。不要在日志或聊天中展示完整令牌。
+
+确认 DSH 启动环境也使用同一 DSH_HOME；桥接不在默认 `<DSH_HOME>/qq-bridge` 时还须给 DSH 宿主设置 FEIYU_BRIDGE_DIR。重启指定 DSH 实例后确认回响入口与 qq-chat / qq-chat-v2 / qq-memory 三个预设可见、三个 MCP 成功加载。只有桥接初始化不够，只有插件页面可见也不够。
+
+```powershell
+Set-Location $bridgeDir
+node src/bridge.js
+```
+
+这条命令以前台方式运行桥接，关闭终端会停止；长期运行需另配你自己的进程管理方式。初次调试应先用前台读取错误，避免多个桥接争抢管理端口。自行启动并登录 SnowLuma，再用白名单内测试账号验证一轮收发。配置 memvec 见下一节；未装 Python 记忆服务不能宣称“记忆闭环已验收”。语音、音乐、表情库等可选能力须额外准备相应依赖或素材，不是空目录初始化会自动产生的内容。
+
+可直接交给 Agent 的完整安装要求见 [首次安装指令](docs/AGENT_INSTALL.md)。控制台入口是 DSH 上的 `/dsh-feiyu-memory/`；`npm start` 只启动独立预览，不等于完成宿主注册、QQ 收发或记忆服务安装。
 
 ## 4. memvec 与鉴权
 
@@ -132,9 +162,9 @@ node bridge/install-all.mjs --target 'E:\dsh-home\qq-bridge' --apply
 | 升级没变化 | 插件加载副本、运行时目标、进程是否真正重启 |
 | 数据突然变空 | 根目录、数据库真实路径、环境变量和过滤条件 |
 
-运行基础检查：`npm test`、`git diff --check`。`npm run check:engine` 检查当前目录的直接运行依赖；在未合并基础 QQ 桥接的源码包中会报告缺失，不能把它当作已部署验收通过。安装后应在真实目标运行 `node src/bridge.js --check`，此检查不发消息。
+运行基础检查：`npm test`、`git diff --check`。`npm run check:engine` 递归检查当前源码中的运行依赖；0.11.2 的完整源码包应通过。安装并执行 npm ci 后，在真实目标运行 `node src/bridge.js --check --dependencies`，此检查不启动服务或发送消息。
 
-本版需沿用的基础模块包括 `memory-audit.mjs`、`private-diary.js`、`diary.js`、`preset-prompt.js`、`dsh-client.js`、`md-to-plain.js`、`v2-wait.js`、`qq-model-view.js`、`safe-fetch.js`、`send-voice-lib.js`、`snowluma-conn.js`、`forward.js`、`model-prices.js`、`sticker-lib.js`。未知基础版本需单独适配，不能创建空文件绕过检查。
+0.11.2 已包含原先缺失的 14 个基础模块和 MCP 的间接依赖。检查器递归检查本地字面量导入；加 `--dependencies` 检查 npm 的 ESM 解析。检查通过不等于 QQ 登录、DSH 服务和模型调用成功。不要创建空文件绕过检查。
 
 浏览器测试依赖已有 Playwright 与浏览器；可以用 `FEIYU_PLAYWRIGHT_PATH`、`FEIYU_BROWSER_CHANNEL=msedge` 指定现有环境。新增发布边界检查为 `node --test test/release-hardening.test.mjs`；打包前运行 `npm run check:release`。
 

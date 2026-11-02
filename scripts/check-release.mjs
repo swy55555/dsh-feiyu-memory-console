@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
 const errors=[];
-const required=['README.md','INSTALL.md','manual/USER_GUIDE.md','docs/TECHNICAL_MANUAL.md','DISCLAIMER.md','ACKNOWLEDGEMENTS.md','UPGRADE.md','CHANGELOG.md'];
+const required=['README.md','INSTALL.md','manual/USER_GUIDE.md','docs/TECHNICAL_MANUAL.md','DISCLAIMER.md','ACKNOWLEDGEMENTS.md','UPGRADE.md','CHANGELOG.md','docs/AGENT_INSTALL.md','bin/init-bridge.mjs','bridge/first-install.mjs','bridge/bootstrap/package.json','bridge/bootstrap/package-lock.json','bridge/bootstrap/config.example.json','bridge/bootstrap/scripts/setup-dsh.mjs','bridge/bootstrap/scripts/patch-snowluma-sdk.mjs','bridge/bootstrap/LICENSE.qq-bridge','bridge/bootstrap/SOURCE-PROVENANCE.json','bridge/bootstrap/dsh/agent-presets/qq-chat/agent.cordis.yml','bridge/bootstrap/dsh/agent-presets/qq-chat-v2/agent.cordis.yml','bridge/bootstrap/dsh/agent-presets/qq-memory/agent.cordis.yml'];
 for(const rel of required)if(!fs.existsSync(path.join(root,rel)))errors.push('Missing document: '+rel);
 for(const id of ['shiguang','lunkuo','chaoxi','yuyin','huilang','five-way-linkage'])if(!fs.existsSync(path.join(root,'docs/images',id+'.png')))errors.push('Missing figure: '+id);
 const markdown=[],localLinks=[];

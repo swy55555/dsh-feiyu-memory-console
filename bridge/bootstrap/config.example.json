@@ -1,0 +1,95 @@
+{
+  "dsh": {
+    "baseUrl": "http://127.0.0.1:3080",
+    "provider": "",
+    "model": "",
+    "reasoningEffort": "low",
+    "allowRemote": false
+  },
+  "snowluma": {
+    "wsUrl": "ws://127.0.0.1:3001",
+    "httpUrl": "http://127.0.0.1:3000",
+    "accessToken": "",
+    "followDiscoveredEndpoint": false
+  },
+  "ownerQQ": null,
+  "allow": {
+    "private": [],
+    "groups": []
+  },
+  "deny": {
+    "private": [],
+    "groups": []
+  },
+  "allowAllWhenEmpty": false,
+  "consolePort": 3100,
+  "consoleToken": "",
+  "sessionCwd": "",
+  "agentPreset": "qq-chat",
+  "workspaceTitle": "QQ 聊天",
+  "slang": {
+    "enabled": false,
+    "autoResearch": false
+  },
+  "simulation": {
+    "enabled": false,
+    "proactiveEnabled": false
+  },
+  "socialV2": {
+    "enabled": true,
+    "dailyMemory": {
+      "enabled": false
+    },
+    "emotion": {
+      "enabled": false,
+      "reviewEnabled": false
+    },
+    "diary": {
+      "enabled": false
+    },
+    "explore": {
+      "enabled": false
+    },
+    "narrative": {
+      "enabled": false,
+      "schedule": false
+    },
+    "initiative": {
+      "enabled": false,
+      "dryRun": true,
+      "allowExplore": false,
+      "allowContact": false,
+      "contactSend": false,
+      "allowShared": false
+    },
+    "opennessDrift": {
+      "enabled": false
+    },
+    "selfReference": {
+      "enabled": false
+    },
+    "continuity": {
+      "enabled": false
+    },
+    "association": {
+      "idleEnabled": false,
+      "idleAffectEnabled": false
+    },
+    "mind": {
+      "enabled": true,
+      "learningEnabled": false
+    },
+    "voice": {
+      "enabled": false
+    },
+    "linkageInject": {
+      "enabled": false
+    },
+    "tools": {
+      "extra": false
+    },
+    "sticker": {
+      "enabled": false
+    }
+  }
+}

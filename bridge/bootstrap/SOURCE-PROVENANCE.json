@@ -1,0 +1,188 @@
+{
+  "upstream": "https://github.com/Derpyu520/qq-bridge",
+  "license": "MIT",
+  "licenseReference": "https://github.com/Derpyu520/qq-bridge/blob/v0.2.0/LICENSE",
+  "note": "Selected local adapted source snapshot; hashes identify pre-portability input, not an assertion of byte equality with upstream v0.2.0. Runtime state, accounts and media are excluded.",
+  "files": [
+    {
+      "path": "bridge/memory-audit.mjs",
+      "originPath": "src/memory-audit.mjs",
+      "sourceSha256": "7de2cb999165ab72ff30d33c254c579088b34fc69da6b892b4aa75863fa141da"
+    },
+    {
+      "path": "bridge/private-diary.js",
+      "originPath": "src/private-diary.js",
+      "sourceSha256": "873904d327fa42f8d2189209ca67d29f13e44db2c05609bb15d78760569f9423"
+    },
+    {
+      "path": "bridge/diary.js",
+      "originPath": "src/diary.js",
+      "sourceSha256": "407b1cee80c6e10a8408b6d7aac3b37f51f842cc48da235b9e539045bfb74cf1"
+    },
+    {
+      "path": "bridge/preset-prompt.js",
+      "originPath": "src/preset-prompt.js",
+      "sourceSha256": "a03c3f6a04ac6e98efc08a34cd57bd9516e14a3b3bb5b973aea7ee4561e5e1d9"
+    },
+    {
+      "path": "bridge/dsh-client.js",
+      "originPath": "src/dsh-client.js",
+      "sourceSha256": "f0e58e6e8c4b997413c6ddff89f27d316b0bac47a1a73bd3f19db2f8593b8e0a"
+    },
+    {
+      "path": "bridge/md-to-plain.js",
+      "originPath": "src/md-to-plain.js",
+      "sourceSha256": "940e7b04fe43b5603d158bfb472fbac80e5f58c73750cae6bd2232053957d166"
+    },
+    {
+      "path": "bridge/v2-wait.js",
+      "originPath": "src/v2-wait.js",
+      "sourceSha256": "a26aa0efefb113b71a2990de7b4011a794f43b91d9f9b62ba9ce5e246fc64628"
+    },
+    {
+      "path": "bridge/qq-model-view.js",
+      "originPath": "src/qq-model-view.js",
+      "sourceSha256": "b9544ca292488531a456a8ae5a7f946266fe9beab8aeeeefb6dbf81394b85de1"
+    },
+    {
+      "path": "bridge/safe-fetch.js",
+      "originPath": "src/safe-fetch.js",
+      "sourceSha256": "457723b834732aeaed19c000b9eeacd459c92e3b1eab25c76a211ca75a6edf54"
+    },
+    {
+      "path": "bridge/send-voice-lib.js",
+      "originPath": "src/send-voice-lib.js",
+      "sourceSha256": "452b6446e436f68a7bdd098f813c2c73f9d66c8964f81e5b46d131fd5899b2f0"
+    },
+    {
+      "path": "bridge/snowluma-conn.js",
+      "originPath": "src/snowluma-conn.js",
+      "sourceSha256": "73fb265f7f5d4125e8c0d00bcc7cd83bddd89ad1745b8c34e5a4a8c12c211ef2"
+    },
+    {
+      "path": "bridge/forward.js",
+      "originPath": "src/forward.js",
+      "sourceSha256": "57d55fa5f439e49aabe5f01913f6aeaacccc79bb5a9e5ab04d0b81d8bcc460c1"
+    },
+    {
+      "path": "bridge/model-prices.js",
+      "originPath": "src/model-prices.js",
+      "sourceSha256": "1bbdcef5414adb66d712117c59765d8839740a5393c2ea840c48f6252d17845b"
+    },
+    {
+      "path": "bridge/sticker-lib.js",
+      "originPath": "src/sticker-lib.js",
+      "sourceSha256": "31f89fc6ffb8bfc6fb062bf5b773159d2ac842755fab6dc857ba3744465e8abf"
+    },
+    {
+      "path": "bridge/mcp-snowluma-safe.js",
+      "originPath": "src/mcp-snowluma-safe.js",
+      "sourceSha256": "df0aa4a733125806871f829412a7430bbc4ee8aebf5aadf0715a4ba58ada4c7a"
+    },
+    {
+      "path": "bridge/mcp-host-server.js",
+      "originPath": "src/mcp-host-server.js",
+      "sourceSha256": "c7ed6500ed6f974ce246e58d1ebab99f822a23576e1d892808ba0fd85cf92687"
+    },
+    {
+      "path": "bridge/mcp-web-search-safe.js",
+      "originPath": "src/mcp-web-search-safe.js",
+      "sourceSha256": "70414bb9a52ac5d9d0ba4e22a70a794e474072b97478c8126e050066129953a7"
+    },
+    {
+      "path": "bridge/qqmusic.js",
+      "originPath": "src/qqmusic.js",
+      "sourceSha256": "6ac8e33fce2b810f118687309227ae1f5880fc37a8d3ab6c3302e8696ee2a94e"
+    },
+    {
+      "path": "bridge/voice-core.js",
+      "originPath": "src/voice-core.js",
+      "sourceSha256": "9d1cbfa4278aafd18c926d14cc7f657aef3c97ce58483839c360da85b8bb8609"
+    },
+    {
+      "path": "bridge/bootstrap/scripts/setup-dsh.mjs",
+      "originPath": "scripts/setup-dsh.mjs",
+      "sourceSha256": "9c16a8d03e48082d67254868c625ad0a68f8dce1423e567e2f8d40b497b64040"
+    },
+    {
+      "path": "bridge/bootstrap/scripts/build-agent-preset-patches.mjs",
+      "originPath": "scripts/build-agent-preset-patches.mjs",
+      "sourceSha256": "fa20e0b89e9e8ecfbaac8f22531a3f18bbf4f9f2e45aa1ca1c643a1fc29a2a93"
+    },
+    {
+      "path": "bridge/bootstrap/scripts/patch-snowluma-sdk.mjs",
+      "originPath": "scripts/patch-snowluma-sdk.mjs",
+      "sourceSha256": "71414d5e77c4b13f8d07355f475d63e86b41b9dc4527b4b77712d5170d4d84cf"
+    },
+    {
+      "path": "bridge/bootstrap/plugins/qq-mode-console/package.json",
+      "originPath": "plugins/qq-mode-console/package.json",
+      "sourceSha256": "5e11cab10a6db25d51ef215d83b57cea0dcd14b845bf23aa6722df32a163f94a"
+    },
+    {
+      "path": "bridge/bootstrap/plugins/qq-mode-console/cordis.patch.yml",
+      "originPath": "plugins/qq-mode-console/cordis.patch.yml",
+      "sourceSha256": "fb564b0157cebcd0253af221e2380b99afba60884bf635447336025de7f7c5d6"
+    },
+    {
+      "path": "bridge/bootstrap/plugins/qq-mode-console/lib/index.js",
+      "originPath": "plugins/qq-mode-console/lib/index.js",
+      "sourceSha256": "968ed9f71ea43cb488d13e7cdf8b143707efe6befc5d8a8fbf2a7e54dfc25a2b"
+    },
+    {
+      "path": "bridge/bootstrap/plugins/qq-agent-presets/package.json",
+      "originPath": "plugins/qq-agent-presets/package.json",
+      "sourceSha256": "66e5a1f67db15e1816754bf063c334fd72f8c9045d4db2d5d41446163aa0236b"
+    },
+    {
+      "path": "bridge/bootstrap/plugins/qq-agent-presets/qq-tool-restrict.mjs",
+      "originPath": "plugins/qq-agent-presets/qq-tool-restrict.mjs",
+      "sourceSha256": "c3d353b7369649faca29d39f8fb0090659cde5d762c315cc44f877935e72de8a"
+    },
+    {
+      "path": "bridge/bootstrap/plugins/qq-agent-presets/memory-no-tools.mjs",
+      "originPath": "plugins/qq-agent-presets/memory-no-tools.mjs",
+      "sourceSha256": "8c249bd70851fa8bdca5b58d008ba20722afaf598a4427bdb0709f0e1d90c985"
+    },
+    {
+      "path": "bridge/bootstrap/dsh/agent-presets/qq-chat/preset.yml",
+      "originPath": "dsh/agent-presets/qq-chat/preset.yml",
+      "sourceSha256": "6e1543e151111772452cd70ca5330041228c4305ede85d060efe3633db072aaf"
+    },
+    {
+      "path": "bridge/bootstrap/dsh/agent-presets/qq-chat/agent.cordis.yml",
+      "originPath": "dsh/agent-presets/qq-chat/agent.cordis.yml",
+      "sourceSha256": "dd8e608137470d46fc48e3203ae5596efb8247980a3c215775edc04e29beae0f"
+    },
+    {
+      "path": "bridge/bootstrap/dsh/agent-presets/qq-chat-v2/preset.yml",
+      "originPath": "dsh/agent-presets/qq-chat-v2/preset.yml",
+      "sourceSha256": "24a55188fde9e8af5f9ba67228c83251ab6428cc5ec252db8fd8805f4427894e"
+    },
+    {
+      "path": "bridge/bootstrap/dsh/agent-presets/qq-chat-v2/agent.cordis.yml",
+      "originPath": "dsh/agent-presets/qq-chat-v2/agent.cordis.yml",
+      "sourceSha256": "a659fc6e7c1799ce4c3c1ca97a514a9df70936350cf8a798dd59ba2b24ef5609"
+    },
+    {
+      "path": "bridge/bootstrap/dsh/agent-presets/qq-memory/preset.yml",
+      "originPath": "dsh/agent-presets/qq-memory/preset.yml",
+      "sourceSha256": "aae44121f904bd1017e8441da90401f98dd9e1cdcbf1afcf02504d8537caf622"
+    },
+    {
+      "path": "bridge/bootstrap/dsh/agent-presets/qq-memory/agent.cordis.yml",
+      "originPath": "dsh/agent-presets/qq-memory/agent.cordis.yml",
+      "sourceSha256": "1b1a7a9996382af643bb9700a825c90fdad078aeb1f5e027e2b5232b0c217f8f"
+    },
+    {
+      "path": "bridge/bootstrap/dsh/agent-presets/qq-chat/qq-tool-restrict.mjs",
+      "originPath": "dsh/agent-presets/qq-chat/qq-tool-restrict.mjs",
+      "sourceSha256": "3f69e5b495c803e1097b458cf26096062ec65477178ff3d2de01acde89dea239"
+    },
+    {
+      "path": "bridge/bootstrap/dsh/agent-presets/qq-chat-v2/qq-tool-restrict.mjs",
+      "originPath": "dsh/agent-presets/qq-chat-v2/qq-tool-restrict.mjs",
+      "sourceSha256": "3f69e5b495c803e1097b458cf26096062ec65477178ff3d2de01acde89dea239"
+    }
+  ]
+}

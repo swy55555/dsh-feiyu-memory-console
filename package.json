@@ -1,6 +1,6 @@
 {
   "name": "dsh-feiyu-memory-console",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "private": false,
   "description": "回响：基于经历、可塑记忆与当前心绪的陪伴系统，保留 QQ 通信和二代仿真兼容能力。",
   "license": "MIT",
@@ -33,7 +33,9 @@
     "check:engine": "node bridge/xinji-engine.mjs --check",
     "prepack": "node scripts/check-release.mjs",
     "check:release": "node scripts/check-release.mjs",
-    "test:release": "node --test test/release-hardening.test.mjs"
+    "test:release": "node --test test/release-hardening.test.mjs",
+    "init:bridge": "node bin/init-bridge.mjs",
+    "test:first-install": "node --test test/first-install.test.mjs"
   },
   "type": "module",
   "main": "./lib/index.js",

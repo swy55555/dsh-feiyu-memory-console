@@ -5,8 +5,29 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.11.1";
-const templates = {
+export const RUNTIME_VERSION = "0.11.2";
+export const templates = {
+  "runtime-inspection.mjs": "runtime-inspection.mjs",
+  "memory-audit.mjs": "memory-audit.mjs",
+  "private-diary.js": "private-diary.js",
+  "diary.js": "diary.js",
+  "preset-prompt.js": "preset-prompt.js",
+  "dsh-client.js": "dsh-client.js",
+  "md-to-plain.js": "md-to-plain.js",
+  "v2-wait.js": "v2-wait.js",
+  "qq-model-view.js": "qq-model-view.js",
+  "safe-fetch.js": "safe-fetch.js",
+  "send-voice-lib.js": "send-voice-lib.js",
+  "snowluma-conn.js": "snowluma-conn.js",
+  "forward.js": "forward.js",
+  "model-prices.js": "model-prices.js",
+  "sticker-lib.js": "sticker-lib.js",
+  "mcp-snowluma-safe.js": "mcp-snowluma-safe.js",
+  "mcp-host-server.js": "mcp-host-server.js",
+  "mcp-web-search-safe.js": "mcp-web-search-safe.js",
+  "qqmusic.js": "qqmusic.js",
+  "voice-core.js": "voice-core.js",
+  "meme-play.js": "meme-play.js",
   "explore-fetch.mjs": "explore-fetch.mjs",
   "memvec-auth.mjs": "memvec-auth.mjs",
   "reference-assembly.mjs": "reference-assembly.mjs",
@@ -120,7 +141,7 @@ export function installRuntime(
   const mcpManaged = !!previous?.files?.['mcp-snowluma-safe.js'];
   if (mcpManaged || (mcpBytes && hasRetiredTools(mcpBytes.toString('utf8')))) files['mcp-snowluma-safe.js'] = '@mcp';
   if (mcpManaged && (!mcpBytes || digest(mcpBytes) !== previous.files['mcp-snowluma-safe.js'].afterHash)) throw Error('安装后 QQ MCP 有修改，未覆盖');
-  const migratedMcp = mode === 'undo' ? null : (files['mcp-snowluma-safe.js'] ? retireLexiconTools(mcpBytes) : null);
+  const migratedMcp = mode === 'undo' ? null : (files['mcp-snowluma-safe.js'] === '@mcp' ? retireLexiconTools(mcpBytes) : null);
   const sourceBytes = source => source === '@retired' ? null : source === '@mcp' ? migratedMcp : fs.readFileSync(path.join(here, source));
   const normalizedSourceHash = source => source === '@retired' ? null : digest(sourceBytes(source).toString('utf8').replace(/^\uFEFF/, '').replaceAll('\r\n', '\n'));
 

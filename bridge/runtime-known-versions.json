@@ -247,5 +247,14 @@
       "emotion-context.mjs": "ed0a846e6e5be8b326ffceda32e5512cbbc5aee4dc723f8d67e66eb6eb0e8c7c",
       "appraisal-budget.mjs": "bb271e1b372570d5a679e75f096aed33be8e6de873aff16fe104241dcb090256"
     }
+  },
+  {
+    "version": "0.11.1",
+    "files": {
+      "bridge.js": "5951d1f76e7edb89eb55eca5af1ad6dd3db6985fe8906d558f309783b489d1d1",
+      "bridge-v09.js": "7c4fba444c1347fa399dbc348534ff6840c7de305d2b9a75bb4162fe804b7e8c",
+      "human-context.mjs": "8419b9a50e3a85a3e82881d44f6e76723e8ce5871e66d2274ecde0a5354fecc4",
+      "xinji-identity.mjs": "c26b896d331cc06d065f8c269312e68355f16a8ae8d3f372447ec925d2d3a7b8"
+    }
   }
 ]

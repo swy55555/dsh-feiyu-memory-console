@@ -41,3 +41,7 @@
 ## AI 辅助制作
 
 除框架与明确保留归属的第三方依赖、代码和资源外，本项目自身代码采用 vibe coding（AI 辅助生成与迭代）制作。文档与机制插图也使用 AI 辅助；维护者负责审核、集成和验证。此声明不把第三方成果归为本项目原创，也不保证生成内容无误。
+
+## QQ 基础桥接
+
+首次安装分发纳入了 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) 的适配代码，参考上游 v0.2.0，保留 Copyright (c) 2026 Derpyu520 and qq-bridge / QSH contributors 及 MIT 许可。来源与修改前快照哈希记录于 `bridge/bootstrap/SOURCE-PROVENANCE.json`，许可文本为 `bridge/bootstrap/LICENSE.qq-bridge`。本地适配快照不保证与上游标签完全相同。DSH、MCP SDK、SnowLuma SDK 等第三方代码不属于本项目的原创成果，分别遵循原许可；本包不分发 SnowLuma 登录程序或原生组件。
