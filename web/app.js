@@ -1760,7 +1760,7 @@ function renderCostChart(d) {
   return el('div', { class: 'card pad', style: { marginBottom: '14px' } },
     el('div', { class: 'section-head', style: { flexWrap: 'wrap' } },
       el('h2', { class: 'h2', text: '时间统计' }),
-      el('span', { class: 'muted small', text: `总 ${cur0(total)} · 可塑性记忆 ${cur0(pluginTotal)}` }),
+      el('span', { class: 'muted small', text: `总 ${cur0(total)} · 回响 ${cur0(pluginTotal)}` }),
       el('span', { style: { flex: 1 } }),
       period(24, '24 小时'), period(24 * 7, '7 天'), period(24 * 30, '30 天'),
     ),
@@ -1782,7 +1782,7 @@ function renderCostChart(d) {
       }),
     ),
     el('div', { class: 'muted small', style: { display: 'flex', gap: '14px', marginTop: '8px' } },
-      el('span', { text: '所选时段 · 已留存的逐次用量' }), el('span', { text: '青色 = 可塑性记忆' }),
+      el('span', { text: '所选时段 · 已留存的逐次用量' }), el('span', { text: '青色 = 回响' }),
       el('span', { style: { marginLeft: 'auto' }, text: `${new Date(s.from).toLocaleString()} → ${new Date(s.to).toLocaleString()}` }),
     ),
     s.detailLimited ? el('p', {class:'note', text:s.detailNote || '部分历史只有累计值，无法按时间拆分；累计总额仍保留。'}) : null,
@@ -1844,7 +1844,7 @@ function renderCost() {
   const pct = totalCost > 0 ? Math.round((pluginCost / totalCost) * 100) : 0
   const colors = { plugin: '#7fd6e6', role: '#6aa9ff', legacy: '#f0c987', unattr: '#5a6a72' }
   const segs = [
-    ['可塑性记忆', pluginCost, colors.plugin],
+    ['回响', pluginCost, colors.plugin],
     ['角色对话', roleCost, colors.role],
     ['历史来源待核实', legacyCost, colors.legacy],
   ].filter(([, v]) => Number(v) > 0)
@@ -1880,7 +1880,7 @@ function renderCost() {
     ),
     renderBackgroundReasoning(),
     el('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' } },
-      card('可塑性记忆', cur + pluginCost.toFixed(2), '占 ' + pct + '% · ' + fmtNum(pluginTokens) + ' tokens', colors.plugin),
+      card('回响', cur + pluginCost.toFixed(2), '占 ' + pct + '% · ' + fmtNum(pluginTokens) + ' tokens', colors.plugin),
       card('角色对话／其他', cur + roleCost.toFixed(2), fmtNum(roleTokens) + ' tokens', colors.role),
       legacyCost > 0 ? card('历史来源待核实', cur + legacyCost.toFixed(2), '旧黑话标签可能混有其他调用', colors.legacy) : null,
       card('统计总花费', cur + totalCost.toFixed(2), (t.currency || '') + ' · ' + (totals.turns || 0) + ' 轮' + (t.historyAudit?.excludedCost > 0 ? ' · 已剔除旧黑话' : ''), '#8fb0ba'),
@@ -1898,7 +1898,7 @@ function renderCost() {
         }, text: pct + '%' })),
       el('div', { class: 'muted small', style: { lineHeight: '1.9', flex: '1', minWidth: '220px' } },
         el('div', { style: { color: 'var(--ink)', fontSize: '14px' }, text: '花费构成' }),
-        legend('可塑性记忆', pluginCost, colors.plugin),
+        legend('回响', pluginCost, colors.plugin),
         legend('角色对话/其他（含未归属会话）', roleCost, colors.role),
         legacyCost > 0 ? legend('历史来源待核实（未计入插件）', legacyCost, colors.legacy) : null,
         unattrCost > 0 ? el('p',{class:'note',text:`其中 ${cur0(unattrCost)} 只有累计值，已包含在上述分类中，无法逐轮展开。`}) : null,
