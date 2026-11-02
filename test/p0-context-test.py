@@ -7,7 +7,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(here, '..', 'memvec'))
 import server
 
-key = 'private:1936396478'
+key = 'private:1'
 
 # 1. 幂等写入：同一 messageId 写两次只留一条
 server.add_message(key=key, message_id='m1', sender='老大', user_id='1936396478', text='今天想做番茄炒蛋', at=1000)

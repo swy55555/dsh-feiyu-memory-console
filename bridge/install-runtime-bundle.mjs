@@ -5,8 +5,10 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.11.0";
+export const RUNTIME_VERSION = "0.11.1";
 const templates = {
+  "explore-fetch.mjs": "explore-fetch.mjs",
+  "memvec-auth.mjs": "memvec-auth.mjs",
   "reference-assembly.mjs": "reference-assembly.mjs",
   "context-efficiency.mjs": "context-efficiency.mjs",
   "analysis-receipts.mjs": "analysis-receipts.mjs",

@@ -1,3 +1,4 @@
+import {canonicalDatabasePath} from '../lib/database-path.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -10,7 +11,7 @@ if (!python || !pythonDependencies(python)) {
   process.exitCode = 1
 } else {
   const db = process.env.MEMVEC_DB_PATH || paths().db
-  const normalize = (value) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
+  const normalize = canonicalDatabasePath
   const legacy = path.join(root, 'memvec', 'memories.db')
   if (normalize(db) !== normalize(paths().db)) {
     console.error('MEMVEC_DB_PATH 和控制台数据库路径不同。请同时设置 FEIYU_MEMVEC_DB，或取消冲突的覆盖项。')

@@ -43,7 +43,7 @@ try {
   await page.getByRole('heading',{name:'所选时段 · 功能花费'}).waitFor();
   const slider=page.getByRole('slider',{name:'空闲联想推理等级'});
   await slider.waitFor();assert.equal(await slider.getAttribute('aria-valuetext'),'低');
-  assert.equal(await page.getByRole('slider').count(),14);
+  assert.equal(await page.getByRole('slider').count(),reasoningView(effortConfig).modules.length);
   await slider.focus();await page.keyboard.press('ArrowRight');
   assert.equal(await slider.getAttribute('aria-valuetext'),'高');
   await page.getByRole('button',{name:'保存后台档位',exact:true}).click();
@@ -58,21 +58,21 @@ try {
   if(process.env.FEIYU_REASONING_SCREENSHOT)await page.locator('.reasoning-panel').screenshot({path:process.env.FEIYU_REASONING_SCREENSHOT});
 
   assert.equal(await page.locator('[title*="总 ¥"]').count(),48);
-  await page.getByText('总 ¥48.00 · 可塑性记忆 ¥24.00',{exact:true}).waitFor();
+  await page.getByText('总 ¥48.00 · 回响 ¥24.00',{exact:true}).waitFor();
   for(const name of ['7 天','30 天']) {
     const response=page.waitForResponse(r=>r.url().includes('/usage/series?'));
     await page.getByRole('button',{name,exact:true}).click();await response;
     assert.equal(await page.locator('[title*="总 ¥"]').count(),48);
   }
   assert.deepEqual(periods,[24,24,168,720]);
-  await page.getByRole('heading',{name:'历史费用核对',exact:true}).waitFor();
+  await page.locator('#usage-history-audit').waitFor();
   await page.getByText('旧黑话提取／研究（已剔除）',{exact:true}).waitFor();
   await page.getByText('记忆提取（已归类）',{exact:true}).waitFor();
   assert.ok(await page.getByText(/仍有 1 个历史会话待核实/).count());
   assert.ok(await page.getByText(/模型服务商已收费用不会退回/).count());
   await page.goto(url+'/#/overview');
   await page.getByRole('heading',{name:'补充关联记忆'}).waitFor();
-  await page.getByRole('link',{name:'查看当前心绪',exact:true}).click();
+  await page.locator('button[data-tab="continuity"]').click();
   await page.getByRole('heading',{name:'空闲联想与主观感受'}).waitFor();
   await page.getByLabel('允许联想产生轻微主观感受（试验）').check();
   await page.getByText('联想设置已更新',{exact:true}).waitFor();

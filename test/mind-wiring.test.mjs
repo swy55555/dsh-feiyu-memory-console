@@ -1,3 +1,4 @@
+import {extras} from './bridge-test-context.mjs';
 import * as replyContext from '../bridge/reply-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,7 +20,7 @@ test('actual startup initializes access mode before restoring feedback and conti
  assert.ok(source.indexOf('  let currentMode =')<source.indexOf('  const responsePatterns ='));
  const key='private:1',saved={version:1,chats:[[key,{evidence:[],adjustments:[],disabled:['concise_first'],audit:[{status:'existing',at:1}]}]]};
  const savedContinuity={version:1,chats:[[key,{concerns:[{id:'old',title:'已有挂念',status:'open',expiresAt:Date.now()+86400000}],beliefs:[],events:[],seen:[],relation:{trust:.5,familiarity:0,tension:0}}]]};
- const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',growthClassroom:{candidates:()=>[],state:{enabled:false}},path,STATE_DIR:'fixture',readJsonSafe:()=>({mode:'reserved2'}),normalizeModeInput:x=>x,modeAllowed,cfg:{ownerQQ:1,allow:{private:[1]},deny:{},allowAllWhenEmpty:false},ResponsePatterns,Continuity,DialogueWindow,saved,savedContinuity});
+ const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',growthClassroom:{candidates:()=>[],state:{enabled:false}},path,STATE_DIR:'fixture',readJsonSafe:()=>({mode:'reserved2'}),normalizeModeInput:x=>x,modeAllowed,cfg:{ownerQQ:1,allow:{private:[1]},deny:{},allowAllWhenEmpty:false},ResponsePatterns,Continuity,DialogueWindow,saved,savedContinuity});
  const initial=between('  // Initialize policy before constructors','  fs.mkdirSync(STATE_DIR');
  const guard=between('  function isSessionAllowedInCurrentMode(','  function sessionPolicy(');
  const allowed=between('  const mindAllowed =','  function mindWorkspaceEnabled(');
@@ -29,7 +30,7 @@ test('actual startup initializes access mode before restoring feedback and conti
 });
 test('actual composer preserves current request, bounded emotions and stale-message isolation without fact recall',async()=>{
  const key='private:1',mind=new MindWorkspace({allowed:()=>true,enabled:()=>true});mind.begin(key,'m');
- const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',growthClassroom:{candidates:()=>[],state:{enabled:false}},crypto,cfg:{socialV2:{memoryRecall:{enabled:false},context:{enabled:false}}},mindWorkspaceEnabled:()=>true,mindWorkspaces:mind,
+ const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',growthClassroom:{candidates:()=>[],state:{enabled:false}},crypto,cfg:{socialV2:{memoryRecall:{enabled:false},context:{enabled:false}}},mindWorkspaceEnabled:()=>true,mindWorkspaces:mind,
   humanContextEnabled:()=>false,noteSessionTurn:()=>{},scheduleRotationCheck:()=>{},dailyMemorySubjects:new Map(),dailyRecallQueries:new Map(),recordRetrievalTrace:()=>{},
   continuity:{prompt:(_k,c)=>{c.continuityItems=[{id:'c',type:'concern',score:.9,text:'相关事项'}];return '';}},
   emotionState:{},emotionViewFor:()=>({}),emotionRecoveryCfg:()=>({}),withSubjectiveFeeling:x=>x,emotionPromptLine:()=> '有一点好奇',episodeRecallBlock:()=> '过去的情景参考',idleAssociations:{feeling:()=>null},expressionTeacher:{candidates:()=>[],view:()=>({lessons:[]})},responsePatterns:{candidates:()=>[],view:()=>({adjustments:[],strategies:[]})}});
@@ -41,7 +42,7 @@ test('actual management route blocks agents and preserves unrelated config; chan
  let cfg={ownerQQ:1,socialV2:{}},file={ownerQQ:1,socialV2:{dailyMemory:{maxCallsPerDay:0}}},invalidated=0;
  const route=between("        if (url.pathname === '/api/mind') {","        if (url.pathname === '/api/continuity') {");
  async function run(headers,body,method='POST'){
-  let result;const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',growthClassroom:{candidates:()=>[],state:{enabled:false}},backgroundEffort,url:{pathname:'/api/mind'},req:{headers,method},cfg,ROOT:'fixture',path,readBody:async()=>body,
+  let result;const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',growthClassroom:{candidates:()=>[],state:{enabled:false}},backgroundEffort,url:{pathname:'/api/mind'},req:{headers,method},cfg,ROOT:'fixture',path,readBody:async()=>body,
    readConfigObject:()=>structuredClone(file),atomicWriteJson:(_p,x)=>file=x,mindWorkspaces:{invalidate:()=>invalidated++,snapshot:()=>({})},continuity:{invalidate:()=>invalidated++},expressionTeacher:{view:()=>({lessons:[]}),invalidate:()=>{}},responsePatterns:{view:()=>({}),edit:()=>{throw Error('invalid')}},sendJson:(data,status=200)=>result={data,status}});
   await vm.runInContext('(async()=>{'+route+'})()',ctx);return result;
  }
@@ -53,7 +54,7 @@ test('actual management route blocks agents and preserves unrelated config; chan
 test('actual semantic recall retains subject, task and source-time markers; late search cannot restore old focus',async()=>{
  const key='private:1',mind=new MindWorkspace({allowed:()=>true,enabled:()=>true});mind.begin(key,'m');let release;
  const row={id:'plan',text:'计划周日去公园，如果不下雨',scope:key,subject_id:'1',tier:'task',score:.95,source_id:'original',source_time:100};
- const traces=[];const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',growthClassroom:{candidates:()=>[],state:{enabled:false}},...human,crypto,AbortSignal,cfg:{socialV2:{context:{enabled:false},emotion:{enabled:false}}},mindWorkspaceEnabled:()=>true,mindWorkspaces:mind,
+ const traces=[];const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',growthClassroom:{candidates:()=>[],state:{enabled:false}},...human,crypto,AbortSignal,cfg:{socialV2:{context:{enabled:false},emotion:{enabled:false}}},mindWorkspaceEnabled:()=>true,mindWorkspaces:mind,
   noteSessionTurn:()=>{},scheduleRotationCheck:()=>{},dailyMemorySubjects:new Map([[key,'1']]),dailyRecallQueries:new Map([[key,'1 周日有什么计划']]),recordRetrievalTrace:x=>traces.push(x),
   continuity:{prompt:()=>''},getSocialV2State:()=>({}),recallQuery:()=>'',memoryScope:k=>k,memoryRequest:async()=>({results:[]}),fetch:async()=>({ok:true,json:async()=>({results:[row]})}),
   idleAssociations:{take:async()=>''},expressionTeacher:{candidates:()=>[],view:()=>({lessons:[]})},responsePatterns:{candidates:()=>[],view:()=>({adjustments:[],strategies:[]})},traceRow:r=>r,log:()=>{}});
@@ -66,6 +67,6 @@ test('actual semantic recall retains subject, task and source-time markers; late
 test('pausing a concern in the existing route also invalidates captured workspace references',async()=>{
  const key='private:1',mind=new MindWorkspace({allowed:()=>true,enabled:()=>true});mind.begin(key,'old');let edited=false;
  const route=between("        if (url.pathname === '/api/continuity') {","        if (req.method === 'GET' && url.pathname === '/api/memory/idle-association')");
- const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',growthClassroom:{candidates:()=>[],state:{enabled:false}},url:{pathname:'/api/continuity'},req:{method:'POST',headers:{}},cfg:{ownerQQ:1},readBody:async()=>({collection:'concerns',id:'c',action:'pause'}),continuity:{edit:()=>{edited=true},snapshot:()=>({})},mindWorkspaces:mind,sendJson:()=>{}});
+ const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',growthClassroom:{candidates:()=>[],state:{enabled:false}},url:{pathname:'/api/continuity'},req:{method:'POST',headers:{}},cfg:{ownerQQ:1},readBody:async()=>({collection:'concerns',id:'c',action:'pause'}),continuity:{edit:()=>{edited=true},snapshot:()=>({})},mindWorkspaces:mind,sendJson:()=>{}});
  await vm.runInContext('(async()=>{'+route+'})()',ctx);assert.ok(edited);assert.equal(mind.compose(key,[{id:'c',type:'concern',text:'旧挂念',score:.9}],{continuityMessageId:'old'}).text,'');
 });

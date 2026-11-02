@@ -35,7 +35,15 @@ export const EXPLORE_DEFAULTS = Object.freeze({
 
 export function exploreConfig(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  return { ...EXPLORE_DEFAULTS, ...Object.fromEntries(Object.entries(src).filter(([k]) => k in EXPLORE_DEFAULTS)) };
+  const out = { ...EXPLORE_DEFAULTS, ...Object.fromEntries(Object.entries(src).filter(([k]) => k in EXPLORE_DEFAULTS)) };
+  for (const [key, min, max] of [['maxPerDay',1,20],['maxCallsPerRun',1,3],['maxPagesPerRun',1,10],['maxCharsPerRun',100,15000],['idleHours',0,168],['maxCostPerDay',0,100],['minCuriosity',0,1],['minAutonomy',0,1]]) {
+    const value = Number(out[key]); out[key] = Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : EXPLORE_DEFAULTS[key];
+    if (['maxPerDay','maxCallsPerRun','maxPagesPerRun','maxCharsPerRun'].includes(key)) out[key] = Math.floor(out[key]);
+  }
+  out.enabled = src.enabled === true;
+  try { new Intl.DateTimeFormat('en', {timeZone:out.timezone}); } catch { out.timezone = EXPLORE_DEFAULTS.timezone; }
+  if (!Array.isArray(out.quietHours) || out.quietHours.length !== 2 || out.quietHours.some(v=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(v))) out.quietHours = [...EXPLORE_DEFAULTS.quietHours];
+  return out;
 }
 
 const clean = (s) => String(s || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();

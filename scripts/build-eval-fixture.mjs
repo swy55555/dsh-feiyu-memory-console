@@ -9,11 +9,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE || '', '.dsh');
 const BRIDGE = path.join(HOME, 'qq-bridge');
 const STATE = path.join(BRIDGE, 'state');
+const EVAL_DIR = path.join(STATE, 'private-evaluation');
+fs.mkdirSync(EVAL_DIR, {recursive:true});
 const cfg = JSON.parse(fs.readFileSync(path.join(BRIDGE, 'config.json'), 'utf8'));
 const token = (cfg.consoleToken || fs.readFileSync(path.join(STATE, 'console-token'), 'utf8')).trim();
 const port = cfg.consolePort || 3100;
 
-const sample = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs', 'eval', 'eval-sample.json'), 'utf8'));
+const sample = JSON.parse(fs.readFileSync(path.join(EVAL_DIR, 'eval-sample.json'), 'utf8'));
 
 const readJson = (f, fb) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return fb; } };
 const hash = (obj) => crypto.createHash('sha256').update(JSON.stringify(obj)).digest('hex');
@@ -43,7 +45,7 @@ const snapshot = {
   episodes: episodes.map((e) => ({ at: e.at, chatKey: e.chatKey, text: String(e.summary || e.quote || '').slice(0, 120) })),
 };
 const snapshotHash = hash(snapshot);
-fs.writeFileSync(path.join(ROOT, 'docs', 'eval', 'eval-snapshot.json'), `${JSON.stringify(snapshot)}\n`, 'utf8');
+fs.writeFileSync(path.join(EVAL_DIR, 'eval-snapshot.json'), `${JSON.stringify(snapshot)}\n`, 'utf8');
 
 async function buildPrompt(text, inject, boundaryAt) {
   const res = await fetch(`http://127.0.0.1:${port}/api/eval/build-prompt`, {
@@ -100,7 +102,7 @@ const fixture = {
   note: '由生产装配器构建的两臂 prompt；记忆快照哈希固定；hasAnswerInMemory 为保守判定',
   items,
 };
-fs.writeFileSync(path.join(ROOT, 'docs', 'eval', 'eval-fixture.json'), `${JSON.stringify(fixture, null, 2)}\n`, 'utf8');
+fs.writeFileSync(path.join(EVAL_DIR, 'eval-fixture.json'), `${JSON.stringify(fixture, null, 2)}\n`, 'utf8');
 console.log('fixture items', items.length, 'hasAnswer', items.filter((x) => x.hasAnswerInMemory).length);
 console.log('snapshotHash', snapshotHash.slice(0, 16));
 for (const it of items.slice(0, 3)) console.log(' ', it.stratum, it.hasAnswerInMemory, it.injectionDelta, it.promptText.slice(0, 20));

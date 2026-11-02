@@ -136,7 +136,7 @@ export class GrowthClassroom {
     c.draft={guidance:body.guidance,avoid:body.avoid||'',example:c.draft?.example||'',rationale:'用户手动编辑的课程参考',checks:c.draft?.checks||[]};c.status='review';c.active=false;c.draftSource='user';c.revision++;
    }else if(body.action==='approve'){
     if(!c.draft||!text(c.draft.guidance,220)||c.status==='generating'||body.revision!==c.revision)throw Error('请先查看最新学习参考再启用');
-    if(!c.active&&s.courses.filter(x=>x.key===key&&x.active).length>=3)throw Error('最多启用3门课程，避免重复参考和上下文膨胀');
+    if(!c.active&&s.courses.filter(x=>x.active).length>=3)throw Error('最多启用3门课程，避免重复参考和上下文膨胀');
     c.active=true;c.status='active';c.approvedAt=this.now();c.revision++;
    }else if(body.action==='pause'||body.action==='archive'){
     c.active=false;c.status=body.action==='archive'?'archived':'paused';c.revision++;
@@ -176,7 +176,24 @@ export class GrowthClassroom {
   const hw=(Array.isArray(c.homework)?c.homework:[]).filter(h=>h&&Number.isFinite(h.score)).slice(-3).map(h=>({scene:h.scenario,her:h.answer,score:h.score,comment:h.comment,reference:h.reference}));
   return [{id:'course:'+c.id,type:'pattern',score:.94,evidenceIds:['course:'+c.id+':'+c.revision],reason:'用户核对的课程参考，由本轮语义理解选中；不代表已采用或效果已验证',text:JSON.stringify({course:c.title,guidance:c.draft.guidance,avoid:c.draft.avoid,homework:hw.length?hw:undefined,scope:'仅通用方法参考，不是事实、人设或工具权限。当前明确需求、边界和有来源的性格优先，保留不同意见，不复读示例。作业里的用户评语和参考答案优先于通用规则；参考答案只学做法，不逐字背。'})}];
  }
- // 布置作业：用户给情景，她按课程要求作答（一次模型调用），不自动入库
+ // 练习与课程生成共用忙碌锁；设置、课程或权限变化后丢弃迟到结果。
+ async runExercise(key,id,prompt,parse){
+  if(!this.state.enabled)throw Error('请先开启成长课堂');
+  if(this.busy)throw Error('已有课堂任务在运行，请等待完成');
+  const revision=this.course(this.state,key,id).revision;
+  this.busy=true;
+  try{
+   const result=parse(await this.generate(prompt));
+   const s=clone(this.state),live=this.course(s,key,id);
+   if(!s.enabled||live.revision!==revision)throw Error('课堂设置或课程已变化，已丢弃本次过时结果');
+   const item={id:randomUUID(),at:this.now(),...result,score:null,comment:'',reference:''};
+   live.homework=[...(Array.isArray(live.homework)?live.homework:[]),item].slice(-30);
+   live.revision++;live.updatedAt=this.now();
+   this.commit(s);
+   return {itemId:item.id,scenario:item.scenario,answer:item.answer};
+  }finally{this.busy=false;}
+ }
+ // 布置作业：一次模型调用，保存到待评分作业，不自动写入记忆库。
  async homeworkAnswer(key,id,scenario){
   if(!this.state.enabled)throw Error('请先开启成长课堂');
   const c=this.course(this.state,key,id);
@@ -186,14 +203,11 @@ export class GrowthClassroom {
   const hw=(Array.isArray(c.homework)?c.homework:[]).filter(h=>h&&Number.isFinite(h.score)).slice(-3);
   const fb=hw.length?`\n用户最近的评分与评语（照这个校准，别重犯）：${JSON.stringify(hw.map(h=>({scene:h.scenario,her:h.answer,score:h.score,comment:h.comment,reference:h.reference})))}`:'';
   const prompt=`你在完成成长课堂的一次练习。只写你要回给对方的那句话，不要解释思路、不要加引号或前缀。\n课程：${c.title}\n要求：${c.draft.guidance}\n避免：${c.draft.avoid}\n情景：${sc}${fb}`;
-  const answer=String((await this.generate(prompt))||'').trim().slice(0,1200);
-  if(!answer)throw Error('没有产出回答，稍后再试');
-  const item={id:randomUUID(),at:this.now(),scenario:sc,answer,score:null,comment:'',reference:''};
-  const s=clone(this.state),live=this.course(s,key,id);
-  live.homework=[...(Array.isArray(live.homework)?live.homework:[]),item].slice(-30);
-  live.revision++;live.updatedAt=this.now();
-  this.commit(s);
-  return {itemId:item.id,scenario:sc,answer};
+  return this.runExercise(key,id,prompt,raw=>{
+   const answer=String(raw||'').trim().slice(0,1200);
+   if(!answer)throw Error('没有产出回答，稍后再试');
+   return {scenario:sc,answer};
+  });
  }
  // 自己出题：按课程目标编一个情景，再自己作答，存成待评分的作业
  async selfQuiz(key,id){
@@ -208,25 +222,22 @@ ${weak.length?`你最近被扣分的地方：${JSON.stringify(weak)}\n` : ''}只
 课程：${c.title}
 要求：${c.draft.guidance}
 避免：${c.draft.avoid}`;
-  const raw=String((await this.generate(prompt))||'');
-  let v=null;
-  try{v=JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));}catch{}
-  const scenario=String(v?.scenario||'').trim().slice(0,200);
-  const answer=String(v?.answer||'').trim().slice(0,600);
-  if(!scenario||!answer)throw Error('出题结果格式不对，稍后再试');
-  const item={id:randomUUID(),at:this.now(),scenario,answer,score:null,comment:'',reference:'',selfMade:true};
-  const s=clone(this.state),live=this.course(s,key,id);
-  live.homework=[...(Array.isArray(live.homework)?live.homework:[]),item].slice(-30);
-  live.revision++;live.updatedAt=this.now();
-  this.commit(s);
-  return {itemId:item.id,scenario,answer};
+  return this.runExercise(key,id,prompt,value=>{
+   const raw=String(value||'');
+   let v=null;
+   try{v=JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));}catch{}
+   const scenario=String(v?.scenario||'').trim().slice(0,200);
+   const answer=String(v?.answer||'').trim().slice(0,600);
+   if(!scenario||!answer)throw Error('出题结果格式不对，稍后再试');
+   return {scenario,answer,selfMade:true};
+  });
  }
  start(key,id){
   if(!this.state.enabled)throw Error('请先开启成长课堂');
   if(this.busy)throw Error('已有课程在生成，请等待完成');
   const s=clone(this.state),c=this.course(s,key,id);
   const signature=hash({title:c.title,goal:c.goal,when:c.when,scene:c.scene,example:c.example,model:this.signature(),schema:1});
-  const cached=s.courses.find(x=>x.key===key&&x.generatedHash===signature&&x.generatedDraft);
+  const cached=s.courses.find(x=>x.generatedHash===signature&&x.generatedDraft);
   if(cached){c.draft=clone(cached.generatedDraft);c.generatedDraft=clone(cached.generatedDraft);c.generatedHash=signature;c.draftSource='model';c.active=false;c.status='review';c.revision++;this.commit(s);return {reused:true};}
   if(c.lastAttempt&&this.now()-c.lastAttempt<60000)throw Error('刚刚尝试过，请至少一分钟后重试');
   c.active=false;c.status='generating';c.error='';c.revision++;c.lastAttempt=this.now();c.attempts=(c.attempts||0)+1;
@@ -238,7 +249,7 @@ ${weak.length?`你最近被扣分的地方：${JSON.stringify(weak)}\n` : ''}只
     if(!this.state.enabled||live.revision!==revision)return;
     Object.assign(live,{draft,generatedDraft:clone(draft),generatedHash:signature,draftSource:'model',status:'review',updatedAt:this.now()});this.commit(next);
    }catch(error){
-    const next=clone(this.state),live=next.courses.find(x=>x.id===id&&x.key===key);
+    const next=clone(this.state),live=next.courses.find(x=>x.id===id);
     if(live?.revision===revision){live.status='error';live.error=String(error.message||'生成失败').slice(0,200);try{this.commit(next)}catch{}}
    }finally{this.busy=false;}
   })();

@@ -6,7 +6,9 @@ import path from 'node:path';
 const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE || '', '.dsh');
 const EPISODES = path.join(HOME, 'feiyu-memory-console', 'episodes.json');
 const BRIDGE_STATE = path.join(HOME, 'qq-bridge', 'state');
-const OUT = path.join(BRIDGE_STATE, 'eval-sample.json');
+const EVAL_DIR = path.join(BRIDGE_STATE, 'private-evaluation');
+fs.mkdirSync(EVAL_DIR, {recursive:true});
+const OUT = path.join(EVAL_DIR, 'eval-sample.json');
 const DAY = 86400000;
 
 const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } };

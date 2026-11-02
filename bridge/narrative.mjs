@@ -50,7 +50,7 @@ export function normalizeNarrativeState(raw) {
       id: v.id,
       generatedAt: Number(v.generatedAt),
       coveredThroughAt: Number(v.coveredThroughAt) || Number(v.generatedAt),
-      text: cleanText(v.text, 250),
+      text: cleanText(v.text, 280),
       sourceEpisodeIds: Array.isArray(v.sourceEpisodeIds) ? [...new Set(v.sourceEpisodeIds.map(String))].slice(0, 50) : [],
       evidence: Array.isArray(v.evidence) ? v.evidence.slice(0, 100).map((e) => ({
         episodeId: String(e?.episodeId || ''),
@@ -373,7 +373,7 @@ export function storeNarrative(state, parsed, { now = Date.now(), maxVersions = 
     id: crypto.randomUUID(),
     generatedAt: now,
     coveredThroughAt: Number(parsed.coveredThroughAt) || now,
-    text: cleanText(parsed.text, 250),
+    text: cleanText(parsed.text, 280),
     sourceEpisodeIds: parsed.sourceEpisodeIds.slice(0, 50),
     evidence: parsed.evidence.slice(0, 100),
   };

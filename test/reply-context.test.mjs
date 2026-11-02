@@ -85,7 +85,7 @@ test('actual bridge wrapper denies cross-chat relay and uses only matching emoti
 });
 
 test('feedback omits unscoped lightweight impressions but keeps stored notes and ordinary rendering',()=>{
- const src=fs.readFileSync(new URL('../bridge/bridge-v09.js',import.meta.url),'utf8'),start=src.indexOf('  function formatMemoryV2('),end=src.indexOf('  function appendMemoryV2(',start);
+ const src=fs.readFileSync(new URL('../bridge/bridge-v09.js',import.meta.url),'utf8'),start=src.indexOf('  function formatMemoryV2('),end=src.indexOf('function appendMemoryV2(',start);
  const fn=vm.runInNewContext(src.slice(start,end)+';formatMemoryV2',{automaticLightContext:()=>[]});
  const st={activeTopics:[{text:'以前的许可：随便怼',lastMentionAt:Date.now()}]};const before=structuredClone(st);
  assert.ok(!fn(st,{feedback:true}).includes('随便怼'));assert.ok(fn(st).includes('随便怼'));assert.deepEqual(st,before);

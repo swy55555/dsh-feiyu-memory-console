@@ -1,294 +1,141 @@
-# 安装与部署（0.11.0）
+# 安装、升级与工程运维
 
-这份文档只讲安装。装完之后怎么用，见 [用户手册](manual/USER_GUIDE-0.11.0.md)。
+适用：0.11.1。本文件面向部署者。功能、费用和操作见 [用户手册](manual/USER_GUIDE.md)，机制见 [技术手册](docs/TECHNICAL_MANUAL.md)。本项目不包含 DSH、QQ 登录环境和模型服务，不是一键搭建全部环境的安装器。
 
-> **这不是一键安装包。** 它不包含 DSH、QQ、SnowLuma、模型服务，也不替你把 QQ 登录好。
+## 1. 环境与边界
 
----
+| 部件 | 要求与检查 |
+| --- | --- |
+| Node.js | 24 或更新，依赖 `node:sqlite`；运行 `node --version` |
+| Python | 3.10 或更新；memvec 需要 numpy、fastembed，依赖见 `memvec/requirements.txt` |
+| DSH | 支持当前本地插件接口；发布验证不覆盖任意历史版本 |
+| QQ 接入 | 自行配置 SnowLuma / OneBot、账号和允许范围 |
+| 基础桥接 | 已有受支持的 QQ 桥接目录及其基础适配模块；本包更新其运行时，不独立打包所有 QQ 基础实现 |
+| 模型 | DSH 内已配置可用聊天模型及正确权限 |
+| 浏览器测试 | 需要 Playwright 和浏览器；运行插件本身不要求安装它们 |
 
-## 0. 前置条件
+常用端口是 DSH 3080、桥接管理 3100、memvec 9881；QQ 接入的 HTTP 与 WebSocket 端口以自己的配置为准，不能假定所有安装都相同。服务默认应保持本机使用。
 
-| 组件 | 要求 | 怎么确认 |
-|---|---|---|
-| Windows | 主要验证平台 | — |
-| DSH | 支持本地插件的版本（已在 DSH NEXT 验证） | 能打开 `http://127.0.0.1:3080` |
-| Node.js | **24 或更新** | `node -v` |
-| Python | **3.10 或更新**，带 `venv` | `python --version` |
-| QQ | 已登录的 QQNT | 能正常收发消息 |
-| SnowLuma | 已启动并连上 OneBot | `http://127.0.0.1:3001` 可访问 |
-| 模型服务 | 一个可用的聊天模型（DSH 内配置） | DSH 里能正常对话 |
+## 2. 先确定代码与数据路径
 
-端口占用：
-
-| 端口 | 用途 |
-|---|---|
-| 3080 | DSH 和控制台页面 |
-| 3100 | 心迹桥接 |
-| 9881 | 独立记忆服务 memvec |
-| 3001 | SnowLuma（默认） |
-
----
-
-## 1. 目录规划
-
-建议先把两个目录定下来：
-
-```
-插件目录      D:\dsh\plugins\dsh-feiyu-memory-console
-心迹桥接目录      D:\dsh\qq-bridge
-数据目录      %USERPROFILE%\.dsh
-```
-
-- **插件目录**：本仓库的代码；
-- **心迹桥接目录**：运行时，由安装器写入；
-- **数据目录**：记忆库、状态、配置，默认 `~/.dsh`，不要放进插件目录。
-
-路径可以含空格，但命令里要加引号。
-
----
-
-## 2. 安装插件
-
-### 方式 A：DSH 插件页安装
-
-1. 打开 DSH 设置 → 插件；
-2. 选择“从本地安装”/“安装本地插件”；
-3. 选中 `dsh-feiyu-memory-console-0.11.0.zip`，或解压后的插件目录；
-4. 启用插件；
-5. 重启 DSH。
-
-### 方式 B：手动放置
-
-把仓库目录放到 DSH 的插件目录（通常是 `%USERPROFILE%\.dsh\plugins\`），确保：
-
-```
-%USERPROFILE%\.dsh\plugins\dsh-feiyu-memory-console\package.json
-```
-
-存在，然后重启 DSH。
-
-### 确认
-
-打开：
-
-```
-http://127.0.0.1:3080/dsh-feiyu-memory/
-```
-
-右上角应显示 **v0.11.0**。页面打不开时先看 DSH 日志，不要重复安装。
-
----
-
-## 3. 准备记忆服务（memvec）
-
-### 3.1 建虚拟环境
+以下是示例，不会替你迁移或覆盖现有数据：
 
 ```powershell
-cd "D:\dsh\plugins\dsh-feiyu-memory-console"
+$env:DSH_HOME = 'E:\dsh-home'
+$env:FEIYU_BRIDGE_DIR = 'E:\dsh-home\qq-bridge'
+$env:FEIYU_MEMVEC_DB = 'E:\dsh-home\memvec\memories.db'
+$env:MEMVEC_DB_PATH = $env:FEIYU_MEMVEC_DB
+$env:FEIYU_PYTHON = 'E:\your-python-env\Scripts\python.exe'
+Set-Location 'E:\dsh\plugin\feiyu-memory-console'
+node bin/doctor.mjs
+```
+
+这些环境变量只对当前终端和随后启动的子进程生效。图形桌面宿主、守护程序和计划任务需要在各自启动环境中设置；修改当前终端不会改变已经运行的 DSH。
+
+| 配置 | 用途 |
+| --- | --- |
+| `DSH_HOME` | 默认根目录，未设置为用户主目录下 `.dsh` |
+| `FEIYU_BRIDGE_DIR` | 控制台所读取的桥接目录 |
+| `FEIYU_MEMVEC_DB` / `MEMVEC_DB_PATH` | 控制台／服务数据库路径，应指向同一真实文件 |
+| `FEIYU_MEMVEC_URL` | 控制台访问的记忆服务地址 |
+| `FEIYU_PYTHON` | 明确指定已有 Python 环境 |
+| `MEMVEC_CACHE_PATH` | 向量模型缓存位置 |
+| `MEMVEC_API_TOKEN_FILE` | 记忆服务令牌文件位置，默认数据库旁 `api-token` |
+| `MEMVEC_API_TOKEN` | 可选直接提供令牌，32–256 位允许字符；不要打印或提交 |
+| `FEIYU_DIARY_DIR` | 控制台日记目录覆盖项；还需核对桥接写入位置 |
+
+目录联接可以导致多条路径指向同一数据。核对真实目标，不要仅比较盘符。不要移动整个 Electron 用户数据目录来代替插件数据迁移；宿主可能要求其中某些位置必须是真实目录。
+
+## 3. 安装包与插件注册
+
+从对应 Release 下载 `.tgz` 或源码 ZIP，验证 SHA-256。源码 ZIP 用于开发／检查；`.tgz` 是插件包，不包含账号配置、真实记忆、模型缓存和运行环境。
+
+按当前 DSH 版本支持的本地插件安装方式加载包或解压目录。必须能读到根 `package.json` 并注册插件；仅把文件拷入一个随意目录不保证宿主自动加载。DSH NEXT 的 UI 与 Profile 安装方式可能随版本变化，按宿主实际入口操作。
+
+加载后访问本机 `/dsh-feiyu-memory/`。独立预览可用 `npm start`，但预览不等于 QQ、DSH 模型会话及桥接已配置。
+
+## 4. memvec 与鉴权
+
+新环境需要在你选择的 Python 环境中准备 `memvec/requirements.txt` 依赖。已有可用环境应复用，升级插件不要求无条件重装依赖。
+
+```powershell
+# 仅新环境需要；不要在未知环境中盲目执行
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r memvec\requirements.txt
+$env:FEIYU_PYTHON = (Resolve-Path '.\.venv\Scripts\python.exe').Path
+node bin/start-memvec.mjs
 ```
 
-要求 Python ≥3.10。用 3.9 会在安装依赖时失败。
-
-### 3.2 启动
+启动可能首次下载向量模型。服务与所有客户端必须使用同一令牌配置；无令牌收到 401 不能被误判为服务损坏。需要检查接口时，在内存中读取令牌并作为 `x-memvec-token` 请求头发送，不把令牌放 URL 或截图。
 
 ```powershell
-npm run start:memvec
+$memvecToken = (Get-Content -LiteralPath 'E:\dsh-home\memvec\api-token' -Raw).Trim()
+Invoke-RestMethod 'http://127.0.0.1:9881/stats' -Headers @{ 'x-memvec-token' = $memvecToken }
+Remove-Variable memvecToken
 ```
 
-或直接：
+启动器会检查数据库路径冲突。发现旧库时先备份与核对，不要为了绕过提示创建另一个空库。
+
+## 5. 心迹运行时安装与升级
 
 ```powershell
-.\.venv\Scripts\python.exe memvec\server.py
+node bridge/install-all.mjs --target 'E:\dsh-home\qq-bridge' --check
+node bridge/install-all.mjs --target 'E:\dsh-home\qq-bridge' --apply
 ```
 
-首次启动会下载向量模型（`bge-small-zh-v1.5`，通过 fastembed），需要网络；下载后缓存在本地。
+`--check` 比较目标；`--apply` 写入受支持的运行时并保存备份。未知或人工修改过的文件应拒绝覆盖，先比较差异；不要默认加 `--replace-legacy`。安装器更新运行时，不替你准备完整 QQ 登录、守护程序和所有配置。
 
-### 3.3 确认
+修改后的模块须在桥接重启后生效，插件宿主也可能需要重启。先确认没有正在发送或需要保留的任务；停止对应守护程序，避免旧进程自动拉起或两个实例竞争端口。只处理已确认的目标 PID／启动项，不按 `node.exe` 等通用名字批量结束进程。
 
-```powershell
-Invoke-WebRequest http://127.0.0.1:9881/stats -UseBasicParsing
-```
+## 6. 配置项与关闭策略
 
-返回 JSON 即正常。数据库默认在 `%USERPROFILE%\.dsh\memvec\memories.db`。
+桥接配置在目标目录 `config.json`。保留自己的 `ownerQQ`、SnowLuma 地址与令牌、DSH 地址和模型配置、允许对象与群列表、管理端口和令牌。不要把示例账号当作生产值；空白名单的行为受现有配置影响，应显式核对允许范围。
 
-> 已有数据库时，**不要**换成新路径启动，否则会出现空库。先备份。
-
----
-
-## 4. 安装心迹桥接运行时
-
-```powershell
-cd "D:\dsh\plugins\dsh-feiyu-memory-console"
-node bridge/install-all.mjs --target "D:\dsh\qq-bridge" --check
-node bridge/install-all.mjs --target "D:\dsh\qq-bridge" --apply
-```
-
-- `--check` 只比较，不改文件；
-- `--apply` 写入运行时，并保留备份；
-- 遇到未知或改过的文件会拒绝覆盖，先人工比较，不要直接加 `--replace-legacy`。
-
-安装完成后，心迹桥接目录里应有：
-
-```
-src\bridge.js
-bridge-loop.cmd
-config.json
-state\
-```
-
----
-
-## 5. 必填配置
-
-配置文件：`<心迹桥接目录>\config.json`。至少确认这些字段：
-
-| 字段 | 说明 |
-|---|---|
-| `ownerQQ` | 你的 QQ 号（主人） |
-| `snowluma.wsUrl` | SnowLuma OneBot WebSocket 地址 |
-| `snowluma.httpUrl` | SnowLuma HTTP 地址 |
-| `snowluma.accessToken` | SnowLuma 访问令牌（如启用） |
-| `dsh.baseUrl` | DSH 地址，默认 `http://127.0.0.1:3080` |
-| `dsh.authToken` | DSH 访问令牌（如果启用） |
-| `allow.private` | 允许的私聊对象 |
-| `allow.groups` | 允许的群 |
-| `consolePort` | 心迹桥接管理端口，默认 3100 |
-| `consoleToken` | 控制台访问令牌，**不要外泄** |
-
-最小示例（只列关键字段，其余保留默认）：
+以下是配置片段，应合并到原配置，不能替换整个文件。界面有相应开关时优先使用界面；手动编辑后重启并读回核对。
 
 ```json
 {
-  "ownerQQ": 123456789,
-  "snowluma": {
-    "wsUrl": "ws://127.0.0.1:3001",
-    "httpUrl": "http://127.0.0.1:3001",
-    "accessToken": ""
-  },
-  "dsh": { "baseUrl": "http://127.0.0.1:3080" },
-  "allow": {
-    "private": { "123456789": true },
-    "groups": {}
-  },
-  "consolePort": 3100,
-  "consoleToken": "换成你自己的长随机串"
+  "socialV2": {
+    "explore": { "enabled": false },
+    "narrative": { "enabled": false, "schedule": false },
+    "initiative": {
+      "enabled": false, "dryRun": true,
+      "allowExplore": false, "allowContact": false,
+      "contactSend": false, "allowShared": false
+    },
+    "opennessDrift": { "enabled": false },
+    "selfReference": { "enabled": false },
+    "continuity": { "enabled": false },
+    "association": { "idleEnabled": false, "idleAffectEnabled": false }
+  }
 }
 ```
 
-白名单不填且 `allowAllWhenEmpty=true` 时，任何私聊都会进来；**正式使用建议关掉这个开关**。
+这是关闭这些指定功能的片段，不是“全系统零调用”模板。日常记忆、情绪判断、日记等还有自己的开关；课堂启用状态保存在课堂状态中，应从年轮关闭。彻底停用需停止桥接和守护程序；禁用控制台插件不会自动停止独立服务。
 
----
+## 7. 备份、迁移与回退
 
-## 6. 启动顺序
+备份应覆盖数据库及一致性要求、桥接配置与 state、控制台数据、日记、所需密钥和启动配置。停止写入方后复制，或使用 SQLite 备份接口；不要遗漏正在使用的 WAL。
 
-```
-memvec（9881） → DSH（3080） → SnowLuma（3001） → 心迹桥接（3100） → QQ
-```
+迁移先复制并核对，再调整启动环境与路径，最后逐个启动并确认读取的是原数据。不删除唯一原件，不因出现 C 盘旧路径就判断迁移失败。`FEIYU_MEMVEC_DB`、桥接来源访问路径和实际服务须一致。
 
-心迹桥接启动：
+代码回退可使用安装器已有备份及 `--undo`，先检查对应安装记录。代码回退不自动回退数据库 schema 或个人状态，也不是数据丢失的通用修复方式。用户已经迁移到 E 盘时，应沿用经过核对的新根目录，不默认搬回旧位置。
 
-```powershell
-cd "D:\dsh\qq-bridge"
-bridge-loop.cmd
-```
+## 8. 排障与验证
 
-或双击随包提供的“启动心迹”快捷方式（`xinji-launcher.ps1 -Action Start`），它会按需启动缺失的服务。
+| 现象 | 优先检查 |
+| --- | --- |
+| `workspaceController unavailable` | DSH 宿主工作区服务和启动日志，不先删除记忆或降级 |
+| `Expected a real directory` | 宿主指定目录是否为链接及其真实目录要求 |
+| 页面有数据、模型没有记忆 | 作用域、召回状态、上下文投递及桥接连接 |
+| 401 / 403 | 令牌、Host、回环地址、写请求头与来源，不关闭鉴权规避 |
+| 升级没变化 | 插件加载副本、运行时目标、进程是否真正重启 |
+| 数据突然变空 | 根目录、数据库真实路径、环境变量和过滤条件 |
 
----
+运行基础检查：`npm test`、`git diff --check`。`npm run check:engine` 检查当前目录的直接运行依赖；在未合并基础 QQ 桥接的源码包中会报告缺失，不能把它当作已部署验收通过。安装后应在真实目标运行 `node src/bridge.js --check`，此检查不发消息。
 
-## 7. 首次自检
+本版需沿用的基础模块包括 `memory-audit.mjs`、`private-diary.js`、`diary.js`、`preset-prompt.js`、`dsh-client.js`、`md-to-plain.js`、`v2-wait.js`、`qq-model-view.js`、`safe-fetch.js`、`send-voice-lib.js`、`snowluma-conn.js`、`forward.js`、`model-prices.js`、`sticker-lib.js`。未知基础版本需单独适配，不能创建空文件绕过检查。
 
-打开控制台总览，确认三项：
+浏览器测试依赖已有 Playwright 与浏览器；可以用 `FEIYU_PLAYWRIGHT_PATH`、`FEIYU_BROWSER_CHANNEL=msedge` 指定现有环境。新增发布边界检查为 `node --test test/release-hardening.test.mjs`；打包前运行 `npm run check:release`。
 
-- **记忆库**：能读到数据库；
-- **桥接**：3100 在线；
-- **QQ**：SnowLuma 已连接。
-
-再发一条真实 QQ 私聊，确认：
-
-1. 有回复；
-2. 总览的“记录”有新增；
-3. 回廊能看到这条原文；
-4. 拾光里没有凭空出现的兴趣。
-
-没有新增不一定是故障：普通闲聊可能没有可提取的事实。先看原文和处理记录，不要为了“有数据”降低确认门槛。
-
----
-
-## 8. 升级
-
-1. **备份**：插件目录、`~/.dsh/memvec`（含 WAL/SHM）、`~/.dsh/qq-bridge/state`、`~/.dsh/feiyu-memory-console`；
-2. 停心迹桥接和 memvec；
-3. 安装新插件包；
-4. 复制新的 `memvec/server.py` 到实际服务目录（保留数据库路径）；
-5. 运行 `node bridge/install-all.mjs --target ... --check`，再 `--apply`；
-6. 启动 memvec、DSH、桥接；
-7. 打开总览看版本号和数据路径是否一致。
-
-升级不会自动开启付费功能，也不会重置已有人格与记忆。
-
-### 回滚
-
-保留旧插件目录、旧 `server.py`、旧心迹桥接运行时备份；按原路径恢复后重启。数据库如已迁移，回滚前先确认备份可用。
-
----
-
-## 9. 卸载
-
-1. 停心迹桥接、memvec、DSH；
-2. 移除插件目录；
-3. 删除或保留数据目录：`~/.dsh/memvec`、`~/.dsh/qq-bridge`、`~/.dsh/feiyu-memory-console`、`~/.dsh/eval`；
-4. 如需彻底清理，再删 DSH 会话目录里对应项目。
-
-卸载不会自动撤回已发送的 QQ 消息。
-
----
-
-## 10. 常见故障
-
-| 现象 | 先查什么 |
-|---|---|
-| 插件页 404 | DSH 没重启，或插件目录路径变了 |
-| 版本还是旧号 | DSH 启动时读的是旧 package.json，重启 |
-| 心迹桥接离线 | 3100 是否被占用；`bridge-loop.cmd` 是否在跑 |
-| 401 未授权 | `consoleToken` 不一致；浏览器缓存了旧令牌 |
-| memvec 起不来 | Python 版本、依赖、9881 占用、模型下载失败 |
-| 模型下载卡住 | 代理/HF 网络；可先离线放置缓存 |
-| QQ 不回 | SnowLuma 是否连上、白名单是否包含该对象 |
-| 数据是空的 | 数据库路径不一致，检查 `~/.dsh/memvec` 与启动参数 |
-| 中文乱码 | 用 UTF-8 保存配置；PowerShell 设 `chcp 65001` |
-
-端口检查：
-
-```powershell
-Get-NetTCPConnection -State Listen -LocalPort 3080,3100,9881,3001
-```
-
----
-
-## 11. 安全
-
-- `consoleToken`、`snowluma.accessToken`、模型密钥都不要提交到仓库或截图外发；
-- 不要把 3080/3100/9881 暴露到公网；仅本机 `127.0.0.1`；
-- 控制台令牌泄露时立即更换并重启桥接；
-- 发布包不包含任何用户数据；如果你自己打包，先确认没有把 `state/`、`memories.db`、`persona.json` 打进去。
-
----
-
-## 12. 安装检查清单
-
-```
-[ ] Node 24+，Python 3.10+
-[ ] 插件目录存在 package.json，DSH 已重启
-[ ] 3080 页面显示 v0.11.0
-[ ] memvec 9881 返回 JSON
-[ ] 心迹桥接 3100 在线
-[ ] SnowLuma 3001 已连接
-[ ] config.json 填了 ownerQQ 和白名单
-[ ] consoleToken 已改成随机长串
-[ ] 发一条 QQ 私聊，回廊有原文
-[ ] 备份了 memvec 和 qq-bridge/state
-```
+不要在生产状态下运行未知模拟脚本。`build-eval-sample` 与 `build-eval-fixture` 会读取私人数据，产物只留在数据根目录的 `private-evaluation`，不得提交或打包。

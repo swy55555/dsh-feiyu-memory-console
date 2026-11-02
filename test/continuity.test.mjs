@@ -9,7 +9,7 @@ function fixture(options={}){
   return {c,get calls(){return calls},get saved(){return saved},set value(v){value=v},set now(v){now=v},set enabled(v){enabled=v},
     async say(body,messageId=String(++id)){return c.observe(KEY,{text:body},c.begin(KEY,messageId));},snap:()=>c.snapshot(KEY)};
 }
-function concern(quote,more={}){return {id:'',action:'open',title:'明天的面试',detail:'尚不知道结果',quote,ttlHours:72,...more};}
+function concern(quote,more={}){return {id:'',action:'open',kind:'task',goal:'competence',title:'明天的面试',detail:'尚不知道结果',quote,ttlHours:72,...more};}
 function belief(quote,more={}){return {id:'',action:'propose',text:'也许在担心面试表现',quote,evidenceKind:'new',...more};}
 
 test('partial event reuses only independently valid emotion, never updates concerns or learns preferences',async()=>{
@@ -92,11 +92,11 @@ test('ordinary absence, user distress, tasks and reported speech cannot change r
     await f.say('我今天忙');assert.equal(f.snap().relation.trust,.5);assert.equal(f.snap().relation.tension,0);
   }
 });
-test('explicit relationship changes are bounded, deduplicated and do not automatically recover trust',async()=>{
+test('explicit relationship changes respect the daily cap and repair never restores trust',async()=>{
   const f=fixture();f.value={...neutral(),appraisal:{kind:'conflict',target:'character',confidence:.95,intensity:.8,evidence:['我不信任你']},relationship:{kind:'distrust',quote:'我不信任你'}};
-  for(let i=0;i<5;i++)await f.say('我不信任你');assert.equal(f.snap().relation.trust,.48);assert.equal(f.snap().relation.tension,.06);
+  for(let i=0;i<5;i++)await f.say('我不信任你');assert.ok(Math.abs(f.snap().relation.trust-.46)<1e-12);assert.ok(Math.abs(f.snap().relation.tension-.12)<1e-12);
   f.now=101*DAY;f.value={...neutral(),appraisal:{kind:'repair',target:'character',confidence:.95,intensity:.8,evidence:['对不起']},relationship:{kind:'repair',quote:'对不起'}};
-  await f.say('对不起');assert.equal(f.snap().relation.trust,.48);assert.equal(f.snap().relation.tension,.03);
+  await f.say('对不起');assert.ok(Math.abs(f.snap().relation.trust-.46)<1e-12);assert.ok(Math.abs(f.snap().relation.tension-.08)<1e-12);
 });
 test('timeout, malformed output, long input and sensitive ticket all fail closed without blocking chat',async()=>{
   const f=fixture({timeoutMs:10});f.value=()=>new Promise(()=>{});assert.equal(await f.say('明天面试'),null);
@@ -166,4 +166,24 @@ test('persistence failures are visible, audit is bounded, generated support cann
   const state={concerns:[],beliefs:[{id:'b',text:'旧认识',status:'tentative'}]};
   assert.throws(()=>parseContinuity(JSON.stringify({...neutral(),beliefs:[belief('原话',{id:'b',action:'propose',text:'新认识'})]}),'原话',state));
   for(let i=0;i<70;i++)await f.say('普通聊天'+i);assert.equal(f.snap().events.length,60);
+});
+
+test('knot aging follows elapsed days, survives reload and never compounds on refresh',async()=>{
+ let now=100*DAY,disk;const options={enabled:()=>true,allowed:()=>true,now:()=>now,save:s=>disk=structuredClone(s),generate:async()=>JSON.stringify({...neutral(),appraisal:{kind:'conflict',target:'character',confidence:.95,intensity:.8,evidence:['我不信任你']},relationship:{kind:'distrust',quote:'我不信任你'}})};
+ const c=new Continuity(options);await c.observe(KEY,{text:'我不信任你'},c.begin(KEY,'one'));
+ now+=5*DAY;assert.ok(Math.abs(c.snapshot(KEY).relation.tension-.06)<1e-12);
+ now+=DAY;const first=c.snapshot(KEY).relation;assert.ok(Math.abs(first.tension-.05)<1e-12);
+ for(let i=0;i<100;i++)assert.deepEqual(c.snapshot(KEY).relation,first);
+ const restored=new Continuity({...options,load:()=>disk});assert.deepEqual(restored.snapshot(KEY).relation,first);
+ now+=2*DAY;assert.ok(Math.abs(restored.snapshot(KEY).relation.tension-.03)<1e-12);
+ const settled=restored.snapshot(KEY).relation;now-=DAY;assert.deepEqual(restored.snapshot(KEY).relation,settled);
+});
+test('legacy knot migration preserves severity and begins one durable aging cursor',()=>{
+ let now=100*DAY,disk;const c=new Continuity({enabled:()=>true,allowed:()=>true,now:()=>now,save:s=>disk=structuredClone(s)});
+ c.state(KEY).relation={trust:.5,familiarity:0,tension:.06,days:[],knots:[{id:'old',at:70*DAY,text:'合成旧事件',severity:.06}]};
+ const first=c.snapshot(KEY).relation;assert.equal(first.tension,.06);
+ for(let i=0;i<8;i++)assert.deepEqual(c.snapshot(KEY).relation,first);
+ const restored=new Continuity({enabled:()=>true,allowed:()=>true,load:()=>disk,now:()=>now});
+ assert.deepEqual(restored.snapshot(KEY).relation,first);now+=DAY;
+ assert.ok(Math.abs(restored.snapshot(KEY).relation.tension-.05)<1e-12);
 });

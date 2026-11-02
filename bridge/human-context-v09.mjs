@@ -1,3 +1,4 @@
+import {memvecHeaders} from './memvec-auth.mjs';
 // Research-informed prompt context, not a validated model of human cognition.
 // buildHumanContext is pure and bounded: no model calls, network, timers, writes, or inferred emotions.
 // fetchSessionContext is the one network exception (local memvec only); it never throws and returns [] on failure.
@@ -113,7 +114,7 @@ export async function fetchSessionContext({ key, port = 9881, limit = 200, budge
   try {
     const res = await fetch(`http://127.0.0.1:${port}/context`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: memvecHeaders(),
       body: JSON.stringify({ key, limit, budgetChars, beforeAt: beforeAt || undefined }),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -160,7 +161,7 @@ export async function fetchContextBundle({ key, port = 9881, limit = 200, budget
   try {
     const res = await fetch(`http://127.0.0.1:${port}/context`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: memvecHeaders(),
       body: JSON.stringify({ key, limit, budgetChars, beforeAt: beforeAt || undefined }),
       signal: AbortSignal.timeout(timeoutMs),
     });

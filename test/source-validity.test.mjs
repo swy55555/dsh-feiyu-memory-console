@@ -12,7 +12,7 @@ test('local reader detects commits, scopes IDs, survives reopen and does not hid
 });
 test('withdrawal excludes concerns and beliefs from actual prompt and idle seed, keeping history and numbers',async()=>{
  const f=fixture();try{
- const c=new Continuity({enabled:()=>true,allowed:()=>true,sourceBlocked:(k,r)=>f.v.blocked(k,r),sourceRevision:()=>f.v.revision(),generate:async()=>JSON.stringify({...neutral(),concerns:[{id:'',action:'open',title:'周末旅行',detail:'周末准备出行',quote:'周末旅行',ttlHours:72}],beliefs:[{id:'',action:'propose',text:'也许喜欢旅行',quote:'周末旅行',evidenceKind:'new'}]})});
+ const c=new Continuity({enabled:()=>true,allowed:()=>true,sourceBlocked:(k,r)=>f.v.blocked(k,r),sourceRevision:()=>f.v.revision(),generate:async()=>JSON.stringify({...neutral(),concerns:[{id:'',action:'open',kind:'task',goal:'curiosity',title:'周末旅行',detail:'周末准备出行',quote:'周末旅行',ttlHours:72}],beliefs:[{id:'',action:'propose',text:'也许喜欢旅行',quote:'周末旅行',evidenceKind:'new'}]})});
  await c.observe(key,{text:'周末旅行'},c.begin(key,'m1'));assert.match(c.prompt(key,{}),/周末旅行/);
  const saved=structuredClone(c.state(key)),id=c.state(key).concerns[0].evidence[0].id;f.revoke(id);
  assert.doesNotMatch(c.prompt(key,{}),/周末旅行|也许喜欢旅行/);assert.equal(c.idleQuery(key),'');assert.deepEqual(c.state(key).concerns,saved.concerns);assert.deepEqual(c.state(key).relation,saved.relation);assert.equal(c.snapshot(key).concerns[0].sourcePaused,true);

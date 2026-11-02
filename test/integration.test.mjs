@@ -1,3 +1,5 @@
+import {randomUUID} from 'node:crypto'
+import {memvecHeaders} from '../bridge/memvec-auth.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -10,7 +12,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { findPython, root } from '../bin/runtime.mjs'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'feiyu-integration-'))
+// Fixture-only credential, inherited by the isolated Python HTTP server.
+process.env.MEMVEC_API_TOKEN = randomUUID().replaceAll('-', '')
 process.env.DSH_HOME = tmp
+process.env.MEMVEC_REVIEW_SCOPE = 'all'
 process.env.FEIYU_MEMVEC_DB = path.join(tmp, 'memvec', 'memories.db')
 process.env.FEIYU_MEMVEC_URL = 'http://127.0.0.1:1'
 const core = await import('../lib/core.js')
@@ -27,7 +32,7 @@ const serve = async (handler) => {
   return `http://127.0.0.1:${server.address().port}`
 }
 const json = async (url, body) => {
-  const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-feiyu-console': '1' }, body: JSON.stringify(body) })
+  const response = await fetch(url, { method: 'POST', headers: memvecHeaders({ 'x-feiyu-console': '1' }), body: JSON.stringify(body) })
   return { status: response.status, data: await response.json() }
 }
 const row = (id) => {

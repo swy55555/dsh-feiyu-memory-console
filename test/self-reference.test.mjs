@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {SelfReference,SELF_FOUNDATION,selfReferencePrompt} from '../bridge/self-reference.mjs';
-import {seedTemperament,growTemperament,sharedTemperamentLine} from '../bridge/self-temperament.mjs';
+import {seedTemperament,growTemperament,sharedTemperamentLine,editTemperament,temperamentPrompt} from '../bridge/self-temperament.mjs';
 const DAY=86400000,now=1800000000000;
 function setup(){let time=now,saved;const ref=new SelfReference({allowed:k=>k==='private:1',enabled:()=>true,now:()=>time,save:s=>saved=s,generate:async()=>'{"changes":[]}'});return {ref,setTime:v=>time=v,saved:()=>saved};}
 const row={id:'u1',at:now,text:'你认真听我说话的时候很好，不用总是嘴硬。'};
@@ -16,17 +16,20 @@ test('automatic batches back off; failure retains queue',async()=>{const {ref,se
 test('foundation is separate from profile data and does not prescribe a biological backstory',()=>{assert.match(SELF_FOUNDATION,/不编造现实肉身/);assert.match(selfReferencePrompt({claims:[]},[row]),/不是给用户画像/);});
 
 const initial={spec:{dimensions:[{key:'warm',label:'温度',desc:'冷到暖',baseline:42,band:20}]},current:{warm:42},baseline:{warm:42}};
-test('three independent days grow one point, not three; repetitions and cooldown cannot grow again',()=>{
+test('independent days grow one point; exact three-day cooldown and duplicate evidence are enforced',()=>{
  let p=seedTemperament(initial);
- const evidence=i=>({op:{dimensionDeltas:{warm:1},action:'upsert',confidence:.95,experience:'独立经历'+i},evidence:[{id:'e'+i,fp:'fp'+i,at:now+i*DAY}]});
+ const evidence=(i,day=i)=>({op:{dimensionDeltas:{warm:1},action:'upsert',confidence:.95,experience:'独立经历'+i},evidence:[{id:'e'+i,fp:'fp'+i,at:now+day*DAY}]});
  for(let i=0;i<3;i++)p=growTemperament(p,[evidence(i)],now+i*DAY);
  assert.equal(p.current.warm,43);assert.equal(p.history.length,1);
- for(let i=0;i<3;i++)p=growTemperament(p,[evidence(i)],now+10*DAY);
+ for(let i=0;i<3;i++)p=growTemperament(p,[evidence(i)],now+2*DAY);
  assert.equal(p.current.warm,43);assert.equal(p.receipts.length,3);
- for(let i=3;i<6;i++)p=growTemperament(p,[evidence(i)],now+i*DAY);
- assert.equal(p.current.warm,43);p=growTemperament(p,[],now+10*DAY);assert.equal(p.current.warm,44);
+ for(let i=3;i<6;i++)p=growTemperament(p,[evidence(i,i-1)],now+(i-1)*DAY);
+ p=growTemperament(p,[],now+5*DAY-1);assert.equal(p.current.warm,43);
+ p=growTemperament(p,[],now+5*DAY);assert.equal(p.current.warm,44);
+ p=growTemperament(p,[],now+10*DAY);assert.equal(p.current.warm,44);
  assert.equal(initial.current.warm,42);
 });
+
 test('joint persistence failure is atomic; edits invalidate pending model results; restore retains consumed evidence',()=>{
  let fail=false;const ref=new SelfReference({enabled:()=>true,allowed:k=>k==='private:1',initialPersona:initial,save:()=>{if(fail)throw Error('disk');},now:()=>now});
  const proposal={changes:[op('',{dimensionDeltas:{warm:1}})]};fail=true;
@@ -35,7 +38,7 @@ test('joint persistence failure is atomic; edits invalidate pending model result
  ref.editTemperament([{key:'warm',current:50,baseline:48,band:10}],'修正起点',1);
  assert.throws(()=>ref.apply(proposal,[row],1),/过期/);assert.equal(ref.state.temperament.current.warm,50);
  ref.restore(1);assert.equal(ref.state.temperament.current.warm,42);assert.equal(ref.state.temperament.receipts.length,1);
- assert.throws(()=>ref.editTemperament([{key:'warm',current:90,baseline:40,band:10}],'越界',ref.state.revision),/无效/);
+ assert.throws(()=>ref.editTemperament([{key:'warm',current:101,baseline:40,band:10}],'越界',ref.state.revision),/无效/);
 });
 test('malformed dimension proposal cannot partially save valid text',()=>{
  const ref=new SelfReference({enabled:()=>true,allowed:()=>true,initialPersona:initial});
@@ -50,4 +53,15 @@ test('interaction feedback is retained without becoming persona text or temperam
  assert.equal(ref.render('private:1').includes('我正在学着认真倾听'),false);
  assert.equal(ref.state.temperament.receipts.length,0);assert.equal(ref.state.temperament.current.warm,42);
  assert.throws(()=>ref.apply({changes:[op('',{referenceKind:'invented'})]},[row]));
+});
+
+test('manual temperament accepts the full UI range, records history, and rejects invalid numbers atomically',()=>{
+ const p=seedTemperament({...initial,spec:{dimensions:[{...initial.spec.dimensions[0],band:0}]}});
+ const before=structuredClone(p);
+ for(const current of [0,43,100]){
+  const next=editTemperament(p,[{key:'warm',current,baseline:42,band:0}],'合成修正',now);
+  assert.equal(next.current.warm,current);assert.equal(next.history.at(-1).source,'manual');
+ }
+ for(const current of [-1,101,NaN,Infinity,2.5])assert.throws(()=>editTemperament(p,[{key:'warm',current,baseline:42,band:0}],'合成修正',now),/无效/);
+ assert.deepEqual(p,before);assert.match(temperamentPrompt(p),/至少3天时/);assert.doesNotMatch(temperamentPrompt(p),/至少7天/);
 });

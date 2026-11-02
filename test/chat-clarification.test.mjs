@@ -4,7 +4,7 @@ const key='private:1',ctx={scope:key,id:'new',text:'刚才那句我去杭州是�
 const proposal=()=>({kind:'whole_retraction',targetId:'old',quote:ctx.text,oldQuote:ctx.candidates[0].text,speaker:'self',mode:'asserted',coverage:'entire',explicit:true,confidence:.99});
 test('real original-write helper returns the existing request and local submit carries its required header',async()=>{
  const source=fs.readFileSync(new URL('../bridge/bridge-v09.js',import.meta.url),'utf8');const take=(a,b)=>source.slice(source.indexOf(a),source.indexOf(b,source.indexOf(a)));
- let calls=0,finish;const context=vm.createContext({cfg:{socialV2:{}},AbortSignal,fetch:async()=>{calls++;await new Promise(r=>finish=r);return {ok:true,arrayBuffer:async()=>new ArrayBuffer(0)}}});
+ let calls=0,finish;const context=vm.createContext({memvecHeaders:extra=>({'content-type':'application/json','x-memvec-token':'fixture-token',...extra}),cfg:{socialV2:{}},AbortSignal,fetch:async()=>{calls++;await new Promise(r=>finish=r);return {ok:true,arrayBuffer:async()=>new ArrayBuffer(0)}}});
  const persist=vm.runInContext(take('  function persistMessageToMemvec(','  // ── 会话摘要')+';persistMessageToMemvec',context);
  const job=persist(key,{id:'new',userId:'1',text:ctx.text,time:Date.now()},'private');assert.equal(typeof job.then,'function');assert.equal(calls,1);finish();assert.equal(await job,true);assert.equal(calls,1);
  const options=[];context.fetch=async(url,opt)=>{options.push(opt);return {ok:true,json:async()=>({ok:true})}};

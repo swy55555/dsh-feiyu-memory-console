@@ -119,8 +119,8 @@
   </div>
 </main>
 <script>
-const API = '/dsh-feiyu-memory/api/evidence/context';
-const ASSOC = '/dsh-feiyu-memory/api/associations';
+const API = './api/evidence/context';
+const ASSOC = './api/associations';
 try { if (window.self !== window.top) document.documentElement.classList.add('embed') } catch {}
 function syncTheme(){
   try{
@@ -305,7 +305,7 @@ async function load(){
     const [ctxRes, assocRes, traceRes] = await Promise.all([
       fetch(API, { cache: 'no-store' }),
       fetch(ASSOC, { cache: 'no-store' }),
-      fetch('/dsh-feiyu-memory/api/broadcast-trace?limit=1', { cache: 'no-store' }),
+      fetch('./api/broadcast-trace?limit=1', { cache: 'no-store' }),
     ]);
     const payload = await ctxRes.json();
     if(!payload?.ok) throw new Error(payload?.error || '读取失败');

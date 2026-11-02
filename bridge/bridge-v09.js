@@ -1,3 +1,5 @@
+import {exploreJson} from './explore-fetch.mjs';
+import {memvecHeaders} from './memvec-auth.mjs';
 import {AnalysisReceipts} from './analysis-receipts.mjs';
 import {assembleReferences,summarizeAssembly} from './reference-assembly.mjs';
 import {gateLinkage} from './linkage-gate.mjs';
@@ -1390,7 +1392,7 @@ async function main() {
     void (async () => {
       try {
         const conf = exploreConfig(cfg.socialV2?.explore);
-        if (!conf.enabled) return;
+        if (!conf.enabled || !initiativeAvailable(true)) return;
         if (narrativeRunning) return;
         const ex = normalizeExplore(readJsonSafe(path.join(STATE_DIR, 'explore.json'), null));
         const last = ex.runs.at(-1);
@@ -1427,11 +1429,18 @@ async function main() {
   // P1 自我驱动决策层：只记录“现在想做什么”，不执行。
   const INITIATIVE_LOG = path.join(STATE_DIR, 'initiative.jsonl');
   const CONTACT_OUTBOX = path.join(STATE_DIR, 'contact-outbox.json');
+  let initiativeEpoch = 0;
+  function initiativeAvailable(manual = false) {
+    return dshReady && currentMode === 'reserved2' && !socialV2.paused
+      && cfg.socialV2?.enabled !== false
+      && (manual || cfg.socialV2?.initiative?.enabled !== false);
+  }
   function checkContactReceipt() {
     try {
       const box = readJsonSafe(CONTACT_OUTBOX, null);
       if (!box || !Number(box.at)) return;
       const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
+      if (box.ownerKey && box.ownerKey !== ownerKey) return;
       const st = ownerKey ? getSocialV2State(ownerKey) : null;
       const lastIn = Number(st?.lastIncomingAt) || 0;
       const since = Date.now() - Number(box.at);
@@ -1479,23 +1488,59 @@ async function main() {
   let initiativeLastAt = 0;
   let contactSentAt = 0;
   let contactSentToday = 0;
-  let initiativeDay = '';
+  let contactInFlight = false;
+  function recordInitiativeContact(ownerQQ, draft, type, result) {
+    resetInitiativeDay();
+    contactSentAt = Date.now();
+    contactSentToday += 1;
+    const box = { at: contactSentAt, ownerKey: `private:${ownerQQ}`, repliedAt: 0, stages: [],
+      messageId: result?.message_id ?? null, day: initiativeDay, contactCount: contactSentToday };
+    try { atomicWriteJson(CONTACT_OUTBOX, box); }
+    catch (error) { log('[initiative] 消息已发送，但回执保存失败', error?.message ?? error); }
+    try { fs.appendFileSync(INITIATIVE_LOG, `${JSON.stringify({ at: contactSentAt, type, ownerKey: box.ownerKey, day: initiativeDay, contactCount: contactSentToday, draft })}\n`); }
+    catch (error) { log('[initiative] 消息已发送，但发送日志保存失败', error?.message ?? error); }
+  }
+  function initiativeDate(at = Date.now()) {
+    const date = new Date(at);
+    try { return date.toLocaleDateString('en-CA', { timeZone: cfg.socialV2?.initiative?.timezone || 'Asia/Shanghai' }); }
+    catch { return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' }); }
+  }
+  let initiativeDay = initiativeDate();
   let initiativeCount = 0;
+  function resetInitiativeDay() {
+    const today = initiativeDate();
+    if (today !== initiativeDay) { initiativeDay = today; initiativeCount = 0; contactSentToday = 0; }
+  }
   try {
     const lines = fs.readFileSync(INITIATIVE_LOG, 'utf8').trim().split('\n').filter(Boolean);
-    const todayKey = new Date().toLocaleDateString('en-CA');
-    for (const line of lines.slice(-500)) {
-      const row = JSON.parse(line);
-      if (row.chosen) initiativeLastAt = Math.max(initiativeLastAt, Number(row.at) || 0);
-      if (new Date(Number(row.at) || 0).toLocaleDateString('en-CA') === todayKey) initiativeCount += 1;
+    let sentRows = 0;
+    for (const line of lines) {
+      let row;
+      try { row = JSON.parse(line); } catch { continue; }
+      const at = Number(row.at);
+      if (!Number.isFinite(at) || at <= 0) continue;
+      const today = initiativeDate(at) === initiativeDay;
+      if (row.chosen) initiativeLastAt = Math.max(initiativeLastAt, at);
+      if (today && !row.type && Object.hasOwn(row, 'chosen')) initiativeCount += 1;
+      if (['contact-sent', 'contact-test-sent'].includes(row.type)
+          && (!row.ownerKey || row.ownerKey === `private:${cfg.ownerQQ}`)) {
+        contactSentAt = Math.max(contactSentAt, at);
+        if (today) { sentRows += 1; contactSentToday = Math.max(sentRows, contactSentToday, Number(row.contactCount) || 0); }
+      }
     }
   } catch {}
+  const savedContact = readJsonSafe(CONTACT_OUTBOX, null);
+  if (savedContact?.ownerKey === `private:${cfg.ownerQQ}` && Number(savedContact.at) > 0) {
+    contactSentAt = Math.max(contactSentAt, Number(savedContact.at));
+    if (initiativeDate(Number(savedContact.at)) === initiativeDay)
+      contactSentToday = Math.max(contactSentToday, Number(savedContact.contactCount) || 1);
+  }
   function initiativeDecision() {
+    if (!initiativeAvailable()) return { ok: false, reason: 'inactive' };
     checkContactReceipt();
     const conf = cfg.socialV2?.initiative || {};
     if (conf.enabled === false) return { ok: false, reason: 'disabled' };
-    const todayKey = new Date().toLocaleDateString('en-CA');
-    if (todayKey !== initiativeDay) { initiativeDay = todayKey; initiativeCount = 0; }
+    resetInitiativeDay();
     if (initiativeCount >= Number(conf.maxPerDay || 12)) return { ok: false, reason: 'daily-cap' };
     const goals = goalView(goalsState);
     const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
@@ -1533,6 +1578,7 @@ async function main() {
           if (!ev?.url) return;
           const title = String(topic?.topic || ev.excerpt || '一个视频').slice(0, 30);
           const msg = `要不要一起看这个？《${title}》 ${ev.url}`.slice(0, 120);
+          if (!initiativeAvailable() || cfg.socialV2?.initiative?.dryRun !== false || cfg.socialV2?.initiative?.allowShared === false) return;
           await bot.sendPrivateMessage(ownerQQ, msg);
           const r = proposeShared(sharedState, { type: 'watch', title, url: ev.url });
           if (r.ok) { sharedState = r.state; saveSharedState(); }
@@ -1541,8 +1587,10 @@ async function main() {
       })();
     }
     // P3b：选中 contact 且开启发送时，生成一条草稿并发私聊；默认关闭。
-    if (conf.dryRun === false && conf.contactSend === true && decision.chosen === 'contact') {
+    if (!contactInFlight && conf.dryRun === false && conf.contactSend === true && decision.chosen === 'contact') {
+      contactInFlight = true;
       const ownerQQ = Number(cfg.ownerQQ);
+      const sendEpoch = initiativeEpoch;
       const openConcern = concerns.find((x) => ['open', 'paused'].includes(x.status));
       const reasonText = decision.candidates.find((x) => x.type === 'contact')?.reason === 'concern'
         ? `有一件没放下的事${openConcern?.title ? `（${openConcern.title}）` : ''}`
@@ -1557,17 +1605,15 @@ async function main() {
           const raw = await runHeadlessPrompt(draftPrompt, 60000, [], 'contact_draft');
           let draft = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 60);
           if (!draft || /熬夜|催睡|通宵/.test(draft)) { log('[initiative] 草稿不合适，跳过发送'); return; }
-          if (!ownerQQ) return;
-          await bot.sendPrivateMessage(ownerQQ, draft);
-          contactSentAt = Date.now();
-          contactSentToday += 1;
-          try {
-            fs.appendFileSync(INITIATIVE_LOG, `${JSON.stringify({ at: Date.now(), type: 'contact-sent', draft })}\n`);
-          } catch {}
+          if (!ownerQQ || Number(cfg.ownerQQ) !== ownerQQ || sendEpoch !== initiativeEpoch || !initiativeAvailable()
+              || cfg.socialV2?.initiative?.dryRun !== false || cfg.socialV2?.initiative?.contactSend !== true
+              || cfg.socialV2?.initiative?.allowContact !== true) return;
+          const result = await bot.sendPrivateMessage(ownerQQ, draft);
+          recordInitiativeContact(ownerQQ, draft, 'contact-sent', result);
           log('[initiative] 已发送主动消息');
         } catch (error) {
           log('[initiative] 主动消息发送失败', error?.message ?? error);
-        }
+        } finally { contactInFlight = false; }
       })();
     }
     // P2：dryRun=false 且选中探索时，才真正触发一次探索。
@@ -1592,7 +1638,20 @@ async function main() {
   // 慢通道：探索倾向 → 轮廓（连续两次满足才自动 +1，最多 +3，可回滚）。
   const OPENNESS_FILE = path.join(STATE_DIR, 'persona-openness.json');
   let opennessState = readJsonSafe(OPENNESS_FILE, { proposals: [], lastProposalAt: 0, consecutive: 0, appliedTotal: 0 });
+  function applyOpennessDelta(delta) {
+    const result = applyPersonaProposal(effectivePersonaState(), { deltas: { initiative: delta } }, Date.now(), PERSONA_DEFAULT_LIMITS);
+    if (!result.applied) return result;
+    if (selfReferenceEnabled() && selfReference?.state?.temperament) {
+      const candidate = structuredClone(selfReference.state);
+      candidate.history = [...candidate.history, selfReference.snapshot()].slice(-20);
+      candidate.temperament = result.state; candidate.revision++;
+      candidate.audit = [...candidate.audit, { at: Date.now(), action: 'openness', delta }].slice(-80);
+      selfReference.commit(candidate);
+    } else { personaState = result.state; savePersonaState(); }
+    return result;
+  }
   function checkOpennessDrift() {
+    if (!initiativeAvailable(true) || cfg.socialV2?.opennessDrift?.enabled === false) return { eligible: false, reason: 'disabled-or-paused' };
     try {
       const taste = normalizeTaste(readJsonSafe(path.join(STATE_DIR, 'taste.json'), null));
       const r = evaluateOpennessDrift({ taste, now: Date.now(), lastProposalAt: opennessState.lastProposalAt, conf: cfg.socialV2?.opennessDrift });
@@ -1602,14 +1661,12 @@ async function main() {
       let appliedTotal = Number(opennessState.appliedTotal) || 0;
       let nextConsecutive = consecutive;
       if (consecutive >= 2 && appliedTotal < 3) {
-        const before = Number(personaState?.current?.initiative) || 0;
-        const res = applyPersonaProposal(personaState, { deltas: { initiative: 1 } }, Date.now(), PERSONA_DEFAULT_LIMITS);
+        const before = Number(effectivePersonaState()?.current?.initiative) || 0;
+        const res = applyOpennessDelta(1);
         if (res.applied) {
-          personaState = res.state;
-          savePersonaState();
           proposal.status = 'applied';
           proposal.before = before;
-          proposal.after = Number(personaState?.current?.initiative) || 0;
+          proposal.after = Number(effectivePersonaState()?.current?.initiative) || 0;
           appliedTotal += 1;
           nextConsecutive = 0;
           log('[openness] 连续两次满足，轮廓主动性 +1（可回滚）');
@@ -1632,23 +1689,15 @@ async function main() {
   const SHARED_FILE = path.join(STATE_DIR, 'shared-activities.json');
   let sharedState = normalizeShared(readJsonSafe(SHARED_FILE, null));
   function saveSharedState() { try { atomicWriteJson(SHARED_FILE, sharedState); } catch {} }
-  function checkSharedResponses() {
-    try {
-      const act = activeShared(sharedState);
-      if (!act) return;
-      const ownerKey = cfg.ownerQQ ? `private:${String(cfg.ownerQQ)}` : '';
-      const st = ownerKey ? getSocialV2State(ownerKey) : null;
-      const msgs = (st?.recentMessages || []).filter((m) => !m.isSelf && Number(m.time) > Number(act.proposedAt));
-      if (!msgs.length) return;
-      const text = msgs.map((m) => String(m.text || '')).join(' ');
-      if (act.status === 'proposed' && /好|行|可以|看吧|来吧|看看/.test(text)) {
-        const r = updateShared(sharedState, act.id, 'accepted', { ownerQuote: text.slice(0, 80) });
-        if (r.ok) { sharedState = r.state; saveSharedState(); log('[shared] 已接受一起看'); }
-      } else if (act.status === 'accepted' && /看完了|看过了|看完|聊完/.test(text)) {
-        const r = updateShared(sharedState, act.id, 'done', { ownerQuote: text.slice(0, 80) });
-        if (r.ok) { sharedState = r.state; saveSharedState(); log('[shared] 一起看完成'); }
-      }
-    } catch {}
+  function checkSharedResponses(key, message) {
+    if (key !== 'private:' + String(cfg.ownerQQ) || !initiativeAvailable(true)) return;
+    const act = activeShared(sharedState);
+    if (!act || Number(message.time) <= Number(act.proposedAt)) return;
+    const match = /^一起看[：:]\s*(接受|完成|取消)[。！!]?$/u.exec(String(message.text || '').trim());
+    if (!match) return;
+    const status = { 接受: 'accepted', 完成: 'done', 取消: 'dropped' }[match[1]];
+    const result = updateShared(sharedState, act.id, status, { ownerQuote: message.text });
+    if (result.ok) { atomicWriteJson(SHARED_FILE, result.state); sharedState = result.state; }
   }
   const opennessTimer = setInterval(checkOpennessDrift, 6 * 3600 * 1000);
   opennessTimer.unref?.();
@@ -3120,7 +3169,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
         const timer = setTimeout(() => ctrl.abort(), 1200);
         const res = await fetch(`http://127.0.0.1:${port}/search`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: memvecHeaders({ 'content-type': 'application/json' }),
           body: JSON.stringify({ query: q, scope: key, k: 5, min_score: 0.1 }),
           signal: ctrl.signal,
         }).finally(() => clearTimeout(timer));
@@ -3217,9 +3266,10 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     if (cfg.socialV2?.memoryRecall?.enabled === false) return;
     if (!/^(private|group):\d+$/.test(String(key))) return;
     const port = Number(cfg.socialV2?.memoryRecall?.port ?? 9881);
-    return fetch(`http://127.0.0.1:${port}/message`, {
+    try {
+      return fetch(`http://127.0.0.1:${port}/message`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: memvecHeaders({ 'content-type': 'application/json' }),
       body: JSON.stringify({
         key,
         messageId: String(msg.id || ''),
@@ -3232,7 +3282,8 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
         meta: String(kind || '')
       }),
       signal: AbortSignal.timeout(800)
-    }).then(async response=>{await response.arrayBuffer();return response.ok;}).catch(() => false);
+      }).then(async response=>{await response.arrayBuffer();return response.ok;}).catch(() => false);
+    } catch { return Promise.resolve(false); }
   }
 
   // ── 会话摘要与轮换 ────────────────────────────────────────────────────
@@ -3646,6 +3697,13 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     const contextEmotionView = cfg.socialV2?.emotion?.enabled === false ? null : withSubjectiveFeeling(emotionViewFor(key), idleAssociations.feeling(key), Date.now(), emotionRecoveryCfg());
     const contextEmotionLine = cfg.socialV2?.emotion?.enabled === false ? '' : emotionPromptLine(contextEmotionView, { isOwner: true, compact: true });
     const finish = (memoryBlock = '', memoryRows = []) => {
+      // All optional references, including outer blocks, belong to this turn.
+      if(workspaceOn && mindWorkspaces.current.get(key)!==context.continuityMessageId){
+        context.mindWorkspace={key,messageId:context.continuityMessageId,ids:[]};
+        if(context.continuity){context.continuity.used=false;context.continuity.interactionUsed=false;}
+        delete context.idleAssociation;
+        return promptText;
+      }
       if (context.disableMemory === true) { memoryBlock = ''; memoryRows = []; }
       memoryRows = recallForCurrentContext(memoryRows,context);
       if(context.styleIntent==='feedback'&&!workspaceOn)memoryBlock=buildHumanContext({key,subjectId,currentMessage,searchRows:memoryRows,options:humanOptions});
@@ -3684,7 +3742,6 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
       return assembled([
         {id:'workspace',text:work.text,priority:100,required:true},
         ...(sharedLine?[{id:'shared',text:sharedLine,priority:96,reason:'共同经历，只作回忆线索'}]:[]),
-        ...(contextEmotionLine?[{id:'emotion',text:contextEmotionLine,priority:95}]:[]),
         ...(repairLine?[{id:'repair',text:repairLine,priority:98}]:[]),
         ...(lesson?[{id:'lesson',text:lesson,priority:97}]:[]),
         ...(narrativeBlock?[{id:'narrative',text:narrativeBlock,priority:68,reason:'owner 私聊的近期叙事，含来源 episode，可按预算裁剪'}]:[]),
@@ -3775,7 +3832,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
       const priority = await memoryRequest('/priority', { scope: memoryScope(key), subject_id: subjectId }, 1200).catch(() => ({ results: [] }));
       const res = await fetch(`http://127.0.0.1:${cfg.socialV2?.memoryRecall?.port ?? 9881}/search`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: memvecHeaders({ 'content-type': 'application/json' }),
         body: JSON.stringify({ query, scope: memoryScope(key), min_score: 0.4, k: Number(cfg.socialV2?.memoryRecall?.topK ?? 3), include_global: false }),
         signal: AbortSignal.timeout(Number(cfg.socialV2?.memoryRecall?.timeoutMs ?? 1200))
       });
@@ -3862,7 +3919,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
   const dailyMemorySubjects = new Map();
   async function memoryRequest(route, body, timeoutMs = 20000, extraHeaders = {}) {
     const res = await fetch(`http://127.0.0.1:${cfg.socialV2?.memoryRecall?.port ?? 9881}${route}`, {
-      method: 'POST', headers: { 'content-type': 'application/json', ...(route.startsWith('/sources/clarification/')?{'x-source-correction':'1'}:{}), ...extraHeaders }, body: JSON.stringify(body),
+      method: 'POST', headers: memvecHeaders({ 'content-type': 'application/json', ...(route.startsWith('/sources/clarification/')?{'x-source-correction':'1'}:{}), ...extraHeaders }), body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs)
     });
     const data = await res.json();
@@ -5602,9 +5659,8 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
         return crypto.timingSafeEqual(a, b);
       })();
       const staticConsolePage = req.method === 'GET' && url.pathname === '/';
-      // 名字同步是纯补空缺的低风险操作，且只监听回环；允许控制台页面不带宽令牌直接触发。
-      const publicLabelSync = req.method === 'GET' && (url.pathname === '/api/labels/sync' || url.pathname === '/api/emotion/impact');
-      if (!tokenMatches && !staticConsolePage && !publicLabelSync) {
+      // 所有管理数据接口都需令牌；网页通过同源控制台代理访问。
+      if (!tokenMatches && !staticConsolePage) {
         sendJson({ ok: false, error: '未授权：请提供控制台访问令牌' }, 401);
         return;
       }
@@ -5729,7 +5785,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
           if(req.method!=='GET'){sendJson({ok:false,error:'method not allowed'},405);return;}
           let memoryReady=false;
           try{
-            const response=await fetch(`http://127.0.0.1:${cfg.socialV2?.memoryRecall?.port??9881}/stats`,{signal:AbortSignal.timeout(2500)});
+            const response=await fetch(`http://127.0.0.1:${cfg.socialV2?.memoryRecall?.port??9881}/stats`,{headers:memvecHeaders(),signal:AbortSignal.timeout(2500)});
             const data=await response.json();memoryReady=response.ok&&data.ok===true;
           }catch{}
           const gateway=snowlumaHealthSnapshot();
@@ -5938,6 +5994,12 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
             return;
           }
           if (exploreRunning || narrativeRunning) { sendJson({ ok: false, error: '已有一轮后台探索或叙事整理在跑' }, 409); return; }
+          if (!initiativeAvailable(true)) { sendJson({ ok: false, error: 'AI 已暂停或尚未就绪' }, 409); return; }
+          const exploreEpoch = initiativeEpoch;
+          const assertExploreCurrent = () => { if (!initiativeAvailable(true) || exploreEpoch !== initiativeEpoch) throw new Error('探索已取消'); };
+          const exploreDeadline = AbortSignal.timeout(90000);
+          let httpRequests = 0, modelCalls = 0;
+          const fetchExplore = async (input, headers) => { assertExploreCurrent(); httpRequests++; const result = await exploreJson(input, {headers, signal: exploreDeadline}); assertExploreCurrent(); return result; };
           exploreRunning = true;
           const startedAt = Date.now();
           try {
@@ -5966,7 +6028,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
               ].filter(Boolean).join('; ');
               if (cookie) headers.cookie = cookie;
             } catch {}
-            const searchRaw = await (await fetch(searchUrl(pick.topic), { headers })).json().catch(() => null);
+            const searchRaw = await fetchExplore(searchUrl(pick.topic), headers);
             const seenBvids = new Set((ex.runs || []).flatMap((r) => [r.video?.bvid, ...(r.tried || []).map((x) => x.bvid)]).filter(Boolean));
             const results = parseSearchResults(searchRaw).filter((r) => !seenBvids.has(r.bvid));
             if (!results.length) {
@@ -5975,7 +6037,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
               sendJson({ ok: true, entry });
               return;
             }
-            const candidates = pickCandidates(results, { seed: pick.seed, limit: 3 });
+            const candidates = pickCandidates(results, { seed: pick.seed, limit: conf.maxPagesPerRun });
             if (!candidates.length) {
               const entry = { at: Date.now(), ok: false, reason: 'only-teaching-results', topic: pick.topic, basis: pick.basis, cost: 0 };
               ex = recordRun(ex, entry); atomicWriteJson(exploreFile, ex);
@@ -5983,7 +6045,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
               return;
             }
             // WBI 需要的两把 key（游客可用）
-            const navRaw = await (await fetch('https://api.bilibili.com/x/web-interface/nav', { headers })).json().catch(() => null);
+            const navRaw = await fetchExplore('https://api.bilibili.com/x/web-interface/nav', headers);
             const keyOf = (url) => String(url || '').split('/').pop().replace(/\.\w+$/, '');
             const imgKey = keyOf(navRaw?.data?.wbi_img?.img_url);
             const subKey = keyOf(navRaw?.data?.wbi_img?.sub_url);
@@ -5991,20 +6053,21 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
             let content = '';
             const tried = [];
             for (const cand of candidates) {
-              const viewRaw = await (await fetch(viewUrl(cand.bvid), { headers })).json().catch(() => null);
+              const viewRaw = await fetchExplore(viewUrl(cand.bvid), headers);
               const view = parseVideoView(viewRaw);
               if (!view) { tried.push({ bvid: cand.bvid, reason: 'view-failed' }); continue; }
               let text = '';
               try {
-                const playerRaw = await (await fetch(playerUrl({ bvid: view.bvid, cid: viewRaw?.data?.cid, imgKey, subKey }), { headers })).json();
+                const playerRaw = await fetchExplore(playerUrl({ bvid: view.bvid, cid: viewRaw?.data?.cid, imgKey, subKey }), headers);
                 for (const ref of subtitleRefs(playerRaw).slice(0, 1)) {
-                  const subRaw = await (await fetch(ref.url, { headers })).json().catch(() => null);
+                  const subRaw = await fetchExplore(ref.url, headers);
                   text = parseSubtitleBody(subRaw);
                 }
               } catch (error) { log('探索：读取字幕失败', error?.message ?? error); }
               if (text.trim().length >= 100) { picked = { view, play: cand.play }; content = text.slice(0, conf.maxCharsPerRun); break; }
               tried.push({ bvid: cand.bvid, reason: 'no-subtitle' });
             }
+            assertExploreCurrent();
             if (!picked) {
               const entry = { at: Date.now(), ok: false, reason: 'no-readable-content', topic: pick.topic, basis: pick.basis, tried, cost: 0 };
               ex = recordRun(ex, entry); atomicWriteJson(exploreFile, ex);
@@ -6014,8 +6077,11 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
             const view = picked.view;
             const excerpt = `${view.title}\n${content}`.slice(0, conf.maxCharsPerRun);
             let raw = '';
+            assertExploreCurrent();
+            modelCalls++;
             try { raw = await runHeadlessPrompt(impressionPrompt({ topic: pick.topic, title: view.title, desc: content.slice(0, 4000) }), 60000, [], 'explore'); }
             catch (error) { raw = ''; log('探索：提炼失败', error?.message ?? error); }
+            assertExploreCurrent();
             const impressions = parseImpressions(raw, { excerpt, topic: pick.topic });
             const writes = [];
             let tasteStatus = 'none';
@@ -6048,7 +6114,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
               at: Date.now(), ok: true, topic: pick.topic, basis: pick.basis,
               video: { bvid: view.bvid, title: view.title, author: view.author, url: view.url, play: picked.play },
               contentRead: true, contentChars: content.length, tried,
-              chars: excerpt.length, calls: 2 + tried.length, pages: tried.length + 1, impressions, writes, tasteStatus,
+              chars: excerpt.length, calls: modelCalls, httpRequests, pages: tried.length + 1, impressions, writes, tasteStatus,
               cost: Math.round(cost * 10000) / 10000,
             };
             ex.focus = nextFocus(ex.focus, pick, Number(cfg.socialV2?.explore?.focusRuns) || 2);
@@ -6229,13 +6295,17 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/initiative/contact-test') {
-          // 强制生成一条主动消息并真实发送：只给管理端测试用。
+          // 手动测试可以绕过每日计划，但仍服从全局暂停。
+          if (!initiativeAvailable(true)) { sendJson({ ok: false, error: 'AI 已暂停或尚未就绪' }, 409); return; }
+          const sendEpoch = initiativeEpoch;
           if (req.headers['x-agent-call'] !== undefined || req.headers['x-agent-token'] !== undefined) {
             sendJson({ ok: false, error: '仅管理端可访问' }, 403);
             return;
           }
           const ownerQQ = Number(cfg.ownerQQ);
           if (!ownerQQ) { sendJson({ ok: false, error: '未配置 ownerQQ' }, 400); return; }
+          if (contactInFlight) { sendJson({ ok: false, error: '已有主动消息正在生成或发送' }, 409); return; }
+          contactInFlight = true;
           try {
             let openTitle = '';
             try { openTitle = continuity.snapshot(`private:${ownerQQ}`)?.concerns?.find((x) => ['open', 'paused'].includes(x.status))?.title || ''; } catch {}
@@ -6251,15 +6321,15 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
               sendJson({ ok: false, error: '草稿未通过安全闸', draft }, 422);
               return;
             }
+            if (!initiativeAvailable(true) || sendEpoch !== initiativeEpoch || Number(cfg.ownerQQ) !== ownerQQ) {
+              sendJson({ ok: false, error: '主动发送已取消' }, 409); return;
+            }
             const result = await bot.sendPrivateMessage(ownerQQ, draft);
-            contactSentAt = Date.now();
-            try {
-              fs.appendFileSync(INITIATIVE_LOG, `${JSON.stringify({ at: Date.now(), type: 'contact-test-sent', draft })}\n`);
-            } catch {}
+            recordInitiativeContact(ownerQQ, draft, 'contact-test-sent', result);
             sendJson({ ok: true, draft, message_id: result?.message_id ?? result ?? null });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '发送失败' }, 500);
-          }
+          } finally { contactInFlight = false; }
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/persona/openness/rollback') {
@@ -6267,14 +6337,13 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
           const list = opennessState.proposals || [];
           const target = [...list].reverse().find((p) => p.status === 'applied');
           if (!target) { sendJson({ ok: false, error: '没有可回滚的提案' }, 400); return; }
-          const res = applyPersonaProposal(personaState, { deltas: { initiative: -Number(target.delta || 1) } }, Date.now(), PERSONA_DEFAULT_LIMITS);
+          if (Number(effectivePersonaState()?.current?.initiative) !== target.after) { sendJson({ ok: false, error: '轮廓已被后续修改，不能覆盖回滚' }, 409); return; }
+          const res = applyOpennessDelta(-Number(target.delta || 1));
           if (!res.applied) { sendJson({ ok: false, error: '回滚未生效' }, 400); return; }
-          personaState = res.state;
-          savePersonaState();
           target.status = 'rolled-back';
           opennessState.appliedTotal = Math.max(0, (Number(opennessState.appliedTotal) || 0) - 1);
           atomicWriteJson(OPENNESS_FILE, opennessState);
-          sendJson({ ok: true, rolledBack: target.at, before: target.before, after: Number(personaState?.current?.initiative) || 0 });
+          sendJson({ ok: true, rolledBack: target.at, before: target.before, after: Number(effectivePersonaState()?.current?.initiative) || 0 });
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/repairs') {
@@ -6375,10 +6444,8 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
           sendJson({ ok: true, review });
           return;
         }
-        try { res.setHeader('Access-Control-Allow-Origin', '*'); } catch {}
         if (url.pathname === '/api/emotion/impact') {
-          try { res.setHeader('Access-Control-Allow-Origin', '*'); } catch {}
-          try {
+            try {
             const days = Math.max(1, Math.min(7, Number(url.searchParams.get('days')) || 1));
             const rawEmotion = JSON.parse(fs.readFileSync(path.join(STATE_DIR, 'emotion-scopes.json'), 'utf8').replace(/^\uFEFF/, ''));
             const lanes = Array.isArray(rawEmotion && rawEmotion.states) ? rawEmotion.states : Object.entries((rawEmotion && rawEmotion.states) || {});
@@ -7663,6 +7730,7 @@ ${roleText.slice(0, 9000)}`;
           const paused = body.paused === true;
           socialV2.paused = paused;
           if (paused) {
+            initiativeEpoch += 1;
             clearAllSocialV2Timers();
             log('控制台：二代 AI 已暂停（唤醒/等待任务已停止）');
           } else {
@@ -13029,6 +13097,7 @@ function appendMemoryV2(st, category, content, extra = {}) {
     st.preSleepWaitObservedAt = 0;
     st.preSleepWaitAccumMs = 0;
     st.recentMessages.push(msg);
+    try { checkSharedResponses(key, msg); } catch (error) { log('[shared] 状态保存失败', error?.message); }
     if (st.recentMessages.length > recentLimit) st.recentMessages.splice(0, st.recentMessages.length - recentLimit);
     st.unread.push(msg);
     if (st.unread.length > unreadLimit) st.unread.splice(0, st.unread.length - unreadLimit);

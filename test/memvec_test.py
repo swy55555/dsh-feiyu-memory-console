@@ -15,6 +15,9 @@ spec.loader.exec_module(m)
 class MemoryLifecycleTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='feiyu-regression-')
+        self.old_home = m.HOME
+        self.old_review_scope = os.environ.pop('MEMVEC_REVIEW_SCOPE', None)
+        m.HOME = self.tmp.name
         m.DB_PATH = str(Path(self.tmp.name) / 'memories.db')
         m._owner_scope_cache = 'private:10001'
         m._strength_migrated = False
@@ -23,6 +26,10 @@ class MemoryLifecycleTests(unittest.TestCase):
         m.DEDUPE_SIM = 1.01
 
     def tearDown(self):
+        m.HOME = self.old_home
+        os.environ.pop('MEMVEC_REVIEW_SCOPE', None)
+        if self.old_review_scope is not None:
+            os.environ['MEMVEC_REVIEW_SCOPE'] = self.old_review_scope
         self.tmp.cleanup()
 
     def add(self, text, scope='private:10001', subject='10001', **kwargs):

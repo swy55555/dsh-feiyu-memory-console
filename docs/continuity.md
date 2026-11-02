@@ -130,4 +130,4 @@ flowchart TD
 
 可视化与文字视图共享状态。挂念、认识、空闲联想和主观感受集中展示，开关仍独立。情绪曲线与参数保留在“情绪”，长期事实管理仍在“长期记忆”。联想不会因页面整合而成为事实或增加权重。
 
-详见[情绪架构](emotion-architecture.md)与[完整用户手册](../manual/USER_GUIDE-0.9.1.md)。
+详见[情绪架构](emotion-architecture.md)与[完整用户手册](../manual/USER_GUIDE.md)。

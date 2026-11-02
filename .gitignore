@@ -11,3 +11,13 @@ memvec/.venv/
 memvec/hfcache/
 memvec/memories.db
 memvec/*.log
+
+# Never publish generated evaluation data or runtime state
+docs/eval/
+**/private-evaluation/
+**/state/
+*.db
+*.db-wal
+*.db-shm
+*.log
+.env

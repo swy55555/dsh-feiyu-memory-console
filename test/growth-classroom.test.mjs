@@ -52,3 +52,83 @@ test('course selection shares event understanding and expires with that turn; no
  now+=120001;const stale={};continuity.prompt(key,stale);assert.equal(c.candidates(key,stale.classroomRef).length,0);
  continuity.begin(key,'next');assert.equal(continuity.prompt(key,{}),'');
 });
+
+test('global courses reuse drafts across allowed chats and reject a fourth active course',async()=>{
+ let calls=0;const c=new GrowthClassroom({allowed:()=>true,generate:async()=>{calls++;return JSON.stringify(draft)}});
+ c.edit(key,{action:'settings',enabled:true});c.edit(key,input);
+ const first=c.view(key).courses[0].id;c.start(key,first);await c.job;
+ c.edit('private:2',input);const second=c.view(key).courses.at(-1).id;
+ assert.equal(c.start('private:2',second).reused,true);assert.equal(calls,1);
+ for(let i=0;i<4;i++){
+  c.edit(key,{...input,title:'启用上限'+i});const row=c.view(key).courses.at(-1);
+  c.edit(key,{action:'reference',id:row.id,guidance:'回应具体内容',avoid:''});
+  const approve=()=>c.edit(key,{action:'approve',id:row.id,revision:c.view(key).courses.at(-1).revision});
+  if(i<3)approve();else assert.throws(approve,/最多启用3门/);
+ }
+ assert.equal(c.view(key).courses.filter(x=>x.active).length,3);assert.equal(c.catalog(key).length,3);
+});
+test('late generation failure cannot overwrite a newer course edit or disabled state',async()=>{
+ for(const mode of ['edit','disable']){
+  const f=fixture(),c=f.c;let reject;c.generate=()=>new Promise((_,r)=>reject=r);
+  c.edit(key,input);c.edit(key,{action:'settings',enabled:true});const id=c.view(key).courses[0].id;
+  c.start(key,id);
+  if(mode==='edit')c.edit(key,{...input,id,goal:'新的目标'});else c.edit(key,{action:'settings',enabled:false});
+  const before=c.view(key).courses[0];reject(Error('late failure'));await c.job;
+  assert.deepEqual(c.view(key).courses[0],before);assert.equal(c.busy,false);
+ }
+});
+
+function exerciseFixture(){
+ const f=fixture(),c=f.c;c.edit(key,{action:'settings',enabled:true});c.edit(key,input);
+ const id=c.view(key).courses[0].id;c.edit(key,{action:'reference',id,guidance:'合成练习参考',avoid:''});
+ return {...f,id};
+}
+const exerciseOutput=method=>method==='selfQuiz'?JSON.stringify({scenario:'合成题目',answer:'合成回答'}):'合成回答';
+
+test('exercises discard late results after disable, re-enable, edits, pause or permission revocation',async()=>{
+ for(const method of ['homeworkAnswer','selfQuiz'])for(const change of ['disable','re-enable','edit','pause','permission']){
+  const {c,id}=exerciseFixture();let finish;c.generate=()=>new Promise(r=>finish=r);
+  const job=c[method](key,id,'合成情景');assert.equal(c.busy,true);
+  if(change==='edit')c.edit(key,{...input,id,goal:'修改后的新目标'});
+  else if(change==='pause')c.edit(key,{action:'pause',id});
+  else if(change==='permission')c.allowed=()=>false;
+  else{c.edit(key,{action:'settings',enabled:false});if(change==='re-enable')c.edit(key,{action:'settings',enabled:true});}
+  const before=structuredClone(c.state),rejected=assert.rejects(job,/变化|允许/);
+  finish(exerciseOutput(method));await rejected;
+  assert.deepEqual(c.state,before,method+' '+change);assert.equal(c.busy,false);
+ }
+});
+
+test('course generation, homework and self quiz share one busy lock in every direction',async()=>{
+ for(const first of ['start','homeworkAnswer','selfQuiz']){
+  const {c,id}=exerciseFixture();let finish,calls=0;c.generate=()=>{calls++;return new Promise(r=>finish=r)};
+  const started=c[first](key,id,'合成情景'),job=first==='start'?c.job:started;
+  assert.equal(c.view(key).busy,true);
+  assert.throws(()=>c.start(key,id),/已有/);
+  await assert.rejects(c.homeworkAnswer(key,id,'重复情景'),/已有/);
+  await assert.rejects(c.selfQuiz(key,id),/已有/);
+  assert.equal(calls,1);finish(first==='start'?JSON.stringify(draft):exerciseOutput(first));await job;
+  assert.equal(c.busy,false);
+ }
+});
+
+test('exercise model, parse and persistence errors release the lock without partial writes',async()=>{
+ for(const method of ['homeworkAnswer','selfQuiz'])for(const failure of ['model','parse','save']){
+  const {c,id}=exerciseFixture(),save=c.save,before=structuredClone(c.state);
+  c.generate=async()=>{if(failure==='model')throw Error('模拟模型离线');return failure==='parse'?'':exerciseOutput(method)};
+  if(failure==='save')c.save=()=>{throw Error('模拟保存失败')};
+  await assert.rejects(c[method](key,id,'合成情景'));assert.deepEqual(c.state,before);assert.equal(c.busy,false);
+  c.save=save;c.generate=async()=>exerciseOutput(method);
+  const result=await c[method](key,id,'重试情景');assert.ok(result.itemId);assert.equal(c.state.courses[0].homework.length,1);assert.equal(c.storageError,false);
+ }
+});
+
+test('successful exercises preserve response fields and keep at most thirty ungraded records',async()=>{
+ for(const method of ['homeworkAnswer','selfQuiz']){
+  const {c,id}=exerciseFixture();c.generate=async()=>exerciseOutput(method);
+  let result;for(let i=0;i<32;i++)result=await c[method](key,id,'合成情景'+i);
+  const rows=c.state.courses[0].homework;assert.equal(rows.length,30);assert.equal(rows.at(-1).id,result.itemId);
+  assert.equal(rows.at(-1).scenario,result.scenario);assert.equal(rows.at(-1).answer,result.answer);assert.equal(rows.at(-1).score,null);
+  assert.equal(rows.at(-1).selfMade===true,method==='selfQuiz');assert.equal(c.busy,false);
+ }
+});

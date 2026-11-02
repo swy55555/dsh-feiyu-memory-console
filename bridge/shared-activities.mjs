@@ -63,6 +63,9 @@ export function updateShared(state, id, status, extra = {}, now = Date.now()) {
   const a = s.activities.find((x) => x.id === id);
   if (!a) return { ok: false, reason: 'not-found', state: s };
   if (!['accepted', 'done', 'dropped'].includes(status)) return { ok: false, reason: 'bad-status', state: s };
+  if (a.status === status) return { ok: true, state: s, activity: a };
+  const allowed = { proposed: ['accepted', 'dropped'], accepted: ['done', 'dropped'], done: [], dropped: [] };
+  if (!allowed[a.status]?.includes(status)) return { ok: false, reason: 'invalid-transition', state: s };
   a.status = status;
   if (status === 'accepted') a.acceptedAt = now;
   if (status === 'done') a.doneAt = now;

@@ -27,8 +27,8 @@ try{
   await route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
  });
  await page.goto(`http://127.0.0.1:${server.address().port}/#/continuity`);await page.locator('.hub-landscape').waitFor();
- assert.equal(await page.locator('a[href="#/classroom"]').count(),1);
- assert.equal(await page.getByRole('button',{name:'成长课堂',exact:true}).count(),1);
+ assert.equal(await page.locator('button[data-tab="classroom"]').count(),1);
+ assert.equal(await page.getByRole('button',{name:'年轮',exact:true}).count(),1);
  assert.equal(posts.length,0);
  await page.getByText('本轮交流理解（可修正）',{exact:true}).click();
  await page.getByText('用户希望这次回应更具体',{exact:true}).waitFor();

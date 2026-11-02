@@ -1,3 +1,4 @@
+import {memvecHeaders} from './memvec-auth.mjs';
 ﻿// 主动接梗/玩梗：从本地 6668 条梗库里挑候选，写进提示词；用过的梗记一笔到 memvec。
 // 只做“可选建议”，用不用由模型判断；不解释出处，避免百科腔。
 import fs from 'node:fs';
@@ -34,19 +35,19 @@ export function loadMemePlayConfig(stateDir) {
 }
 
 function rows(dbPath) {
+  let db;
   try {
     const st = fs.statSync(dbPath);
     if (_cache.path === dbPath && _cache.mtime === st.mtimeMs) return _cache.rows;
-    const db = new DatabaseSync(dbPath, { readOnly: true });
+    db = new DatabaseSync(dbPath, { readOnly: true });
     const list = db.prepare('SELECT title,slug,tags,usage,origin FROM memes').all()
       .map((r) => ({ ...r, title: String(r.title || '').trim(), tags: String(r.tags || ''), usage: String(r.usage || '') }))
       .filter((r) => r.title);
-    db.close();
     _cache = { path: dbPath, mtime: st.mtimeMs, rows: list };
     return list;
   } catch {
     return [];
-  }
+  } finally { db?.close(); }
 }
 
 function terms(text) {
@@ -142,7 +143,7 @@ export async function recordMemeUse({ memvecUrl = 'http://127.0.0.1:9881', scope
     const timer = setTimeout(() => ctrl.abort(), 1500);
     await fetch(`${String(memvecUrl).replace(/\/$/, '')}/add`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: memvecHeaders(),
       body: JSON.stringify(body),
       signal: ctrl.signal,
     }).finally(() => clearTimeout(timer));

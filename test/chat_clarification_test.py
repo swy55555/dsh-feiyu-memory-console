@@ -48,6 +48,8 @@ class ChatClarificationTests(unittest.TestCase):
         self.assertEqual(self.f.f.row(self.mid)['status'],'active')
         with m.db() as c:self.assertEqual(c.execute('SELECT COUNT(*) FROM source_corrections').fetchone()[0],0)
     def test_actual_http_route_enforces_header_and_returns_idempotent_result(self):
+        m.API_TOKEN_FILE = str(Path(m.DB_PATH).with_name('api-token'))
+        token = m._ensure_api_token()
         server=ThreadingHTTPServer(('127.0.0.1',0),m.Handler);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         def call(headers):
             c=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=5)
@@ -55,9 +57,10 @@ class ChatClarificationTests(unittest.TestCase):
                 c.request('POST','/sources/clarification/apply',json.dumps(self.body),headers);r=c.getresponse();return r.status,json.loads(r.read())
             finally:c.close()
         try:
+            self.assertEqual(call({'content-type':'application/json','x-memvec-token':token})[0],403)
             self.assertEqual(call({})[0],403);self.assertEqual(call({'x-source-correction':'1','origin':'https://example.invalid'})[0],403)
-            self.assertEqual(call({'x-source-correction':'1'})[1]['status'],'applied')
-            self.assertEqual(call({'x-source-correction':'1'})[1]['status'],'already-processed')
+            self.assertEqual(call({'x-source-correction':'1','content-type':'application/json','x-memvec-token':token})[1]['status'],'applied')
+            self.assertEqual(call({'x-source-correction':'1','content-type':'application/json','x-memvec-token':token})[1]['status'],'already-processed')
         finally:server.shutdown();server.server_close();thread.join()
 
 if __name__=='__main__':unittest.main()

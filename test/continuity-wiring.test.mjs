@@ -1,3 +1,4 @@
+import {extras} from './bridge-test-context.mjs';
 import * as replyContext from '../bridge/reply-context.mjs';
 import {ReferenceReuse} from '../bridge/reference-reuse.mjs';
 import test from 'node:test';
@@ -20,7 +21,7 @@ test('partly invalid continuity response still reaches real emotion handler with
   const c=new Continuity({enabled:()=>true,allowed:()=>true,generate:async()=>{eventCalls++;return JSON.stringify({summary:'亲昵互动',
     appraisal:{kind:'affection',target:'character',confidence:.95,intensity:.4,evidence:['摸摸脑袋']},concerns:'bad',beliefs:[]});}});
   const understood=await c.observe('private:1',{text:'摸摸脑袋'},c.begin('private:1','partial'));
-  const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',...emotion,crypto,emotionState:emotion.emptyEmotion(),emotionLast:{text:'',at:0},
+  const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',...emotion,crypto,emotionState:emotion.emptyEmotion(),emotionLast:{text:'',at:0},
     cfg:{socialV2:{emotion:{appraisalModel:{enabled:true}}}},emotionRecoveryCfg:()=>({}),recordEpisodeOutcome:()=>{},
     saveEmotionState:()=>{},maybeCreateEpisode:()=>null,maybeQueueSpillover:()=>{},log:()=>{},
     refineEmotionWithModel:async()=>{emotionCalls++;}});
@@ -31,7 +32,7 @@ test('partly invalid continuity response still reaches real emotion handler with
 
 test('qq_get_prompt retains self reference once while preserving emotion and legacy persona behavior',()=>{
   let self=true;
-  const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',personaEnabled:()=>!self,selfReferenceEnabled:()=>self,selfReference:{render:()=>'<full self reference>'},
+  const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',personaEnabled:()=>!self,selfReferenceEnabled:()=>self,selfReference:{render:()=>'<full self reference>'},
     renderPersonaBlock:()=>'<legacy dimensions>',personaStateForChat:()=>({}),personaIsOwnerKey:()=>true,
     cfg:{socialV2:{emotion:{enabled:true}}},mindWorkspaceEnabled:()=>true,emotionState:{},emotionViewFor:()=>({}),idleAssociations:{feeling:()=>null},
     emotionPromptLine:()=>'<emotion>',emotionRecoveryCfg:()=>({}),withSubjectiveFeeling:x=>x,episodeRecallBlock:()=>'<episodes>',contrarianPrompt:()=>'<legacy mood>'});
@@ -42,13 +43,13 @@ test('qq_get_prompt retains self reference once while preserving emotion and leg
   self=false;assert.equal(fn('private:1',false,false),'<legacy dimensions>\n<emotion>\n<episodes>\n<legacy mood>');
   assert.match(source,/persona: personaBlockFor\(key, false, !selfReferenceEnabled\(\)\)/);
   // Self reference is already bounded by its own schema; legacy role truncation must not remove its tail.
-  const expression=source.match(/role: \{ name: selfReferenceEnabled\(\)[^\n]+hint: (.+) \},/)[1];
+  const expression=source.match(/role: \{ name: [^\n]+hint: (.+) \},/)[1];
   const full='完整参考'.repeat(1000);
   assert.equal(vm.runInNewContext(expression,{selfReferenceEnabled:()=>true,selfReference:{render:()=>full},key:'private:1',currentMode:'reserved2',currentRoleHintV2:()=>'<truncated>'}),full);
 });
 
 test('live emotion handler returns the measured change instead of silently omitting it',async()=>{
- const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',...emotion,crypto,Date,Promise,cfg:{socialV2:{emotion:{enabled:true}}},emotionState:emotion.emptyEmotion(Date.now()),emotionLast:{text:'',at:0},
+ const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',...emotion,crypto,Date,Promise,cfg:{socialV2:{emotion:{enabled:true}}},emotionState:emotion.emptyEmotion(Date.now()),emotionLast:{text:'',at:0},
   recordEpisodeOutcome:()=>{},emotionRecoveryCfg:()=>({}),saveEmotionState:()=>{},maybeCreateEpisode:()=>null,maybeQueueSpillover:()=>{},log:()=>{},reconcileEmotionCorrection:()=>{},refineEmotionWithModel:async()=>null});
  scoped(ctx);const fn=vm.runInContext(between('  function noteEmotion(','  // On-demand review')+';noteEmotion',ctx);
  const result=await fn({text:'新发现真有意思',key:'private:1',speakerId:'1',messageId:'measured',recentMessages:[],semanticAppraisal:{kind:'neutral',target:'none',confidence:.95,intensity:0,evidence:[],feelings:[{kind:'curiosity',intensity:.5,confidence:.95,evidence:'新发现',reason:'新的话题'}]}});
@@ -59,7 +60,7 @@ test('live emotion handler returns the measured change instead of silently omitt
 
 test('actual emotion entry accepts unified appraisal and does not spend a second model call',async()=>{
   let calls=0;
-  const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',...emotion,crypto,emotionState:emotion.emptyEmotion(),emotionLast:{text:'',at:0},
+  const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',...emotion,crypto,emotionState:emotion.emptyEmotion(),emotionLast:{text:'',at:0},
     cfg:{socialV2:{emotion:{appraisalModel:{enabled:true}}}},emotionRecoveryCfg:()=>({}),recordEpisodeOutcome:()=>{},
     saveEmotionState:()=>{},maybeCreateEpisode:()=>null,maybeQueueSpillover:()=>{},log:()=>{},
     runHeadlessPrompt:()=>{calls++;throw Error('unexpected second call')}});
@@ -69,7 +70,7 @@ test('actual emotion entry accepts unified appraisal and does not spend a second
 });
 test('actual context composer includes related continuity when fact recall is disabled; automatic prompts omit it',async()=>{
   let uses=0;
-  const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',crypto,cfg:{socialV2:{memoryRecall:{enabled:false},context:{enabled:false}}},
+  const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',crypto,cfg:{socialV2:{goals:{enabled:false},rhythm:{enabled:false},emotion:{enabled:false},memoryRecall:{enabled:false},context:{enabled:false}}},
     humanContextEnabled:()=>false,noteSessionTurn:()=>{},scheduleRotationCheck:()=>{},dailyMemorySubjects:new Map(),dailyRecallQueries:new Map(),
     recordRetrievalTrace:()=>{},continuity:{prompt:(key,context)=>{uses++;context.continuity={key,eventId:'event'};return '挂念参考\n'}}});
   const fn=vm.runInContext(between('  async function withMemoryContext(','  const dailyRecallQueries')+';withMemoryContext',ctx);
@@ -81,7 +82,7 @@ test('actual console route denies agent access and preserves unrelated settings 
   const route=between("        if (url.pathname === '/api/continuity') {","        if (req.method === 'GET' && url.pathname === '/api/memory/idle-association')");
   async function run(headers,body,method='POST'){
     let result;
-    const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',url:{pathname:'/api/continuity'},req:{method,headers},cfg,ROOT:'test',path,
+    const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',url:{pathname:'/api/continuity'},req:{method,headers},cfg,ROOT:'test',path,
       readBody:async()=>body,readConfigObject:()=>structuredClone(file),atomicWriteJson:(_p,v)=>{file=v},
       mindWorkspaces:{invalidate:()=>{}},continuity:{snapshot:()=>({enabled:cfg.socialV2.continuity?.enabled}),invalidate:()=>invalidated++,edit:()=>{throw Error('invalid')}},
       sendJson:(data,status=200)=>result={data,status}});
@@ -108,7 +109,7 @@ test('host API forwards authenticated continuity calls and enforces write header
 });
 test('actual dispatch records acceptance and failure separately from actual QQ send',async()=>{
   const events=[];let value={result:{ok:true}};
-  const ctx=vm.createContext({...replyContext,mindAllowed:k=>k==='private:1',cfg:{},referenceReuse:new ReferenceReuse(),reverse:new Map(),turnTraces:{cancel:()=>{},invalidate:()=>{}},continuity:{delivery:(_r,s)=>events.push(s)},api:{sessions:{prompt:async()=>{if(value instanceof Error)throw value;return value}}}});
+  const ctx=vm.createContext({...extras,...replyContext,mindAllowed:k=>k==='private:1',cfg:{},referenceReuse:new ReferenceReuse(),reverse:new Map(),turnTraces:{cancel:()=>{},invalidate:()=>{}},continuity:{delivery:(_r,s)=>events.push(s)},api:{sessions:{prompt:async()=>{if(value instanceof Error)throw value;return value}}}});
   const fn=vm.runInContext(between('  async function dispatchTracedPrompt(','  function traceRow(')+';dispatchTracedPrompt',ctx);
   const c={continuity:{key:'private:1',eventId:'e'}};await fn({sessionId:'s'},c);value={result:{ok:false}};await fn({sessionId:'s'},c);value=Error('timeout');await assert.rejects(fn({sessionId:'s'},c));
   assert.deepEqual(events,['injected','rejected','delivery-unknown']);

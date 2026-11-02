@@ -94,7 +94,7 @@ test('legacy spillover is not consumed and group-wide episode prompt cannot inhe
  assert.equal(fn('group:9'),'');
 });
 test('sharing route denies model/agent requests and rejects destinations outside access rules',async()=>{
- const route=fragment("        if (url.pathname === '/api/memory/sharing')", "        if (req.method === 'POST' && url.pathname === '/api/memory/fact-review')");
+ const route=fragment("        if (url.pathname === '/api/memory/sharing')", "        if (req.method === 'POST' && url.pathname === '/api/memory/audit')");
  assert.ok(route.length>0&&route.length<4000);
  async function call(headers={},allowed=true){
   let result,calls=0;

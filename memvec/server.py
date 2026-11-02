@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import secrets
 import math
 import os
 import re
@@ -67,6 +68,39 @@ import numpy as np
 
 HOME = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("MEMVEC_DB_PATH", os.path.join(HOME, "memories.db"))
+API_TOKEN_FILE = os.environ.get('MEMVEC_API_TOKEN_FILE', os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), 'api-token'))
+
+
+def _api_token():
+    token = os.environ.get('MEMVEC_API_TOKEN', '').strip()
+    if not token:
+        try:
+            with open(API_TOKEN_FILE, encoding='utf-8') as f:
+                token = f.read().strip()
+        except OSError:
+            return ''
+    return token if re.fullmatch(r'[A-Za-z0-9_-]{32,256}', token) else ''
+
+
+def _ensure_api_token():
+    token = _api_token()
+    if token:
+        return token
+    if os.environ.get('MEMVEC_API_TOKEN'):
+        raise RuntimeError('MEMVEC_API_TOKEN must be 32-256 URL-safe characters')
+    os.makedirs(os.path.dirname(os.path.abspath(API_TOKEN_FILE)), exist_ok=True)
+    try:
+        fd = os.open(API_TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(secrets.token_urlsafe(32))
+    except FileExistsError:
+        pass
+    token = _api_token()
+    if not token:
+        raise RuntimeError('memvec API token is missing or invalid')
+    return token
+
+
 PORT = int(os.environ.get("MEMVEC_PORT", "9881"))
 MODEL = os.environ.get("MEMVEC_MODEL", "BAAI/bge-small-zh-v1.5")
 HALF_LIFE_DAYS = 7.0  # Availability half-time, not a human recall probability.
@@ -1736,12 +1770,10 @@ def memory_sharing(scope, mid, action='view', target_scope='', expected_hash='')
 def _cached_memory_matrix(conn, scope: str, shared: bool = False, include_global: bool = False):
     """按 scope 缓存 active 记忆的向量矩阵，避免每次检索都重新 stack。
 
-    写入后最多 30 秒内可能看到旧缓存；写入路径会主动清缓存，30 秒只是兜底。
+    每次读取当前行以识别控制台跨进程写入；仅复用未变化的向量矩阵。
     """
     cache_key = (scope, bool(shared), bool(include_global))
     hit = _matrix_cache.get(cache_key)
-    if hit and (now() - hit[0]) < _MATRIX_CACHE_TTL:
-        return hit[1], hit[2]
     cols = "SELECT id,text,tags,scope,importance,created_at,last_access,strength_days,access_count,embedding,tier,source_id,source_text,source_time,subject_id,confidence,expires_at,memory_kind FROM memories"
     if shared or include_global:
         permitted = _granted_memory_ids(conn, scope)
@@ -1752,7 +1784,13 @@ def _cached_memory_matrix(conn, scope: str, shared: bool = False, include_global
         rows = conn.execute(cols + " WHERE scope=? AND status='active'", (scope,)).fetchall()
     ts = now()
     rows = [r for r in rows if (r[16] or 0) == 0 or r[16] > ts]
-    mat = np.stack([np.frombuffer(r[9], dtype=np.float32) for r in rows]) if rows else np.zeros((0, 512), dtype=np.float32)
+    reuse = (hit and ts - hit[0] < _MATRIX_CACHE_TTL
+             and len(rows) == len(hit[1])
+             and all(r[0] == old[0] and r[9] == old[9] for r, old in zip(rows, hit[1])))
+    if reuse:
+        mat = hit[2]
+    else:
+        mat = np.stack([np.frombuffer(r[9], dtype=np.float32) for r in rows]) if rows else np.zeros((0, 512), dtype=np.float32)
     if len(_matrix_cache) > 32:
         _matrix_cache.clear()
     _matrix_cache[cache_key] = (ts, rows, mat)
@@ -1981,8 +2019,11 @@ def manage_memory(scope, subject_id, action, query='', replacement='', source_id
 
 def remove_memory(scope, mid):
     scope = valid_scope(scope)
-    with _lock, db() as conn:
-        changed = conn.execute("UPDATE memories SET status='deleted' WHERE id=? AND scope=?", (mid, scope)).rowcount
+    with _lock:
+        with db() as conn:
+            changed = conn.execute("UPDATE memories SET status='deleted' WHERE id=? AND scope=?", (mid, scope)).rowcount
+        if changed:
+            _matrix_cache_clear()
     return {'changed': changed}
 
 
@@ -2389,13 +2430,28 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         return json.loads(self.rfile.read(n).decode("utf-8"))
 
+    def _authorized(self):
+        token = _api_token()
+        supplied = self.headers.get('x-memvec-token', '')
+        if self.headers.get('origin') or not token or not secrets.compare_digest(supplied.encode('utf-8'), token.encode('utf-8')):
+            self._send(403, {'ok': False, 'error': 'memvec authorization required'})
+            return False
+        return True
+
     def do_GET(self):
+        if not self._authorized():
+            return
         if self.path.startswith("/stats"):
             self._send(200, {"ok": True, "stats": stats()})
         else:
             self._send(404, {"ok": False, "error": "not found"})
 
     def do_POST(self):
+        if not self._authorized():
+            return
+        if self.headers.get('content-type', '').split(';', 1)[0].strip().lower() != 'application/json':
+            self._send(415, {'ok': False, 'error': 'application/json required'})
+            return
         try:
             _ctx.allow_self = bool(_self_token()) and self.headers.get('x-memvec-self') == _self_token()
             if self.path in ('/sources/correction/prepare','/sources/correction/apply','/sources/correction/undo'):
@@ -2557,6 +2613,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    _ensure_api_token()
     _ensure_self_token()
     get_model()  # 先把模型加载好，避免第一个请求超时
     conn = db()

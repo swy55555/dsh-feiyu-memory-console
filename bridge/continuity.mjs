@@ -122,16 +122,28 @@ export class Continuity {
     let changed=false;
     const nowMs=this.now();
     if(Array.isArray(s.relation&&s.relation.knots)){
-      let touched=false;
+      let decayed=0;
       for(const k of s.relation.knots){
-        const age=(nowMs-Number(k.at||nowMs))/86400000;
-        if(age>5){const next=Math.max(0,Number(k.severity||0)-0.01);if(next!==k.severity){k.severity=next;touched=true;}}
+        const created=Number.isFinite(k.at)?k.at:nowMs;
+        const graceUntil=created+5*DAY;
+        // Legacy knots have no settlement cursor. Preserve their current
+        // severity and begin timing now instead of retroactively charging it.
+        if(!Number.isFinite(k.lastDecayAt)){
+          k.lastDecayAt=Math.max(nowMs,graceUntil);changed=true;
+        }
+        const anchor=Math.max(graceUntil,k.lastDecayAt);
+        const days=Math.floor(Math.max(0,nowMs-anchor)/DAY);
+        if(days>0){
+          const before=Math.max(0,Number(k.severity)||0);
+          k.severity=Math.max(0,before-days*0.01);
+          k.lastDecayAt=anchor+days*DAY;
+          decayed+=before-k.severity;changed=true;
+        }
       }
-      if(touched){
+      if(decayed>0){
         s.relation.knots=s.relation.knots.filter(k=>Number(k.severity)>0.001);
         const floor=Math.min(1,s.relation.knots.reduce((a,k)=>a+Number(k.severity||0),0));
-        s.relation.tension=clamp(Math.max(floor,Math.min(s.relation.tension,floor)),0,1);
-        changed=true;
+        s.relation.tension=clamp(Math.max(floor,s.relation.tension-decayed),0,1);
       }
     }
     for(const row of s.beliefs){const view=beliefView(row,this.now());if(row.expiresAt!==view.expiresAt){row.expiresAt=view.expiresAt;changed=true;}}
@@ -302,7 +314,7 @@ export class Continuity {
       // 心结：冲突留下一个结，只有把结解开，张力才能真正清零。哄只削一点，削不动地板。
       if(kind==='conflict'||kind==='distrust'){
         s.relation.tension=clamp(s.relation.tension+.06,0,1);
-        s.relation.knots=[...(Array.isArray(s.relation.knots)?s.relation.knots:[]),{id:Math.random().toString(36).slice(2,10),at:source.at,text:String(v.relationship.quote||v.summary||'').slice(0,60),severity:0.06}].slice(-8);
+        s.relation.knots=[...(Array.isArray(s.relation.knots)?s.relation.knots:[]),{id:Math.random().toString(36).slice(2,10),at:source.at,lastDecayAt:source.at+5*DAY,text:String(v.relationship.quote||v.summary||'').slice(0,60),severity:0.06}].slice(-8);
       }
       if(kind==='repair'){
         const knots=Array.isArray(s.relation.knots)?s.relation.knots:[];

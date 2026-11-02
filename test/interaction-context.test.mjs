@@ -66,7 +66,7 @@ test('a new message invalidates pending interaction; failure or restart cannot r
 });
 test('actual outgoing persistence marks role independently of caller msg flag',async()=>{
  const source=fs.readFileSync(new URL('../bridge/bridge-v09.js',import.meta.url),'utf8'),start=source.indexOf('  function persistMessageToMemvec('),end=source.indexOf('\n  // ── 会话摘要',start);
- const sent=[];const fn=vm.runInNewContext('('+source.slice(start,end).trim()+')',{cfg:{socialV2:{}},fetch:async(url,options)=>{sent.push(JSON.parse(options.body));return {}},AbortSignal,Date});
+ const sent=[];const fn=vm.runInNewContext('('+source.slice(start,end).trim()+')',{memvecHeaders:extra=>({'content-type':'application/json','x-memvec-token':'fixture-token',...extra}),cfg:{socialV2:{}},fetch:async(url,options)=>{sent.push(JSON.parse(options.body));return {}},AbortSignal,Date});
  fn(key,{text:'实际回复',time:now},'self');fn(key,{text:'用户消息',time:now},'private');await new Promise(r=>setImmediate(r));
  assert.equal(sent[0].isSelf,true);assert.equal(sent[1].isSelf,false);
 });

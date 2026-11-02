@@ -62,6 +62,7 @@ export function noteTaste(state, { topic, evidence, delta = 0.12, source = '' } 
   if (!row) {
     row = { id: name, topic: name, strength: 0.2, evidence: [], createdAt: now, updatedAt: now, lastSeenAt: now, source };
     s.topics.push(row);
+    s.topics = s.topics.slice(-TASTE_LIMITS.maxTopics);
   }
   row.strength = clamp(row.strength + clamp(delta, 0, 0.3), 0, 1);
   row.evidence = [...row.evidence, { url: String(evidence?.url || ''), excerpt: excerpt.slice(0, 300), at: now }].slice(-TASTE_LIMITS.maxEvidence);
@@ -112,21 +113,18 @@ export function recordExploration(state, { topic, evidence, now = Date.now() } =
   if (!row) {
     row = { id: name, topic: name, strength: 0.2, evidence: [], createdAt: now, updatedAt: now, lastSeenAt: now, source: 'bilibili' };
     s.topics.push(row);
+    s.topics = s.topics.slice(-TASTE_LIMITS.maxTopics);
     row.evidence = [{ url, excerpt: excerpt.slice(0, 300), at: now, author }].slice(-TASTE_LIMITS.maxEvidence);
     s.updatedAt = now;
     return { state: s, ok: true, status: 'provisional', strength: row.strength };
   }
-  const seenUrl = row.evidence.some((e) => url && e.url === url);
+  const seenUrl = row.evidence.some((e) => url ? e.url === url : !e.url && e.excerpt === excerpt);
+  if (seenUrl) return { state: s, ok: true, status: 'repeat', strength: row.strength };
   const otherContent = row.evidence.some((e) => (url && e.url !== url) || (!url && e.excerpt !== excerpt));
   const otherAuthor = author && row.evidence.some((e) => e.author && e.author !== author);
   row.evidence = [...row.evidence, { url, excerpt: excerpt.slice(0, 300), at: now, author }].slice(-TASTE_LIMITS.maxEvidence);
   row.updatedAt = now;
   row.lastSeenAt = now;
-  if (seenUrl) {
-    row.strength = clamp(row.strength + 0.02, 0, 1);
-    s.updatedAt = now;
-    return { state: s, ok: true, status: 'repeat', strength: row.strength };
-  }
   if (otherContent && (!author || otherAuthor || row.evidence.length === 1)) {
     row.strength = Math.max(row.strength, 0.42);
     s.updatedAt = now;

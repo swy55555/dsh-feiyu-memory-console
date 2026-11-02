@@ -847,7 +847,7 @@ function renderOverview() {
     el('div', { class: 'kicker', text: 'memory console' }),
     el('h2', null, heroText),
     el('p', { text: '这条鱼会淡忘 —— 不常被想起来的，会慢慢沉下去。这里能看见哪些还浮着、哪些快沉了，也能亲手把重要的那条捞回来。' }),
-    el('div', { class: 'row' }, el('button', { class: 'btn sm', text: '同步群名昵称', on: { click: async (e) => { const b = e.currentTarget; b.disabled = true; try { const resp = await fetch('http://127.0.0.1:3100/api/labels/sync', { cache: 'no-store' }); const r = await resp.json(); toast(r && r.added ? '补了 ' + r.added + ' 个名字' : '没有新名字', 'ok'); if (typeof refreshOverview === 'function') await refreshOverview() } catch (err) { toast(err.message, 'error') } finally { b.disabled = false } } } })),
+    el('div', { class: 'row' }, el('button', { class: 'btn sm', text: '同步群名昵称', on: { click: async (e) => { const b = e.currentTarget; b.disabled = true; try { const r = await api('/labels/refresh', { method: 'POST', body: {} }); toast(r && r.added ? '补了 ' + r.added + ' 个名字' : '没有新名字', 'ok'); if (typeof refreshOverview === 'function') await refreshOverview() } catch (err) { toast(err.message, 'error') } finally { b.disabled = false } } } })),
   )
 
   const stats = el('section', { class: 'stats' },
@@ -5137,7 +5137,7 @@ async function loadEmotionImpact() {
   const box = document.getElementById('impact-body')
   if (!box) return
   try {
-    const res = await fetch('http://127.0.0.1:3100/api/emotion/impact?days=7', { cache: 'no-store' })
+    const res = await fetch('./api/emotion/impact?days=7', { cache: 'no-store' })
     const data = await res.json()
     const name = (key) => (S.overview?.scopes || []).find((s) => s.scope === key)?.label || key
     const bar = (row, max, color) => el('div', { style: { margin: '8px 0' } },

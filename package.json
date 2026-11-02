@@ -1,6 +1,6 @@
 {
   "name": "dsh-feiyu-memory-console",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "private": false,
   "description": "回响：基于经历、可塑记忆与当前心绪的陪伴系统，保留 QQ 通信和二代仿真兼容能力。",
   "license": "MIT",
@@ -30,7 +30,10 @@
     "test:browser:xinji": "node test/xinji-console-browser.test.mjs",
     "test:browser:onboarding": "node test/onboarding-browser.test.mjs",
     "simulate:everyday": "node scripts/simulate-everyday.mjs",
-    "check:engine": "node bridge/xinji-engine.mjs --check"
+    "check:engine": "node bridge/xinji-engine.mjs --check",
+    "prepack": "node scripts/check-release.mjs",
+    "check:release": "node scripts/check-release.mjs",
+    "test:release": "node --test test/release-hardening.test.mjs"
   },
   "type": "module",
   "main": "./lib/index.js",
@@ -44,7 +47,6 @@
   "files": [
     "lib",
     "bridge",
-    "docs",
     "web",
     "bin",
     "locale",
@@ -60,7 +62,11 @@
     "LICENSE",
     "test",
     "UPGRADE.md",
-    "manual/USER_GUIDE-0.11.0.md"
+    "INSTALL.md",
+    "manual/USER_GUIDE.md",
+    "docs/*.md",
+    "docs/images/*.png",
+    "docs/images/prompts.json"
   ],
   "dsh": {
     "bundle": {

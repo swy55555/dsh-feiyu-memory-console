@@ -88,6 +88,8 @@ class CorrectionTests(unittest.TestCase):
         self.assertEqual(self.undo(r)['skipped'],1)
 
     def test_real_http_requires_local_header_and_preserves_version_checks(self):
+        m.API_TOKEN_FILE = str(Path(m.DB_PATH).with_name('api-token'))
+        token = m._ensure_api_token()
         server=ThreadingHTTPServer(('127.0.0.1',0),m.Handler)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         def call(action,body,headers=None):
@@ -97,8 +99,9 @@ class CorrectionTests(unittest.TestCase):
                 r=c.getresponse();return r.status,json.loads(r.read())
             finally:c.close()
         try:
-            b={'scope':SCOPE,'id':self.mid};header={'x-source-correction':'1'}
+            b={'scope':SCOPE,'id':self.mid};header={'x-source-correction':'1','content-type':'application/json','x-memvec-token':token}
             self.assertEqual(call('prepare',b)[0],403)
+            self.assertEqual(call('prepare',b,{'content-type':'application/json','x-memvec-token':token})[0],403)
             self.assertEqual(call('prepare',b,{**header,'origin':'https://example.invalid'})[0],403)
             status,p=call('prepare',b,header);self.assertEqual(status,200)
             status,r=call('apply',{**b,**p,'reason':'这句原话说错'},header);self.assertEqual(status,200);self.assertEqual(r['paused'],1)

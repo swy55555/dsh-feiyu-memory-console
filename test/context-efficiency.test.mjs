@@ -1,3 +1,4 @@
+import {extras} from './bridge-test-context.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -31,7 +32,7 @@ test('actual bridge composer applies unified reference budget and preserves curr
  const start=source.indexOf('  async function withMemoryContext('),end=source.indexOf('  const dailyRecallQueries',start);
  const observations=new ContextEfficiency();
  const rows=Array.from({length:30},(_,i)=>({text:`甲说第${i}件事：不喜欢煎饼，喜欢小笼包。`+'细节'.repeat(80),sender:'甲',at:1700000000000+i}));
- const ctx=vm.createContext({assembleReferences,contextEfficiency:observations,buildSessionBlock,buildSummaryBlock,crypto,recallForCurrentContext,
+ const ctx=vm.createContext({...extras,assembleReferences,contextEfficiency:observations,buildSessionBlock,buildSummaryBlock,crypto,recallForCurrentContext,
    cfg:{socialV2:{memoryRecall:{enabled:false},context:{referenceBudgetChars:2400}}},mindAllowed:()=>false,
    humanContextEnabled:()=>false,noteSessionTurn:()=>{},scheduleRotationCheck:()=>{},dailyMemorySubjects:new Map(),dailyRecallQueries:new Map(),
    recordRetrievalTrace:()=>{},fetchContextBundle:async()=>({messages:rows,summaries:[]}),sessionWindowStart:()=>1,log:()=>{}});

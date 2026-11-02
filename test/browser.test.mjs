@@ -1,3 +1,4 @@
+import {memvecHeaders} from '../bridge/memvec-auth.mjs';
 // Optional isolated browser regression: requires Playwright + Chromium.
 // Does not connect to the user's running console or QQ bridge.
 import assert from 'node:assert/strict'
@@ -32,6 +33,16 @@ try {
   await page.goto(url)
   await page.getByRole('heading', {name:'回响',exact:true}).waitFor()
   await page.locator('button[data-tab="memes"]').waitFor()
+  let labelRequest
+  await page.route('**/api/labels/refresh', async route => {
+    labelRequest = {method: route.request().method(), headers: route.request().headers()}
+    await route.fulfill({contentType:'application/json',body:JSON.stringify({ok:true,added:1})})
+  })
+  await page.getByRole('button',{name:'同步群名昵称',exact:true}).click()
+  await page.getByText('补了 1 个名字',{exact:true}).waitFor()
+  assert.equal(labelRequest.method,'POST')
+  assert.equal(labelRequest.headers['x-feiyu-console'],'1')
+  await page.unroute('**/api/labels/refresh')
   const packageVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
   await page.locator('.app-version').filter({ hasText: `v${packageVersion}` }).waitFor()
   await page.getByText('记忆库还没有就绪，先完成下面的启动检查。').waitFor()
@@ -93,7 +104,7 @@ try {
   if (process.env.FEIYU_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.FEIYU_SCREENSHOT_DIR, 'retrieval-evidence-mobile.png'), fullPage: true })
   await page.setViewportSize({ width: 1365, height: 1000 })
   const postService = async (endpoint, body) => {
-    const response = await fetch(`${process.env.FEIYU_MEMVEC_URL}${endpoint}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    const response = await fetch(`${process.env.FEIYU_MEMVEC_URL}${endpoint}`, { method: 'POST', headers: memvecHeaders(), body: JSON.stringify(body) })
     assert.equal(response.status, 200)
     return response.json()
   }
@@ -152,7 +163,7 @@ try {
     if(route.request().method()==='POST') idleEnabled=route.request().postDataJSON().enabled
     await route.fulfill({contentType:'application/json',body:JSON.stringify({ok:true,enabled:idleEnabled,status:'ready',nodes:[{kind:'question',topic:'雨声配阅读？<img src=x onerror=alert(1)>'}],sources:[{text:'喜欢雨声'}]})})
   })
-  await page.getByRole('link',{name:'查看当前心绪',exact:true}).click()
+  await page.locator('button[data-tab="continuity"]').click()
   await page.getByLabel('启用空闲联想（试验）',{exact:true}).check()
   await page.getByText('联想设置已更新',{exact:true}).waitFor()
   assert.equal(idleEnabled,true)

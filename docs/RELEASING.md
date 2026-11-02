@@ -5,10 +5,10 @@
 ## 发布前
 
 1. 确认工作树中每个改动的来源和范围，检查远端最新提交，不能覆盖他人更新。
-2. 同步 package.json、运行时版本、memvec 版本、README、CHANGELOG、UPGRADE 和手册。版本数字必须一致。
+2. 同步 package.json、运行时发布版本、README、CHANGELOG、UPGRADE 和手册。应用发布版本必须一致；memvec 数据库 schema 版本独立管理，不因文档发布而递增。
 3. README 说明项目定位、前置条件、安装、功能、数据流和限制；详细操作放入用户手册。默认值按代码核对，不使用某台机器的配置冒充默认。
 4. 手册提供 Markdown 与 PDF；验证中文字体、目录、表格、页码和链接。截图只能用合成数据，并说明版本。
-5. 运行 `npm test`、七个浏览器测试（主界面、上下文、花费与联想、当前心绪、界面升级、心绪中枢、轻量记忆）、`git diff --check`；对支持的旧运行时验证检查、安装、重复安装和原字节回退。
+5. 运行 `npm test`、`npm run test:release`、全部 `test/*browser.test.mjs` 浏览器测试和 `git diff --check`；对支持的旧运行时验证检查、安装、重复安装和原字节回退。记录环境、实际覆盖范围及未执行项，不把套件数当成用例数。
 6. 检查打包清单，排除数据库、模型缓存、账号配置、令牌、真实聊天、日志和备份。安装包应包含当前手册和升级说明。
 
 ## 版本与提交
@@ -20,6 +20,9 @@
 - `dsh-feiyu-memory-console-X.Y.Z.tgz`：插件包。
 - `dsh-feiyu-memory-console-X.Y.Z-source.zip`：从发布提交生成的源码包。
 - `USER_GUIDE-X.Y.Z.md` 和对应 PDF：用户手册。
+- `TECHNICAL_MANUAL-X.Y.Z.md` 和对应 PDF：技术手册。
+- `README-X.Y.Z.md` 与 `INSTALL-X.Y.Z.md`：项目定位和工程安装说明。
+- `dsh-feiyu-memory-console-X.Y.Z-docs.zip`：保留相对目录的文档与六张机制图，供离线阅读。
 - `UPGRADE-X.Y.Z.md`：升级与回退说明。
 - `SHA256SUMS-X.Y.Z.txt`：上述附件的 SHA-256；不包含校验文件自身，避免自引用。
 

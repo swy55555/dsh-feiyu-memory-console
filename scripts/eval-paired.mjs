@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE || '', '.dsh');
-const EVAL_DIR = path.join(ROOT, 'docs', 'eval');
+const EVAL_DIR = path.join(HOME, 'qq-bridge', 'state', 'private-evaluation');
 const mode = process.argv.includes('--run') ? 'run' : 'preflight';
 
 const readJson = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
@@ -73,7 +73,7 @@ const report = {
   },
   sets: { effect: effect.length, personalization: personalization.length, control: control.length },
   runsAllowed: effect.length + personalization.length > 0,
-  note: '预检不发起模型调用；报告写入 docs/eval/eval-preflight.json',
+  note: '预检不发起模型调用；报告写入 <DSH_HOME>/qq-bridge/state/private-evaluation/eval-preflight.json',
 };
 fs.writeFileSync(PATHS.preflight, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 

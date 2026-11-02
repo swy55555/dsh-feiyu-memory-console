@@ -30,7 +30,7 @@ test('affection responds to event strength, retains bounds, and presentation res
 test('mixed feelings keep individual strength and compact reply reference agrees with display',()=>{
  const state=applyEmotionEvent(emptyEmotion(base),input('mixed',['warmth','concern']),base);
  assert.ok(state.state.feelingStrength>state.state.intensity);
- assert.match(state.state.displayLabel,/平静.*温暖.*牵挂/);
+ assert.equal(state.state.label,'愉快');assert.match(state.state.displayLabel,/愉快.*温暖.*牵挂/);
  const prompt=emotionPromptLine(state,{isOwner:true,compact:true});assert.ok(prompt.includes(state.state.displayLabel));assert.ok(prompt.length<700);
  assert.match(prompt,/历史输入/);assert.match(prompt,/不等于每项感受强度/);
 });
