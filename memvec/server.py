@@ -1853,7 +1853,7 @@ def associate_memory(memory_id: str, scope: str | None = None, limit: int = 2, i
                 break
         return out
 
-def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: float = 0.35, shared: bool = False, exclude_scope: str | None = None, include_global: bool = False) -> list[dict]:
+def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: float = 0.35, shared: bool = False, exclude_scope: str | None = None, include_global: bool = False, _query_vector=None) -> list[dict]:
     scope = valid_scope(scope)
     if not isinstance(query, str) or not query.strip() or len(query) > 2000:
         return []
@@ -1861,7 +1861,7 @@ def search_memory(query: str, k: int = 5, scope: str | None = None, min_score: f
     with _lock,db() as check:
         if check.execute('SELECT model FROM memory_vector_meta WHERE singleton=1').fetchone()[0]!=MODEL:
             raise ValueError('memory embedding model differs; rebuild in isolation before switching')
-    q = embed([query])[0]
+    q = embed([query])[0] if _query_vector is None else _query_vector
     with _lock, db() as conn:
         rows, mat = _cached_memory_matrix(conn, scope, shared=shared, include_global=include_global)
         if not len(rows):
@@ -1952,26 +1952,34 @@ def search_evidence(body):
     # available and is explicitly reported, rather than pretending vector success.
     vector_error = None
     try:
-        vectors = search_memory(query, k=20, scope=scope, min_score=.35)
         query_vector = embed([query])[0]
+        vectors = search_memory(query, k=20, scope=scope, min_score=.35,_query_vector=query_vector)
     except (RuntimeError, ValueError, OSError) as error:
         vectors = []; query_vector=None; vector_error = type(error).__name__
     with _lock, db() as conn:
         raw=[]
         if not conn.in_transaction:conn.execute('BEGIN')
         if query_vector is not None:
-            for version,dimensions,blob in conn.execute('''SELECT v.source_version,v.dimensions,v.embedding FROM evidence_vectors v
-                WHERE v.model=? AND EXISTS(SELECT 1 FROM evidence_source_lookup s WHERE s.source_version=v.source_version AND s.key=?)''',(MODEL,scope)):
+            # Materialize the permitted source set once; a correlated EXISTS over
+            # the retained-source union otherwise repeats thousands of lookups.
+            subject=str(body.get('subject',''))
+            for version,dimensions,blob in conn.execute('''SELECT v.source_version,v.dimensions,v.embedding
+                FROM (SELECT DISTINCT s.source_version FROM evidence_source_lookup s WHERE s.key=? AND s.source_truncated=0
+                    AND (?='' OR s.user_id=?) AND NOT EXISTS(SELECT 1 FROM source_corrections c WHERE c.source_version=s.source_version AND c.state='revoked')) allowed
+                JOIN evidence_vectors v ON v.source_version=allowed.source_version WHERE v.model=?''',(scope,subject,subject,MODEL)):
                 value=np.frombuffer(blob,dtype=np.float32)
                 if dimensions!=len(query_vector) or len(value)!=dimensions:continue
                 raw.append((version,float(value@query_vector)))
             raw=sorted(raw,key=lambda r:(-r[1],r[0]))[:80]
         result = evidence_store.search(conn,scope,query,vectors,body.get('limit',8),
-            str(body.get('subject','')),body.get('at'),body.get('time'),raw,valid_at=now())
+            str(body.get('subject','')),body.get('at'),body.get('time'),raw,valid_at=now(),exclude=body.get('exclude',[]))
         if body.get('anchors'):
-            neighbours=evidence_store.expand(conn,scope,body['anchors'],6)
-            seen={r['id'] for r in result['results']}
-            result['results'] += [r for r in neighbours if r['id'] not in seen]
+            neighbours=evidence_store.expand(conn,scope,body['anchors'],12)
+            excluded=set(body.get('exclude',[]));seen=set();combined=[]
+            for row in neighbours+result['results']:
+                if row['id'] in seen or set(row['contract']['rootIds']).issubset(excluded):continue
+                seen.add(row['id']);combined.append(row)
+            result['results']=combined[:max(1,min(12,int(body.get('limit',8))))]
         result['vectorStatus'] = 'unavailable' if vector_error else 'ready'
         return result
 

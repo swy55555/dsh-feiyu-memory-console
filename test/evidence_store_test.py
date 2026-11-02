@@ -14,6 +14,36 @@ class EvidenceTests(unittest.TestCase):
     def setUp(self):self.f=ret.SourceRetentionTests();self.f.setUp()
     def tearDown(self):self.f.tearDown()
     def search(self,q,**extra):return m.search_evidence({'scope':SCOPE,'query':q,**extra})
+    def test_whole_word_ranking_keeps_picnic_above_generic_pic(self):
+        for i in range(6):self.f.original(str(i),text='What a great pic! Thanks for sharing it with me.')
+        right=self.f.original('right',text='We had a picnic last week, even though it rained.')
+        result=self.search('When did I have a picnic?')
+        self.assertEqual(result['results'][0]['contract']['sourceVersion'],right['sourceVersion'])
+        self.assertNotIn('art',m.evidence_store._lex.tokens('The party started yesterday'))
+    def test_speaker_hint_uses_actual_speaker_not_only_addressed_name(self):
+        m.add_message(SCOPE,'own','Mira','10001','I received a scholarship for robotics.',at=self.f.at*1000)
+        m.add_message(SCOPE,'other','Jon','10001','Mira, I received a scholarship for music.',at=(self.f.at+1)*1000)
+        result=self.search('What scholarship did Mira receive?')
+        self.assertEqual(result['results'][0]['contract']['messageId'],'own')
+    def test_anchor_followup_excludes_delivered_sources_before_result_limit(self):
+        anchor=self.f.original('anchor',text='We attended a concert yesterday.')
+        self.f.original('answer',text='The performer was a local violinist.')
+        result=self.search('concert',anchors=[anchor['sourceVersion']],exclude=[anchor['sourceVersion']],limit=1)
+        self.assertEqual(len(result['results']),1)
+        self.assertEqual(result['results'][0]['contract']['messageId'],'answer')
+        with self.assertRaises(ValueError):self.search('concert',exclude=['not-a-source-version'])
+    def test_lexical_cache_changes_with_sources_and_chinese_speakers(self):
+        m.add_message(SCOPE,'one','小李','10001','我喜欢游泳，但是不喜欢跑步。',at=self.f.at*1000)
+        m.add_message(SCOPE,'two','小王','10001','小李，我喜欢跑步。',at=(self.f.at+1)*1000)
+        self.assertEqual(self.search('小李喜欢什么运动')['results'][0]['contract']['messageId'],'one')
+        with m.db() as c:c.execute("DELETE FROM messages WHERE message_id='one'")
+        self.assertFalse(any(r['contract'].get('messageId')=='one' for r in self.search('小李喜欢什么运动')['results']))
+    def test_shared_query_embedding_is_computed_once(self):
+        self.f.original()
+        original=m.embed
+        with patch.object(m,'embed',wraps=original) as embedded:
+            self.search('喜欢咖啡')
+            self.assertEqual(embedded.call_count,1)
     def test_raw_words_available_before_extraction_and_subject_is_preserved(self):
         raw=self.f.original(text='我喜欢烤肉和火锅')
         rows=self.search('烤肉')['results'];self.assertEqual(len(rows),1)

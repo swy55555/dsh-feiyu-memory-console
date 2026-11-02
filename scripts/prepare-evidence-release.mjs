@@ -21,5 +21,5 @@ if(r.status)throw Error(r.stderr);const pkg=JSON.parse(r.stdout)[0];
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const manifest={base:'142e99e99ae55135e20d9596072975c7d11ef94a',sourceCommit:spawnSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).stdout.trim(),
  package:pkg.filename,sha256:hash(path.join(out,pkg.filename)),files:pkg.files.map(f=>({path:f.path,sha256:hash(path.join(root,f.path))})),
- requiresRestart:['DSH','qq-bridge','memvec'],databaseSchema:2,memoryFiles:['server.py','evidence_store.py'],productionChanged:false};
+ requiresRestart:['DSH','qq-bridge','memvec'],databaseSchema:2,memoryFiles:['server.py','evidence_store.py','lexical_rank.py'],productionChanged:false};
 fs.writeFileSync(path.join(out,'deployment-manifest.json'),JSON.stringify(manifest,null,2));console.log(JSON.stringify({package:manifest.package,sha256:manifest.sha256,files:manifest.files.length,out}));

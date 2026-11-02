@@ -19,8 +19,8 @@ const fromIndex = args.indexOf('--from');
 const FROM = fromIndex >= 0 && args[fromIndex + 1]
   ? path.resolve(args[fromIndex + 1])
   : path.join(os.homedir(), '.dsh', 'memvec');
-const files=['server.py','evidence_store.py'];
-// Validate the entire pair before any writes; never import production data.
+const files=['server.py','evidence_store.py','lexical_rank.py'];
+// Validate the entire source set before any writes; never import production data.
 const planned=files.map(name=>{
   const source=path.join(FROM,name),target=path.join(DEST,name);
   if(!fs.existsSync(source))throw Error(`Missing companion source: ${source}`);
@@ -34,5 +34,5 @@ if(checkOnly){
 }else{
   fs.mkdirSync(DEST,{recursive:true});
   for(const p of planned)if(p.content!==p.current)fs.writeFileSync(p.target,p.content,'utf8');
-  console.log('Synchronized memvec source pair; database and runtime untouched.');
+  console.log('Synchronized memvec source set; database and runtime untouched.');
 }

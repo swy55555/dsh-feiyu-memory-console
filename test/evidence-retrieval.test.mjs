@@ -27,6 +27,13 @@ test('call/character budgets, foreign scope, empty results and no model costs',a
  const r=await big.search({key,turn:1,query:'a',maxChars:500});assert.equal(r.records.length,0);assert.equal(r.stats.contextChars,0);
  assert.equal((await new RetrievalSessions({request:async()=>({results:[]})}).search({key,turn:1,query:'none'})).status,'empty');
 });
+test('first retrieval reserves followup room and forwards only already delivered roots',async()=>{
+ const requests=[];const s=new RetrievalSessions({request:async(route,body)=>{requests.push(body);return {results:Array.from({length:body.limit},(_,i)=>({...row(body.query+i,body.query+i),text:'x'.repeat(900)}))};}});
+ const first=await s.search({key,turn:1,query:'initial'});
+ assert.equal(requests[0].limit,4);assert.ok(first.stats.contextChars<=3900);
+ const next=await s.search({key,turn:1,query:'followup',anchors:[first.records[0].ref]});
+ assert.deepEqual(requests[1].exclude,first.records.flatMap(r=>r.contract.rootIds));assert.ok(next.records.length>0);assert.ok(next.stats.contextChars<=6000);
+});
 test('source changes, new messages and timeouts cannot publish stale results',async()=>{
  let release,revision=1,current=true;const s=new RetrievalSessions({request:()=>new Promise(r=>release=r),revision:()=>revision,timeoutMs:50});
  const first=s.search({key,turn:1,query:'a',current:()=>current});await Promise.resolve();revision++;release({results:[row()]});assert.equal((await first).status,'stale');

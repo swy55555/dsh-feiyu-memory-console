@@ -7,6 +7,10 @@ import json
 import re
 import math
 import time
+import importlib.util
+from pathlib import Path
+_spec=importlib.util.spec_from_file_location("scoped_lexical",Path(__file__).with_name("lexical_rank.py"))
+_lex=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(_lex)
 from datetime import datetime, timedelta, timezone
 
 SCHEMA = 2
@@ -166,7 +170,7 @@ def expand(conn, scope, versions, limit=3):
     return result
 
 
-def search(conn, scope, query, vectors=(), limit=8, subject='', at=None, time_filter=None, raw_vectors=(), valid_at=None):
+def search(conn, scope, query, vectors=(), limit=8, subject='', at=None, time_filter=None, raw_vectors=(), valid_at=None, exclude=()):
     if not isinstance(query,str) or not 1<=len(query.strip())<=2000:
         raise ValueError('query must contain 1..2000 characters')
     ts=terms(query);hint=temporal_query(query,at);ranked={};reasons={}
@@ -176,28 +180,18 @@ def search(conn, scope, query, vectors=(), limit=8, subject='', at=None, time_fi
         lo,hi=time_filter.get('from'),time_filter.get('to')
         if any(type(v) not in (float,int) or not math.isfinite(v) for v in (lo,hi)) or not 0<lo<hi:
             raise ValueError('invalid time window')
-    long=[t for t in ts if len(t)>=3]
-    candidates=[]
-    if long:
-        match=' OR '.join('"'+t.replace('"','""')+'"' for t in long)
-        candidates += _rows(conn,'SELECT source_version,bm25(evidence_fts) AS rank FROM evidence_fts WHERE evidence_fts MATCH ? AND scope=? ORDER BY rank,source_version LIMIT 80',(match,scope))
-    # Short Chinese words cannot use a trigram index. Scope-bound literal instr is
-    # a bounded candidate fallback; no wildcard/FTS syntax is passed through.
-    if ts:
-        predicate=' OR '.join('instr(lower(text),?)>0' for _ in ts)
-        candidates += _rows(conn,'SELECT source_version FROM evidence_source_lookup WHERE key=? AND ('+predicate+') ORDER BY at DESC,source_version LIMIT 120',(scope,*ts))
-    for item in candidates:
-        row=source(conn,scope,item['source_version'])
-        if not row or (subject and row['user_id']!=subject):
-            continue
-        if time_filter and not time_filter['from']<=row['at']<time_filter['to']:
-            continue
-        matches=[t for t in ts if t in row['text'].lower()]
-        exact=query.strip().lower() in row['text'].lower()
-        score=.45+min(.3,len(matches)/max(1,len(ts))*.3)+(.2 if exact else 0)
-        if hint.get('from',float('inf'))<=row['at']<hint.get('to',0):
-            score+=.08
-        value=contract(row);value.update(score=score,retrieval={'method':'lexical-source','matchedTerms':matches,'timeHint':hint})
+    if not isinstance(exclude,(list,tuple)) or len(exclude)>128 or any(not isinstance(v,str) or not re.fullmatch('[a-f0-9]{64}',v) for v in exclude):
+        raise ValueError('invalid excluded source versions')
+    excluded=set(exclude)
+    originals=_rows(conn,"""SELECT * FROM evidence_source_lookup s WHERE key=? AND source_truncated=0
+        AND (?='' OR user_id=?) AND NOT EXISTS(SELECT 1 FROM source_corrections c WHERE c.source_version=s.source_version AND c.state='revoked')""",(scope,subject,subject))
+    database=conn.execute('PRAGMA database_list').fetchone()[2]
+    lexical=_lex.ScopedLexical(originals,query,cache_key=(database,scope,subject))
+    for version,score in lexical.candidates():
+        row=source(conn,scope,version)
+        if not row or (subject and row['user_id']!=subject):continue
+        if time_filter and not time_filter['from']<=row['at']<time_filter['to']:continue
+        value=contract(row);value.update(score=score['lexical'],retrieval={'method':'lexical-source'})
         ranked[value['id']]=value
     # Vector results are existing confirmed/experience records, never all candidates.
     # Source roots deduplicate derived restatements below without hiding their provenance.
@@ -230,7 +224,7 @@ def search(conn, scope, query, vectors=(), limit=8, subject='', at=None, time_fi
             raw=contract(original);old=ranked.get(raw['id'],{})
             raw['score']=max(row.get('score',0),old.get('score',0))
             raw['associationId']=row['id']
-            raw['retrieval']={'method':'derived-source-expansion','via':row['id'],'prior':old.get('retrieval')}
+            raw['retrieval']={'method':'derived-source-expansion','similarity':max(row.get('score',0),old.get('retrieval',{}).get('similarity',0)),'via':row['id'],'prior':old.get('retrieval')}
             ranked[raw['id']]=raw
     for version,similarity in raw_vectors:
         row=source(conn,scope,version)
@@ -241,11 +235,26 @@ def search(conn, scope, query, vectors=(), limit=8, subject='', at=None, time_fi
         value=contract(row);lex=ranked.get(value['id'])
         value['score']=max(similarity,lex.get('score',0) if lex else 0)
         if lex and lex.get('associationId'):value['associationId']=lex['associationId']
-        value['retrieval']={'method':'hybrid-original' if lex else 'vector-original','similarity':similarity,'lexical':lex.get('retrieval') if lex else None}
+        value['retrieval']={'method':'hybrid-original' if lex else 'vector-original','similarity':max(similarity,lex.get('retrieval',{}).get('similarity',0) if lex else 0),'lexical':lex.get('retrieval') if lex else None}
         ranked[value['id']]=value
+    # Fuse component scores rather than letting an unrelated cosine erase lexical
+    # evidence. Speaker identity is a soft hint, never an authorization override.
+    for value in ranked.values():
+        c=value['contract'];version=c.get('sourceVersion','')
+        info=lexical.score(version,value['text'])
+        semantic=float(value.get('retrieval',{}).get('similarity',value.get('score',0) if value.get('memory_kind')!='utterance' else 0))
+        value['score']=info['lexical']+.3*max(0,min(1,(semantic-.35)/.65))+.08*info['speakerMatch']
+        if hint.get('from',float('inf'))<=(c.get('spokenAt') or 0)<hint.get('to',0):value['score']+=.05
+        value['retrieval']={**value.get('retrieval',{}),'ranking':info,'semantic':semantic}
+    for value in ranked.values():
+        if value.get('memory_kind')=='utterance':continue
+        originals=[ranked['source:'+v] for v in value['contract']['rootIds'] if 'source:'+v in ranked]
+        if originals:value['score']=max(r['score'] for r in originals)-.000001
     selected=[];roots=set();dropped=[]
     for row in sorted(ranked.values(),key=lambda r:(-r.get('score',0),0 if r.get('memory_kind')=='utterance' else 1,r['id'])):
         rr=set(row['contract']['rootIds'])
+        if rr and rr.issubset(excluded):
+            dropped.append({'id':row['id'],'reason':'already-delivered'});continue
         if rr and rr.issubset(roots):
             dropped.append({'id':row['id'],'reason':'same-evidence-root'});continue
         if len(selected)>=max(1,min(12,int(limit))):

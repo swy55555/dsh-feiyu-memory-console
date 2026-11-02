@@ -28,9 +28,12 @@ export class RetrievalSessions {
     if(s.calls>=maxCalls||s.chars>=maxChars||s.count>=maxItems)return {status:'budget-exhausted',records:[],stats:stats()};
     if(s.busy||this.inflight>=2)return {status:'busy',records:[],stats:stats()};
     const versions=anchors.flatMap(id=>s.refs.get(id));
+    const reserveFollowup=s.calls===0&&maxCalls>1&&maxItems>4&&maxChars>=2000;
+    const responseLimit=reserveFollowup?Math.min(4,maxItems-s.count):Math.min(8,maxItems-s.count);
+    const deliveryCeiling=reserveFollowup?Math.floor(maxChars*.65):maxChars;
     s.calls++;s.queries.add(fingerprint);s.busy=true;this.inflight++;
     const started=this.now();let timer;
-    const work=Promise.resolve().then(()=>this.request('/evidence/search',{scope:key,query,anchors:versions.slice(0,3),limit:Math.min(maxItems-s.count,8),at:this.now()},this.timeoutMs));
+    const work=Promise.resolve().then(()=>this.request('/evidence/search',{scope:key,query,anchors:versions.slice(0,3),exclude:[...s.roots].slice(0,128),limit:responseLimit,at:this.now()},this.timeoutMs));
     work.finally(()=>{s.busy=false;this.inflight--;}).catch(()=>{});
     try{
       const data=await Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('timeout')),this.timeoutMs);})]);
@@ -42,9 +45,9 @@ export class RetrievalSessions {
         const roots=Array.isArray(row.contract.rootIds)?row.contract.rootIds:[];
         if(s.seen.has(row.id)||(roots.length&&roots.every(id=>s.roots.has(id)))){dropped.push({id:row.id,reason:'same-evidence-root'});continue;}
         const ref=s.prefix+':m'+(++s.serial);
-        const item={ref,id:row.id,text:row.text,contract:row.contract,reason:row.retrieval,scope:row.scope,subject_id:row.subject_id||row.contract.speaker,tags:row.tags||'',score:row.score,associationId:row.associationId};
+        const item={ref,id:row.id,text:row.text,contract:row.contract,reason:{method:row.retrieval?.method},scope:row.scope,subject_id:row.subject_id||row.contract.speaker,tags:row.tags||'',score:row.score,associationId:row.associationId};
         const chars=JSON.stringify(item).length+1;
-        if(s.chars+chars>maxChars||s.count>=maxItems){dropped.push({id:row.id,reason:'context-budget'});continue;}
+        if(s.chars+chars>deliveryCeiling||s.count>=maxItems){dropped.push({id:row.id,reason:'context-budget'});continue;}
         s.chars+=chars;s.count++;s.seen.add(row.id);roots.forEach(r=>s.roots.add(r));s.refs.set(ref,roots);s.deliveries.set(row.id,{ref,roots,chars});records.push(item);
       }
       return {status:records.length?'matched':data.results.length?'no-new-evidence':'empty',records,stats:stats(),
