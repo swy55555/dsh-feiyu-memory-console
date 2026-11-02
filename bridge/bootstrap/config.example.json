@@ -86,7 +86,8 @@
       "enabled": false
     },
     "tools": {
-      "extra": false
+      "extra": false,
+      "longMemory": true
     },
     "sticker": {
       "enabled": false

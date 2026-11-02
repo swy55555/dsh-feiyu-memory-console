@@ -31,6 +31,7 @@ try {
   run(process.execPath, ['test/reference-reuse.test.mjs'])
   run(process.execPath, ['test/context-efficiency.test.mjs'])
   run(process.execPath, ['test/behavior-optimization.test.mjs'])
+  run(process.execPath, ['test/followup-memory.test.mjs'])
   run(process.execPath, ['test/analysis-receipts.test.mjs'])
   run(process.execPath, ['test/local-maintenance.test.mjs'])
   run(process.execPath, ['test/expression-teacher.test.mjs'])

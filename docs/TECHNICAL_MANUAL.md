@@ -174,6 +174,14 @@
 
 ## 13. 首次安装的分发边界
 
+### 连续轮次的长期记忆补充
+
+`followup-memory.mjs` 在 wait/unread/recent 响应时为最新消息检索参考，解决同一模型轮次持续接收消息却沿用首次检索的问题。按聊天、消息序号、消息 ID、查询、来源版本和上下文选项缓存 30 秒，最多 128 个聊天、2 个并行检索；总等待上限 2 秒，候选最多 5 条，装配最多 3 条、最多 2400 字符。底层超时后未结束的任务继续占用并发位。算术、空文本及超过 2000 字符的查询不触发自动检索。
+
+`GET /api/socialV2/long-memory` 是 `qq_vmem_search` 的认证入口，要求同一聊天的 agent token、有效会话、运行模式和独立 `longMemory` 开关。返回前复查权限、来源版本与最新消息，拒绝主人中继例外和跨聊天候选。自动补充也复查这些边界，并受自动召回与上下文开关控制。诊断轨迹区分 manual/followup 模式及 matched/empty/filtered/unavailable/stale 等状态，不把空结果写成全库不存在。
+
+QQ 预设作用域覆盖 Soul 的记忆提示并隐藏其不可执行工具，执行守卫仍保留；普通 DSH 作用域不变。安装器同步 followup 模块和 human-context 模板，按已识别边界替换现有 MCP 的长期检索注册块，保留其余本机路径与媒体配置。
+
 0.11.2 的 `bridge/bootstrap` 提供桥接 package/lock、无账号配置模板、预设源、工具权限守卫、模式 bundle 与注册脚本。初始化器按运行时模板映射将适配器部署到目标 src，并生成管理令牌和安装回执；预设构建器生成 DSH bundle patch，注册脚本将回响、模式和预设 bundle 及三个 MCP 挂入现有 Profile。安装与运行时升级分离，避免首次安装逻辑覆盖旧数据。
 
 运行时检查递归遍历桥接与三个 MCP 的本地字面量导入；`--dependencies` 使用 Node ESM 解析核对外部包。动态构造的导入、宿主服务版本兼容、QQ 登录与模型会话仍须运行验收。SDK 相对路径补丁仅处理存在的 .js/.json 目标，npm 安装后执行。上游来源与原始快照哈希见包内 `bridge/bootstrap/SOURCE-PROVENANCE.json`，许可见 `LICENSE.qq-bridge`；该快照含本项目适配，不等同于上游标签逐字复制。

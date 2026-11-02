@@ -24,7 +24,7 @@
 //    所以本地工具必须同时出现在下面的 restrict 名单里。
 export const name = 'qq-tool-restrict'
 
-export const inject = ['tools']
+export const inject = ['tools', 'systemPrompt']
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -320,6 +320,8 @@ const LOCAL_EXECUTION_TOOLS = [
 ]
 
 const KNOWN_DANGEROUS_GLOBAL_TOOLS = [
+  // QQ uses scoped Xinji memory, not Soul's project/profile learning store.
+  'learning_search', 'learning_get', 'learning_propose',
   // 本地执行面（见上）
   ...LOCAL_EXECUTION_TOOLS,
   // dsh-super-injector / 开发注入器（0.1.7-rc.2 实测注册的全局工具）
@@ -387,6 +389,10 @@ const SAFE_EXACT = new Set([
 ])
 
 export function apply(ctx) {
+  // Scoped context shadows only this global contribution; ordinary DSH keeps Soul.
+  ctx.systemPrompt.context({name:'dsh-soul:memory',order:950,text:()=>''})
+  ctx.systemPrompt.context({name:'qq-memory-routing',order:951,text:()=>
+    '本 QQ 会话的长期记忆使用 qq_vmem_search；qq_memory_query 只查轻量话题/印象，近期聊天不是全库。等待或读取消息返回的 memoryReference 是当前消息的有限检索参考，当前原话优先。未查询、查询失败与无匹配必须区分；未匹配不证明记忆丢失，不声称翻遍全库。不调用 learning_search/learning_get/learning_propose；它们属于普通 DSH 的另一套记忆。'})
   // 1) 把已知危险全局工具从 schema 隐藏（restrict 只影响继承的全局层，
   //    不会误删 preset 自己注册的 scoped 工具）。
   // 逐个 restrict：当前 DSH 版本不存在的工具名会单独抛错并跳过，

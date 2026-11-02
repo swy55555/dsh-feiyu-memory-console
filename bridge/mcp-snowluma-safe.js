@@ -240,7 +240,7 @@ const TOOL_CONFIG_FLAGS = {
   qq_bili_cover: 'extra',
   qq_meme_lookup: 'extra',
   qq_vmem_add: 'extra',
-  qq_vmem_search: 'extra',
+  qq_vmem_search: 'longMemory',
 };
 const disabledTools = [];
 {
@@ -1559,12 +1559,12 @@ server.tool(
 
 server.tool(
   'qq_vmem_search',
-  '只读检索当前聊天的已确认长期记忆；搜索不会强化记忆，不可跨聊天查询。',
+  '只读检索当前聊天的长期记忆，询问过去的偏好或经历时使用。自动参考不足时可换词查询。qq_memory_query 只查轻量话题，不能替代此工具。空结果不证明未记录或丢失；失败须说明未完成查询。搜索不强化记忆，不可跨聊天。',
   {
     key: z.string().describe('会话 key'),
     token: z.string().describe('会话令牌'),
     query: z.string().describe('想找什么（自然语言）'),
-    k: z.number().int().min(1).max(20).optional().describe('返回几条，默认 5'),
+    k: z.number().int().min(1).max(20).optional().describe('兼容旧调用；当前检索最多 5 个候选，按完整记录与字符预算提供最多 3 条参考'),
     scope: z.string().optional().describe('只能等于当前会话 key，省略时自动使用当前聊天')
   },
   async ({ key, token, query, k, scope }) => {
@@ -1572,10 +1572,9 @@ server.tool(
       if (!isOwnerKey(key) && !isAllowedGroupKey(key)) throw new Error('只有管理员私聊和白名单群能查记忆');
       await assertSessionToken(key, token);
       if (scope && scope !== key) throw new Error('不允许跨聊天查记忆');
-      const j = await memvec('/search', { query, k: k ?? 5, scope: key, min_score: 0.4 });
-      if (!j.results?.length) return { content: [{ type: 'text', text: '记忆库里没找到相关的东西。' }] };
-      const lines = j.results.map((r, i) => `${i + 1}. [相关度 ${r.score}] ${r.text}${r.tags ? `（${r.tags}）` : ''}`);
-      return { content: [{ type: 'text', text: `找到 ${j.results.length} 条：\n${lines.join('\n')}` }] };
+      const params=new URLSearchParams({key,query});
+      const data=await agentApi('/api/socialV2/long-memory?'+params,{headers:{'x-agent-token':token}});
+      return {content:[{type:'text',text:serializeModelData(data)}],...(['unavailable','busy','stale'].includes(data.memory?.status)?{isError:true}:{})};
     } catch (error) {
       return { content: [{ type: 'text', text: `查记忆失败：${error?.message ?? error}` }], isError: true };
     }

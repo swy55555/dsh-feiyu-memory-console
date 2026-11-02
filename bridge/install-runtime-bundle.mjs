@@ -37,6 +37,7 @@ export const templates = {
   "source-validity.mjs": "source-validity.mjs",
   "chat-clarification.mjs": "chat-clarification.mjs",
   "reply-context.mjs": "reply-context.mjs",
+  "followup-memory.mjs": "followup-memory.mjs",
   "reply-freshness.mjs": "reply-freshness.mjs",
   "source-retention.mjs": "source-retention.mjs",
   "reference-reuse.mjs": "reference-reuse.mjs",
@@ -100,6 +101,18 @@ const sourceHash = (file) =>
 const knownAuxiliary = { "daily-memory.js": "a71448afb1c6d23cf938b18ed618dd89fc5e4f6f7344d565a35bf754b14c9d17" };
 const recognizedAuxiliary = (name, file) => knownAuxiliary[name] && sourceHash(file) === knownAuxiliary[name];
 const receiptFile = (root) => path.join(root, "state", "runtime-bundle.json");
+// Upgrade only the memory tool in an already receipt-verified MCP file. Keep
+// local media/Python paths and other integrations byte-for-byte intact.
+export function upgradeMemorySearch(bytes) {
+  const text=bytes.toString('utf8');
+  if(!text.includes("'qq_vmem_search'"))return bytes;
+  const section=/server\.tool\(\r?\n  'qq_vmem_search',[\s\S]*?(?=server\.tool\(\r?\n)/;
+  const canonical=fs.readFileSync(path.join(here,'mcp-snowluma-safe.js'),'utf8');
+  const replacement=canonical.match(section)?.[0];
+  if(!replacement||!section.test(text)||!/^  qq_vmem_search: '(extra|longMemory)',\r?$/m.test(text))throw Error('长期记忆工具边界不匹配，未覆盖 MCP');
+  const newline=text.includes('\r\n')?'\r\n':'\n';
+  return Buffer.from(text.replace(section,replacement.replace(/\r?\n/g,newline)).replace("qq_vmem_search: 'extra'","qq_vmem_search: 'longMemory'"));
+}
 function receipt(root) {
   try {
     return JSON.parse(fs.readFileSync(receiptFile(root), "utf8"));
@@ -141,7 +154,7 @@ export function installRuntime(
   const mcpManaged = !!previous?.files?.['mcp-snowluma-safe.js'];
   if (mcpManaged || (mcpBytes && hasRetiredTools(mcpBytes.toString('utf8')))) files['mcp-snowluma-safe.js'] = '@mcp';
   if (mcpManaged && (!mcpBytes || digest(mcpBytes) !== previous.files['mcp-snowluma-safe.js'].afterHash)) throw Error('安装后 QQ MCP 有修改，未覆盖');
-  const migratedMcp = mode === 'undo' ? null : (files['mcp-snowluma-safe.js'] === '@mcp' ? retireLexiconTools(mcpBytes) : null);
+  const migratedMcp = mode === 'undo' ? null : (files['mcp-snowluma-safe.js'] === '@mcp' ? upgradeMemorySearch(retireLexiconTools(mcpBytes)) : null);
   const sourceBytes = source => source === '@retired' ? null : source === '@mcp' ? migratedMcp : fs.readFileSync(path.join(here, source));
   const normalizedSourceHash = source => source === '@retired' ? null : digest(sourceBytes(source).toString('utf8').replace(/^\uFEFF/, '').replaceAll('\r\n', '\n'));
 

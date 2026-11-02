@@ -10,6 +10,7 @@ import {detectCorrection,repairHint,addRepair,lessonLine,normalizeRepairs} from 
 import {ContextEfficiency,rotationBlockers} from './context-efficiency.mjs';
 import {ChatClarifications} from './chat-clarification.mjs';
 import {SourceValidity} from './source-validity.mjs';
+import {FollowupMemory} from './followup-memory.mjs';
 import {ExpressionGuard} from './expression-guard.mjs';
 import {replyReference,allowOptionalNudges,contextualRecall,recallForCurrentContext} from './reply-context.mjs';
 import {privateReplyGuard} from './reply-freshness.mjs';
@@ -708,6 +709,7 @@ function loadConfig() {
         setWakeConfig: true,
         markRead: true,
         memory: true,
+        longMemory: true,
         getImages: true,
         getForwardMsg: true,
         sendPoke: true,
@@ -850,6 +852,7 @@ function loadConfig() {
     setWakeConfig: true,
     markRead: true,
     memory: true,
+    longMemory: true,
 
 
     getImages: true,
@@ -3950,6 +3953,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
 
   const dailyRecallQueries = new Map();
   const dailyMemorySubjects = new Map();
+  const followupMemory = new FollowupMemory({request:memoryRequest,revision:()=>sourceValidity.revision()});
   async function memoryRequest(route, body, timeoutMs = 20000, extraHeaders = {}) {
     const res = await fetch(`http://127.0.0.1:${cfg.socialV2?.memoryRecall?.port ?? 9881}${route}`, {
       method: 'POST', headers: memvecHeaders({ 'content-type': 'application/json', ...(route.startsWith('/sources/clarification/')?{'x-source-correction':'1'}:{}), ...extraHeaders }), body: JSON.stringify(body),
@@ -7228,7 +7232,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
             merged.autoReplyCheckMs = Number.isFinite(n) ? Math.max(1000, Math.round(n)) : (current.autoReplyCheckMs ?? 30000);
           }
           // tools：只接受布尔开关
-          const toolFlags = ['getPrompt', 'getUnread', 'getRecent', 'socialState', 'sendGroup', 'sendPrivate', 'reply', 'sendBurst', 'sendMessage', 'waitMessages', 'feedback', 'getMyRecent', 'getMessageDetail', 'getActiveMembers', 'setWakeConfig', 'markRead', 'memory', 'getImages', 'getForwardMsg', 'sendPoke', 'listStickers', 'getStickerImage', 'sendSticker', 'setStickerRemark', 'stickerNote', 'collectSticker', 'getSelfImage', 'sendVoice'];
+          const toolFlags = ['getPrompt', 'getUnread', 'getRecent', 'socialState', 'sendGroup', 'sendPrivate', 'reply', 'sendBurst', 'sendMessage', 'waitMessages', 'feedback', 'getMyRecent', 'getMessageDetail', 'getActiveMembers', 'setWakeConfig', 'markRead', 'memory', 'longMemory', 'getImages', 'getForwardMsg', 'sendPoke', 'listStickers', 'getStickerImage', 'sendSticker', 'setStickerRemark', 'stickerNote', 'collectSticker', 'getSelfImage', 'sendVoice'];
           if (body.tools && typeof body.tools === 'object') {
             merged.tools = { ...(current.tools ?? {}), ...body.tools };
             for (const k of toolFlags) {
@@ -7902,6 +7906,7 @@ ${roleText.slice(0, 9000)}`;
             setWakeConfig: 'qq_set_wake_config',
             markRead: 'qq_mark_read',
             memory: 'qq_memory_append / qq_memory_query / qq_memory_remove / qq_memory_clear',
+            longMemory: 'qq_vmem_search',
 
 
             getImages: 'qq_get_message_images',
@@ -7992,7 +7997,8 @@ ${roleText.slice(0, 9000)}`;
           const messages = afterSeq === null ? st.unread.slice(-limit)
             : st.unread.filter((m) => Number.isSafeInteger(m.seq) && m.seq > afterSeq).slice(0, limit);
           const readThroughSeq = req.headers['x-agent-token'] ? noteModelMessagesV2(st, messages) : readThroughSeqV2(st);
-          sendJson({ ok: true, key, unreadCount: st.unread.length, messages, readThroughSeq, replyReference: responseReferenceV2(key, st, messages, req.headers['x-agent-token']) });
+          const memoryReference=await memoryReferenceV2(key,st,messages,req.headers['x-agent-token'],'getUnread');
+          sendJson({ ok: true, key, unreadCount: st.unread.length, messages, readThroughSeq, memoryReference, replyReference: responseReferenceV2(key, st, messages, req.headers['x-agent-token']) });
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/recent') {
@@ -8015,7 +8021,8 @@ ${roleText.slice(0, 9000)}`;
           const end = Math.max(0, st.recentMessages.length - offset);
           const messages = st.recentMessages.slice(start, end);
           const readThroughSeq = req.headers['x-agent-token'] ? noteModelMessagesV2(st, messages) : readThroughSeqV2(st);
-          sendJson({ ok: true, key, messages, readThroughSeq, replyReference: responseReferenceV2(key, st, messages, req.headers['x-agent-token']) });
+          const memoryReference=await memoryReferenceV2(key,st,messages,req.headers['x-agent-token'],'getRecent');
+          sendJson({ ok: true, key, messages, readThroughSeq, memoryReference, replyReference: responseReferenceV2(key, st, messages, req.headers['x-agent-token']) });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/mark-read') {
@@ -9486,6 +9493,7 @@ ${roleText.slice(0, 9000)}`;
           const lastNew = newMessages.length ? newMessages[newMessages.length - 1]
             : replyWait ? [...st.recentMessages].reverse().find((m) => m && !m.isSelf) : null;
           const lastMessageUnfinished = lastNew ? looksLikeUnfinished(String(lastNew.tail || lastNew.plain || lastNew.text || '')) : false;
+          const memoryReference=await memoryReferenceV2(key,st,newMessages,req.headers['x-agent-token'],'waitMessages');
           finishWait();
           sendJson({
             ok: true,
@@ -9505,6 +9513,7 @@ ${roleText.slice(0, 9000)}`;
             // the model should complete sleep observation before its first reply.
             ...(!replyWait ? { preSleepWaitMs, preSleepWaitRemainingMs: preSleepRemainingMs } : {}),
             newMessages,
+            memoryReference,
             replyReference: responseReferenceV2(key, st, newMessages, req.headers['x-agent-token']),
             readThroughSeq,
             unreadCount: st.unread.length
@@ -10031,6 +10040,22 @@ ${roleText.slice(0, 9000)}`;
           saveSocialV2State();
           sendJson({ ok: true, key, category, memory: formatMemoryV2(st) });
           return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/socialV2/long-memory') {
+          const key=String(url.searchParams.get('key')||''),token=req.headers['x-agent-token'];
+          const query=String(url.searchParams.get('query')||'').trim();
+          if(!query||query.length>2000){sendJson({ok:false,error:'查询长度必须为 1–2000 字符'},400);return;}
+          // No owner-relay exception: long-term facts belong to this exact actor.
+          const allowed=()=>Boolean(token)&&agentTokenOk(key,token)&&v2SessionAllowed(key)
+            &&currentMode==='reserved2'&&!socialV2.paused&&cfg.socialV2?.enabled!==false&&v2ToolEnabled('longMemory');
+          if(!allowed()){sendJson({ok:false,error:'长期检索已关闭、会话暂停或令牌与聊天不匹配'},403);return;}
+          const st=getSocialV2State(key),seq=st.lastUnreadSeq||0;
+          const memory=await followupMemory.get({key,latestSeq:seq,
+            messages:[{seq,messageId:'query:'+crypto.createHash('sha256').update(query).digest('hex').slice(0,16),text:query}],
+            current:()=>allowed()&&socialV2.conversations.get(canonicalV2Key(key))===st&&(st.lastUnreadSeq||0)===seq,
+            trace:data=>recordRetrievalTrace({traceId:crypto.randomUUID(),mode:'manual',...data})});
+          if(!allowed()){sendJson({ok:false,error:'检索期间权限发生变化'},403);return;}
+          sendJson({ok:true,memory});return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/memory') {
           const key = String(url.searchParams.get('key') ?? '').trim();
@@ -13395,6 +13420,18 @@ function appendMemoryV2(st, category, content, extra = {}) {
       feelings:(view.state.feelings||[]).slice(0,2).map(f=>({label:f.label,level:f.level})),note:emotionAttribution(view)+'当前原话与明确边界优先，不报数、不强制表演。'}):'';
     const preferences=responsePatterns.enabled()?responsePatterns.view(key).adjustments:[];
     return replyReference({messages,latestSeq:st.lastUnreadSeq,current,emotion,preferences});
+  }
+
+  async function memoryReferenceV2(key,st,messages,token,toolFlag) {
+    const seq=st.lastUnreadSeq;
+    const current=()=>Boolean(token)&&agentTokenOk(key,token)&&v2SessionAllowed(key)
+      &&currentMode==='reserved2'&&!socialV2.paused&&cfg.socialV2?.enabled!==false
+      &&socialV2.conversations.get(canonicalV2Key(key))===st&&st.lastUnreadSeq===seq
+      &&v2ToolEnabled(toolFlag)&&cfg.socialV2?.memoryRecall?.enabled!==false
+      &&cfg.socialV2?.memoryRecall?.followup!==false&&cfg.socialV2?.humanContext?.enabled!==false;
+    if(!current())return undefined;
+    return followupMemory.get({key,messages,latestSeq:seq,current,options:cfg.socialV2?.humanContext||{},
+      trace:data=>recordRetrievalTrace({traceId:crypto.randomUUID(),mode:'followup',...data})});
   }
 
   function noteModelMessagesV2(st, messages) {
