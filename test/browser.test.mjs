@@ -30,7 +30,7 @@ try {
   page.on('pageerror', (error) => errors.push(error.message))
   page.on('dialog', async (dialog) => { dialogs.push(dialog.message()); await dialog.dismiss() })
   await page.goto(url)
-  await page.getByRole('heading', {name:'心迹 · 可塑性记忆',exact:true}).waitFor()
+  await page.getByRole('heading', {name:'回响',exact:true}).waitFor()
   await page.locator('button[data-tab="memes"]').waitFor()
   const packageVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
   await page.locator('.app-version').filter({ hasText: `v${packageVersion}` }).waitFor()

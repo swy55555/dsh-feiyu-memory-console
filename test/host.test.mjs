@@ -71,7 +71,7 @@ assert.ok(typeof overviewJson.active === 'number')
 const page = await fetch(`${base}/dsh-feiyu-memory/`)
 assert.equal(page.status, 200)
 assert.match(page.headers.get('content-type') || '', /text\/html/)
-assert.match(await page.text(), /<title>心迹 · 可塑性记忆<\/title>/)
+assert.match(await page.text(), /<title>回响<\/title>/)
 
 const css = await fetch(`${base}/dsh-feiyu-memory/app.css`)
 assert.equal(css.status, 200)

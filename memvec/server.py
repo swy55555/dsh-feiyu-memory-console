@@ -1915,18 +1915,6 @@ def lookup_memories(scope, ids, include_provenance=False):
         return [{**{k:r[k] for k in ('id','text','source_time','subject_id')},**({'provenance':memory_provenance(conn,r)} if include_provenance is True else {})} for r in rows]
 
 
-def lookup_memories(scope, ids):
-    """Revalidate a bounded set of original facts without embedding or recall side effects."""
-    scope = valid_scope(scope)
-    if not isinstance(ids, list) or not 1 <= len(ids) <= 3 or any(not isinstance(i, str) or len(i) > 100 for i in ids):
-        raise ValueError('lookup requires 1..3 memory IDs')
-    with _lock, db() as conn:
-        conn.row_factory = sqlite3.Row
-        marks = ','.join('?' for _ in ids)
-        rows = conn.execute(f"SELECT id,text,source_time,subject_id FROM memories WHERE scope=? AND status='active' AND (expires_at=0 OR expires_at>?) AND id IN ({marks})", (scope, now(), *ids)).fetchall()
-    return [dict(r) for r in rows]
-
-
 def priority_memories(scope, subject_id):
     scope = valid_scope(scope)
     # Core context belongs to the current human, not all members of a group.
