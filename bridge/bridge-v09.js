@@ -3733,9 +3733,10 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
       context.referenceBlocks=result.blocks.filter(b=>['summary','history'].includes(b.id));
       context.referenceAssembly=result.report;
       if(initialEvidence){
-        const delivered=new Set(result.blocks.map(b=>b.id));
-        deliveredEvidence=initialEvidence.records.filter(r=>delivered.has('evidence:'+r.id));
-        retrievalSessions.releaseUndelivered(key,initialEvidenceSeq,initialEvidence.records.filter(r=>!delivered.has('evidence:'+r.id)).map(r=>r.id));
+        const selectedBlocks=new Set(result.blocks.map(b=>b.id));
+        const delivered=new Set(blocks.filter(b=>selectedBlocks.has(b.id)).flatMap(b=>b.recordIds||[]));
+        deliveredEvidence=initialEvidence.records.filter(r=>delivered.has(r.id));
+        retrievalSessions.releaseUndelivered(key,initialEvidenceSeq,initialEvidence.records.filter(r=>!delivered.has(r.id)).map(r=>r.id));
       }
       assemblyReport=result.report||null;
       if(context.evalCapture) context.evalCapture.assembly=result.report||null;

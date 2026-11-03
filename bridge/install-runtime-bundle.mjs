@@ -39,6 +39,8 @@ export const templates = {
   "reply-context.mjs": "reply-context.mjs",
   "followup-memory.mjs": "followup-memory.mjs",
   "retrieval-session.mjs": "retrieval-session.mjs",
+  "evidence-model-view.mjs": "evidence-model-view.mjs",
+  "evidence-groups.mjs": "evidence-groups.mjs",
   "evidence-consumer.mjs": "evidence-consumer.mjs",
   "evidence-contract.mjs": "evidence-contract.mjs",
   "reply-freshness.mjs": "reply-freshness.mjs",

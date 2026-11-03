@@ -1977,9 +1977,16 @@ def search_evidence(body):
             neighbours=evidence_store.expand(conn,scope,body['anchors'],12)
             excluded=set(body.get('exclude',[]));seen=set();combined=[]
             for row in neighbours+result['results']:
+                if body.get('subject') and row['contract'].get('speaker')!=str(body['subject']):continue
+                tf=body.get('time');spoken=row['contract'].get('spokenAt')
+                if tf and (spoken is None or not tf['from']<=spoken<tf['to']):continue
                 if row['id'] in seen or set(row['contract']['rootIds']).issubset(excluded):continue
                 seen.add(row['id']);combined.append(row)
-            result['results']=combined[:max(1,min(12,int(body.get('limit',8))))]
+            result['results']=combined
+        # Context selection changes only group delivery, never query ranking.
+        held=body.get('exclude',[])
+        result['results']=evidence_store.context_groups(conn,scope,result['results'],held)
+        result['results']=evidence_store.limit_context_groups(result['results'],max(1,min(12,int(body.get('limit',8)))),held)
         result['vectorStatus'] = 'unavailable' if vector_error else 'ready'
         return result
 

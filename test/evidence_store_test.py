@@ -14,6 +14,47 @@ class EvidenceTests(unittest.TestCase):
     def setUp(self):self.f=ret.SourceRetentionTests();self.f.setUp()
     def tearDown(self):self.f.tearDown()
     def search(self,q,**extra):return m.search_evidence({'scope':SCOPE,'query':q,**extra})
+    def qa(self, intervening=False):
+        q=m.add_message(SCOPE,'q','Questioner','10001','What food do you like?',at=self.f.at*1000)
+        if intervening:
+            m.add_message(SCOPE,'middle','Other','10003','Unrelated interruption',at=(self.f.at+1)*1000)
+        a=m.add_message(SCOPE,'a','Answerer','10002','Meat, hotpot and barbecue.',at=(self.f.at+2)*1000)
+        return q,a
+    def test_context_group_preserves_pair_without_changing_evidence_text(self):
+        q,a=self.qa()
+        with m.db() as c:
+            rows=[m.evidence_store.contract(m.evidence_store.source(c,SCOPE,r['sourceVersion'])) for r in (q,a)]
+            groups=m.evidence_store.context_groups(c,SCOPE,rows)
+            self.assertEqual(groups[0]['retrieval']['contextVersions'],[q['sourceVersion'],a['sourceVersion']])
+            self.assertEqual(m.evidence_store.limit_context_groups(groups,1),[])
+            self.assertEqual(len(m.evidence_store.limit_context_groups(groups,2)),2)
+            self.assertEqual(groups[1]['text'],'Meat, hotpot and barbecue.')
+    def test_group_completes_already_held_question_in_one_remaining_slot(self):
+        q,a=self.qa()
+        with m.db() as c:
+            rows=[m.evidence_store.contract(m.evidence_store.source(c,SCOPE,a['sourceVersion']))]
+            groups=m.evidence_store.context_groups(c,SCOPE,rows,[q['sourceVersion']])
+            self.assertEqual(len(groups[0]['retrieval']['contextVersions']),2)
+            self.assertEqual(len(m.evidence_store.limit_context_groups(groups,1,[q['sourceVersion']])),1)
+    def test_group_never_jumps_over_an_unselected_intervening_source(self):
+        q,a=self.qa(True)
+        with m.db() as c:
+            rows=[m.evidence_store.contract(m.evidence_store.source(c,SCOPE,r['sourceVersion'])) for r in (q,a)]
+            groups=m.evidence_store.context_groups(c,SCOPE,rows)
+            self.assertFalse(any(r.get('retrieval',{}).get('contextVersions') for r in groups))
+    def test_followup_group_does_not_relax_subject_or_typed_time_filter(self):
+        q,a=self.qa()
+        result=self.search('food',anchors=[q['sourceVersion']],subject='10001')
+        self.assertTrue(all(r['contract']['speaker']=='10001' for r in result['results']))
+        result=self.search('food',anchors=[q['sourceVersion']],time={'basis':'spoken','from':self.f.at*1000,'to':(self.f.at+1)*1000})
+        self.assertTrue(all(r['contract']['messageId']=='q' for r in result['results']))
+    def test_revoked_companion_is_never_added_by_group_detection(self):
+        q,a=self.qa()
+        with m.db() as c:
+            c.execute('DELETE FROM messages WHERE message_id=?',('a',))
+            row=m.evidence_store.contract(m.evidence_store.source(c,SCOPE,q['sourceVersion']))
+            groups=m.evidence_store.context_groups(c,SCOPE,[row],[a['sourceVersion']])
+            self.assertNotIn('contextVersions',groups[0].get('retrieval',{}))
     def test_whole_word_ranking_keeps_picnic_above_generic_pic(self):
         for i in range(6):self.f.original(str(i),text='What a great pic! Thanks for sharing it with me.')
         right=self.f.original('right',text='We had a picnic last week, even though it rained.')

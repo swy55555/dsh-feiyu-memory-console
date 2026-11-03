@@ -2,6 +2,7 @@
 // No sending, model calls or memory reinforcement. References are opaque per turn.
 import {randomBytes} from 'node:crypto';
 import {deliveryChars,renderMemoryToolResult} from './evidence-model-view.mjs';
+import {evidenceUnits} from './evidence-groups.mjs';
 export {renderEvidence} from './evidence-model-view.mjs';
 
 export class RetrievalSessions {
@@ -64,16 +65,26 @@ export class RetrievalSessions {
       const data=await Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('timeout')),this.timeoutMs);})]);
       if(!valid())return publish('stale');
       if(!Array.isArray(data.results))throw Error('invalid evidence response');
-      const records=[],dropped=[],pendingRoots=new Set(s.roots),pendingIds=new Set(s.seen);
+      const records=[],dropped=[],pendingRoots=new Set(s.roots),pendingIds=new Set(s.seen),eligible=[];
       for(const row of data.results){
-        if(row.scope!==key||row.contract?.scope!==key||typeof row.text!=='string'){dropped.push({id:row.id,reason:'scope-or-contract'});continue;}
+        if(!row||typeof row.id!=='string'||row.scope!==key||row.contract?.scope!==key||typeof row.text!=='string'||!Array.isArray(row.contract.rootIds)||row.contract.rootIds.some(x=>typeof x!=='string'||!x)||['revoked','invalid','deleted'].includes(row.contract?.state)){dropped.push({id:row?.id,reason:'scope-or-contract'});continue;}
+        eligible.push(row);
+      }
+      for(const unit of evidenceUnits(eligible,s.roots)){
+        if(unit.missing){unit.rows.forEach(r=>dropped.push({id:r.id,reason:'incomplete-context-group'}));continue;}
+        const additions=[],newIds=new Set(pendingIds),newRoots=new Set(pendingRoots);
+        for(const row of unit.rows){
         const roots=Array.isArray(row.contract.rootIds)?row.contract.rootIds:[];
-        if(pendingIds.has(row.id)||(roots.length&&roots.every(id=>pendingRoots.has(id)))){dropped.push({id:row.id,reason:'same-evidence-root'});continue;}
+        if(newIds.has(row.id)||(roots.length&&roots.every(id=>newRoots.has(id)))){dropped.push({id:row.id,reason:'same-evidence-root'});continue;}
         const ref=s.prefix+':m'+(++s.serial);
         const item={ref,id:row.id,text:row.text,contract:row.contract,reason:{method:row.retrieval?.method},scope:row.scope,subject_id:row.subject_id||row.contract.speaker,tags:row.tags||'',score:row.score,associationId:row.associationId};
-        const chars=deliveryChars([...records,item],delivery);
-        if(s.chars+chars>deliveryCeiling||s.count+records.length>=maxItems){dropped.push({id:row.id,reason:'context-budget'});continue;}
-        records.push(item);pendingIds.add(row.id);roots.forEach(r=>pendingRoots.add(r));
+        if(unit.requiredRoots.length){item.contextVersions=unit.requiredRoots;item.contextRefs=[...s.deliveries.values()].filter(d=>d.roots.some(r=>unit.requiredRoots.includes(r))).map(d=>d.ref);}
+        additions.push(item);newIds.add(row.id);roots.forEach(r=>newRoots.add(r));
+        }
+        if(!additions.length)continue;
+        const chars=deliveryChars([...records,...additions],delivery);
+        if(s.chars+chars>deliveryCeiling||s.count+records.length+additions.length>maxItems){additions.forEach(r=>dropped.push({id:r.id,reason:'context-budget'}));continue;}
+        records.push(...additions);additions.forEach(r=>{pendingIds.add(r.id);r.contract.rootIds?.forEach(x=>pendingRoots.add(x));});
       }
       return publish(records.length?'matched':data.results.length?'no-new-evidence':'empty',records,
         {query,selected:records.map(r=>r.id),dropped,elapsedMs:this.now()-started,vectorStatus:data.vectorStatus,localOnly:true});
@@ -83,7 +94,11 @@ export class RetrievalSessions {
   releaseUndelivered(key,turn,ids){
     const s=this.sessions.get(key);if(!s||s.turn!==turn)return;
     const batches=new Set();
-    for(const id of ids){const item=s.deliveries.get(id);if(!item||item.batch.delivery!=='automatic')continue;
+    const release=new Set(ids);
+    for(const id of ids){const d=s.deliveries.get(id);if(!d||d.batch.delivery!=='automatic')continue;
+      for(const u of evidenceUnits(d.batch.records))if(u.rows.some(r=>r.id===id))u.rows.forEach(r=>release.add(r.id));
+    }
+    for(const id of release){const item=s.deliveries.get(id);if(!item||item.batch.delivery!=='automatic')continue;
       batches.add(item.batch);item.batch.records=item.batch.records.filter(r=>r.id!==id);
       s.seen.delete(id);s.refs.delete(item.ref);s.deliveries.delete(id);s.count--;
     }

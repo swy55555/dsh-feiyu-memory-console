@@ -170,6 +170,75 @@ def expand(conn, scope, versions, limit=3):
     return result
 
 
+def context_groups(conn, scope, rows, held=()):
+    """Tag only already selected, truly adjacent short question/answer candidates.
+
+    No extra retrieval, query weighting, inferred fact, or cross-scope expansion.
+    A filtered/deleted/truncated intervening message must not be jumped over.
+    """
+    originals = {}
+    for row in rows:
+        c = row.get('contract', {})
+        version = c.get('sourceVersion')
+        if version and c.get('sourceType') in ('participant-utterance', 'character-utterance'):
+            original = source(conn, scope, version)
+            if original:
+                originals[version] = original
+    for version in held:
+        original = source(conn, scope, version)
+        if original:
+            originals[version] = original
+    used, groups = set(), {}
+    for version, question in sorted(originals.items(), key=lambda x: (x[1]['at'], x[0])):
+        text = question['text'].strip()
+        if version in used or not text.endswith(('?', '？')) or len(text) > 600:
+            continue
+        following = _rows(conn, '''SELECT * FROM evidence_source_lookup WHERE key=?
+            AND (at>? OR (at=? AND source_version>?))
+            ORDER BY at,source_version LIMIT 1''', (scope, question['at'], question['at'], version))
+        if not following:
+            continue
+        answer = following[0]; other = answer['source_version']
+        if (other not in originals or other in used or answer['user_id'] == question['user_id']
+                or not 0 < answer['at']-question['at'] <= 120000
+                or not answer['text'].strip() or len(answer['text']) > 600
+                or answer['text'].strip().endswith(('?', '？'))):
+            continue
+        pair = [version, other]
+        used.update(pair)
+        for item in pair:
+            groups[item] = pair
+    for row in rows:
+        version = row.get('contract', {}).get('sourceVersion')
+        if version in groups:
+            row['retrieval'] = {**row.get('retrieval', {}), 'contextVersions': groups[version],
+                                'heuristicContext': True}
+    return rows
+
+
+def limit_context_groups(rows, limit, held=()):
+    """Keep ranking order while refusing a partial newly selected context group."""
+    selected, seen = [], set(held)
+    available = {v: row for row in rows for v in row['contract'].get('rootIds', [])}
+    ids = set()
+    for row in rows:
+        if row['id'] in ids:
+            continue
+        required = row.get('retrieval', {}).get('contextVersions', [])
+        if any(v not in seen and v not in available for v in required):
+            continue
+        group = [row]
+        for v in required:
+            if v not in seen and available[v]['id'] not in {r['id'] for r in group}:
+                group.append(available[v])
+        group = [r for r in group if r['id'] not in ids]
+        if len(selected)+len(group) > limit:
+            continue
+        selected.extend(group);ids.update(r['id'] for r in group)
+        seen.update(v for r in group for v in r['contract'].get('rootIds', []))
+    return selected
+
+
 def search(conn, scope, query, vectors=(), limit=8, subject='', at=None, time_filter=None, raw_vectors=(), valid_at=None, exclude=()):
     if not isinstance(query,str) or not 1<=len(query.strip())<=2000:
         raise ValueError('query must contain 1..2000 characters')

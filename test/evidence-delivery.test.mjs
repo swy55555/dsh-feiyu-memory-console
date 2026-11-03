@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {evidenceModelView,renderEvidence,renderMemoryToolResult,evidenceBlocks,deliveryChars} from '../bridge/evidence-model-view.mjs';
 import {RetrievalSessions} from '../bridge/retrieval-session.mjs';
+import {assembleReferences} from '../bridge/reference-assembly.mjs';
 import {serializeModelData} from '../bridge/qq-model-view.js';
 const key='private:10001';
 const record=(id='one',text='原话 "引用"\n\\ 路径 😀')=>({id,ref:'opaque:'+id,text,scope:key,subject_id:'user',score:.8,
@@ -53,4 +54,46 @@ test('huge internal metadata does not displace a short attributable utterance',a
  const s=new RetrievalSessions({request:async()=>({results:[r]})});
  const a=await s.search({key,turn:1,query:'short',maxChars:600});assert.equal(a.records.length,1);
  assert.equal(a.records[0].contract.idempotencyKey.length,9000);assert.ok(a.stats.contextChars<600);
+});
+const pair=(a='q',b='a',size=40)=>[record(a,'What food do you like?'),record(b,'Meat. '+ 'x'.repeat(size))].map(r=>({...r,retrieval:{contextVersions:[a,b]}}));
+test('new group fits as a whole or contributes no records, including item limits',async()=>{
+ for(const options of [{maxItems:1},{maxChars:500}]){
+  const s=new RetrievalSessions({request:async()=>({results:pair('q','a',800)})});
+  const r=await s.search({key,turn:1,query:'food',...options});assert.equal(r.records.length,0);
+ }
+ const s=new RetrievalSessions({request:async()=>({results:pair()})});
+ const r=await s.search({key,turn:1,query:'food'});assert.equal(r.records.length,2);
+ const blocks=evidenceBlocks(r,key);assert.equal(blocks.length,1);assert.equal(r.stats.contextChars,blocks[0].text.length);
+ assert.equal(blocks[0].recordIds.length,2);
+});
+test('already delivered anchor can be completed once without recharging or duplicating it',async()=>{
+ const s=new RetrievalSessions({request:async(_,b)=>({results:b.anchors.length?[pair()[1]]:[record('q')]})});
+ const a=await s.search({key,turn:1,query:'first'});
+ const b=await s.search({key,turn:1,query:'food',anchors:[a.records[0].ref],delivery:'manual'});
+ assert.equal(b.records.length,1);assert.equal(b.records[0].id,'a');assert.deepEqual(b.records[0].contextRefs,[a.records[0].ref]);
+ assert.equal(b.stats.records,2);assert.equal(b.stats.contextChars,a.outputChars+b.modelText.length);
+});
+test('foreign, revoked, missing or malformed companions fail closed for the complete group',async()=>{
+ for(const bad of [{scope:'group:2'},{contract:{scope:key,rootIds:['a'],state:'revoked'}}]){
+  const rows=pair();rows[1]={...rows[1],...bad};
+  const s=new RetrievalSessions({request:async()=>({results:rows})});assert.equal((await s.search({key,turn:1,query:'x'})).records.length,0);
+ }
+ for(const rows of [[pair()[0]],[{...record(),retrieval:{contextVersions:'bad'}}]]){
+  const s=new RetrievalSessions({request:async()=>({results:rows})});assert.equal((await s.search({key,turn:1,query:'x'})).records.length,0);
+ }
+});
+test('overlapping group metadata is treated atomically rather than leaking one pair',async()=>{
+ const rows=[...pair('q','a'),{...record('last'),retrieval:{contextVersions:['a','last']}}];
+ const s=new RetrievalSessions({request:async()=>({results:rows})});
+ assert.equal((await s.search({key,turn:1,query:'x',maxItems:2})).records.length,0);
+});
+test('outer reference assembly keeps or drops the whole pair and refunds the same unit',async()=>{
+ const s=new RetrievalSessions({request:async()=>({results:pair('q','a',1200)})});
+ const r=await s.search({key,turn:1,query:'food'});assert.equal(r.records.length,2);
+ const blocks=evidenceBlocks(r,key);
+ const assembled=assembleReferences({key,budgetChars:2400,blocks:[{id:'required',scope:key,text:'r'.repeat(1600),required:true,priority:100},...blocks]});
+ assert.ok(!assembled.text.includes('What food'));assert.ok(!assembled.text.includes('Meat.'));
+ // Even a partial release request revokes the entire pending automatic unit.
+ s.releaseUndelivered(key,1,[r.records[0].id]);assert.equal(s.sessions.get(key).count,0);assert.equal(s.sessions.get(key).chars,0);
+ for(const item of r.records)assert.equal((await s.search({key,turn:1,query:'again',anchors:[item.ref]})).status,'invalid-anchor');
 });

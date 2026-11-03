@@ -18,7 +18,7 @@ function run(command, args) {
   if (result.status !== 0) { failures++; console.error('FAILED:', args.join(' '), result.error?.message || '') }
 }
 try {
-  run(process.execPath, ['--test','test/daily-memory-recovery.test.mjs','test/evidence-retrieval.test.mjs'])
+  run(process.execPath, ['--test','test/daily-memory-recovery.test.mjs','test/evidence-retrieval.test.mjs','test/evidence-delivery.test.mjs'])
   for (const name of ['host', 'diary', 'audit', 'features', 'integration', 'human-context', 'runtime-extras', 'emotion-v2', 'turn-traces', 'runtime-bundle', 'runtime-integration', 'emotion-context', 'daily-memory', 'idle-association', 'usage-features', 'continuity', 'continuity-wiring', 'candidate-auto', 'emotion-feelings', 'headless-snapshot', 'mind-workspace', 'response-patterns', 'mind-wiring', 'human-presence', 'light-profile', 'xinji-runtime', 'background-reasoning', 'confirmation-review', 'self-reference']) run(process.execPath, [`test/${name}.test.mjs`])
   run(process.execPath, ['test/shared-expression.test.mjs'])
   run(process.execPath, ['test/expression-guard.test.mjs'])

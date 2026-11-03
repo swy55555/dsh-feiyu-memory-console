@@ -37,6 +37,8 @@ test("bundle requires known hashes, updates dependencies, is idempotent and reve
       "appraisal-budget.mjs",
       "turn-traces.mjs",
       "human-context.mjs",
+      "evidence-model-view.mjs",
+      "evidence-groups.mjs",
     ])
       assert.ok(fs.existsSync(path.join(dir, "src", f)));
     const installed = fs.readFileSync(target);
