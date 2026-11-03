@@ -12,6 +12,7 @@ import {ChatClarifications} from './chat-clarification.mjs';
 import {SourceValidity} from './source-validity.mjs';
 import {FollowupMemory} from './followup-memory.mjs';
 import {RetrievalSessions,renderEvidence} from './retrieval-session.mjs';
+import {memoryModelResult} from './evidence-model-view.mjs';
 import {EvidenceConsumer,applySourceChange} from './evidence-consumer.mjs';
 import {ExpressionGuard} from './expression-guard.mjs';
 import {replyReference,allowOptionalNudges,contextualRecall,recallForCurrentContext} from './reply-context.mjs';
@@ -10105,8 +10106,8 @@ ${roleText.slice(0, 9000)}`;
           catch{sendJson({ok:false,error:'无效的临时记忆编号'},400);return;}
           const found=await retrievalSessions.search({key,turn:seq,query,anchors,
             current:()=>allowed()&&socialV2.conversations.get(canonicalV2Key(key))===st&&(st.lastUnreadSeq||0)===seq});
-          const memory={...found,records:undefined,ids:(found.records||[]).map(r=>r.id),context:renderEvidence(found)};
-          recordRetrievalTrace({traceId:crypto.randomUUID(),mode:'manual',key,query,status:found.status,ids:memory.ids,stats:found.stats,decisions:found.trace});
+          const memory=memoryModelResult(found);
+          recordRetrievalTrace({traceId:crypto.randomUUID(),mode:'manual',key,query,status:found.status,ids:(found.records||[]).map(r=>r.id),stats:found.stats,decisions:found.trace});
           if(!allowed()){sendJson({ok:false,error:'检索期间权限发生变化'},403);return;}
           sendJson({ok:true,memory});return;
         }
