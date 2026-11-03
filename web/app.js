@@ -473,9 +473,14 @@ function buildTabs() {
 }
 
 function libraryTabCount() {
-  if (S.tab !== 'library') return S.overview?.active
+  if (!memoryViewVisible('timeline')) return S.overview?.active
   if (S.semantic) return S.semantic.length
   return S.library.loaded ? S.library.total : S.overview?.active
+}
+
+function memoryViewVisible(view) {
+  return S.tab === (view === 'timeline' ? 'library' : view)
+    || (S.tab === 'memory' && S.memoryView === view)
 }
 
 function hasCap(name) {
@@ -560,7 +565,7 @@ function paintCurrent() {
   if (!mainEl) return
   if (S.tab !== 'classroom' && S.classroom.timer) {clearInterval(S.classroom.timer);S.classroom.timer=0}
   if (S.tab !== 'graph' && !(S.tab === 'memory' && S.memoryView === 'graph')) stopGraphLoop()
-  if (S.tab !== 'library' && S.candidateAuto.timer) {clearInterval(S.candidateAuto.timer);S.candidateAuto.timer=0}
+  if (!memoryViewVisible('timeline') && S.candidateAuto.timer) {clearInterval(S.candidateAuto.timer);S.candidateAuto.timer=0}
   if (S.tab !== 'continuity' && S.continuity.timer) {clearInterval(S.continuity.timer);S.continuity.timer=0}
   if (S.tab !== 'emotion' && S.emotionTimer) { clearInterval(S.emotionTimer); S.emotionTimer = 0 }
   mainEl.replaceChildren()
@@ -626,12 +631,12 @@ async function refreshAll() {
   try {
     try { S.version = (await api('/version')).version; const badge = $('.app-version'); if (badge) badge.textContent = `v${S.version}` } catch {}
     await refreshOverview({ paint: false })
-    if (S.tab === 'library') { S.library.loaded = false; await loadLibrary() }
+    if (memoryViewVisible('timeline')) { S.library.loaded = false; await loadLibrary() }
     else if (S.tab === 'classroom') {await loadClassroom()}
     else if (S.tab === 'persona') { S.persona = null; await loadPersona() }
-    else if (S.tab === 'light') { S.light.scopes = null; await loadLightScopes(true) }
-    else if (S.tab === 'diary') { S.diary.books = null; S.diary.loaded = false; S.diary.days = {}; paintCurrent() }
-    else if (S.tab === 'upkeep') { S.upkeep.preview = null; S.upkeep.queue = null; paintCurrent() }
+    else if (memoryViewVisible('light')) { S.light.scopes = null; await loadLightScopes(true) }
+    else if (memoryViewVisible('diary')) { S.diary.books = null; S.diary.loaded = false; S.diary.days = {}; paintCurrent() }
+    else if (memoryViewVisible('upkeep')) { S.upkeep.preview = null; S.upkeep.queue = null; paintCurrent() }
     paintCurrent()
     toast('已经读到最新的了', 'ok')
   } catch (error) {
@@ -643,10 +648,10 @@ async function afterChange() {
   try {
     try { S.version = (await api('/version')).version; const badge = $('.app-version'); if (badge) badge.textContent = `v${S.version}` } catch {}
     await refreshOverview({ paint: false })
-    if (S.tab === 'library') await loadLibrary()
-    else if (S.tab === 'light' && S.light.key) await loadLight(S.light.key)
-    else if (S.tab === 'diary') { S.diary.days = {}; S.diary.books = null; S.diary.loaded = false; paintCurrent() }
-    else if (S.tab === 'upkeep') { S.upkeep.preview = null; paintCurrent() }
+    if (memoryViewVisible('timeline')) await loadLibrary()
+    else if (memoryViewVisible('light') && S.light.key) await loadLight(S.light.key)
+    else if (memoryViewVisible('diary')) { S.diary.days = {}; S.diary.books = null; S.diary.loaded = false; paintCurrent() }
+    else if (memoryViewVisible('upkeep')) { S.upkeep.preview = null; paintCurrent() }
     if (S.tab === 'overview') paintCurrent()
   } catch (error) {
     toast(error.message, 'error')
@@ -796,7 +801,7 @@ function renderMemoryBook() {
   wrap.appendChild(el('div', { class: 'row', style: 'margin:-8px 0 14px' },
     el('a', { class: 'btn sm', href: '#/evidence', text: '在拾光看相关证据' })))
   const body = el('div', { class: 'memory-body' })
-  if (current === 'timeline') { body.appendChild(renderLibrary()); if (!S.library.loaded) void loadLibrary() }
+  if (current === 'timeline') body.appendChild(renderLibrary())
   else if (current === 'graph') {
     body.appendChild(renderGraphTab()); startGraphLoop(); if (!S.graph.data) void loadGraph()
     // 切入时容器可能还没完成布局：下一帧按真实尺寸重建，否则力导向图会画在 0×0 画布上。
@@ -813,7 +818,7 @@ function renderMemoryBook() {
     requestAnimationFrame(() => { if (!fitGraph()) setTimeout(fitGraph, 160) })
   }
   else if (current === 'light') { body.appendChild(renderLight()); if (S.light.scopes === null) void loadLightScopes() }
-  else if (current === 'diary') { body.appendChild(renderDiary()); if (!S.diary.books) void loadDiary() }
+  else if (current === 'diary') body.appendChild(renderDiary())
   else if (current === 'upkeep') { body.appendChild(renderUpkeep()) }
   else if (current === 'context') {
     body.appendChild(el('iframe', {
@@ -1094,7 +1099,7 @@ function reloadLibraryWith(patch = {}) {
   Object.assign(S.library, patch)
   S.library.loaded = false
   S.semantic = null
-  if (S.tab === 'library') paintCurrent()
+  if (memoryViewVisible('timeline')) paintCurrent()
 }
 
 function renderLibrary() {
@@ -1975,10 +1980,10 @@ async function loadLightScopes(force = false) {
   try {
     const data = await withBusy(() => api('/light/scopes'))
     S.light.scopes = data
-    if (S.tab === 'light' && !S.light.key) paintCurrent()
+    if (memoryViewVisible('light') && !S.light.key) paintCurrent()
   } catch (error) {
     toast(error.message, 'error')
-    if (S.tab === 'light') mainEl.replaceChildren(el('div', { class: 'empty', text: error.message }))
+    if (memoryViewVisible('light')) mainEl.replaceChildren(el('div', { class: 'empty', text: error.message }))
   }
 }
 
@@ -2016,10 +2021,10 @@ async function loadLight(key) {
     const data = await withBusy(() => api(`/light?key=${encodeURIComponent(key)}`))
     if (seq !== S.light.seq) return
     S.light.data = data
-    if (S.tab === 'light') paintCurrent()
+    if (memoryViewVisible('light')) paintCurrent()
   } catch (error) {
     toast(error.message, 'error')
-    if (S.tab === 'light') mainEl.replaceChildren(el('div', { class: 'empty', text: error.message }))
+    if (memoryViewVisible('light')) mainEl.replaceChildren(el('div', { class: 'empty', text: error.message }))
   }
 }
 
@@ -2222,7 +2227,7 @@ async function lightAct(op, payload) {
     const data = await withBusy(() => api('/light/action', { method: 'POST', body: { op, ...payload } }))
     S.light.data = data
     toast('改好了', 'ok')
-    if (S.tab === 'light') paintCurrent()
+    if (memoryViewVisible('light')) paintCurrent()
     await refreshOverview({ paint: false })
   } catch (error) {
     toast(error.message, 'error')
@@ -2385,10 +2390,10 @@ async function loadDiary() {
       S.diary.token = ''
       sessionStorage.removeItem('feiyu-diary-token')
     }
-    if (S.tab === 'diary') paintCurrent()
+    if (memoryViewVisible('diary')) paintCurrent()
   } catch (error) {
     toast(error.message, 'error')
-    if (S.tab === 'diary') mainEl.replaceChildren(el('div', { class: 'empty', text: error.message }))
+    if (memoryViewVisible('diary')) mainEl.replaceChildren(el('div', { class: 'empty', text: error.message }))
   }
 }
 
@@ -3061,8 +3066,8 @@ async function undoEntry(entry) {
     toast(`已撤销：${data.summary}`, 'ok')
     try { S.version = (await api('/version')).version; const badge = $('.app-version'); if (badge) badge.textContent = `v${S.version}` } catch {}
     await refreshOverview({ paint: false })
-    if (S.tab === 'library') await loadLibrary()
-    if (S.tab === 'diary') { S.diary.books = null; S.diary.days = {}; paintCurrent() }
+    if (memoryViewVisible('timeline')) await loadLibrary()
+    if (memoryViewVisible('diary')) { S.diary.books = null; S.diary.days = {}; paintCurrent() }
     else await loadAudit()
   } catch (error) {
     toast(error.message, 'error')
@@ -4278,7 +4283,7 @@ async function loadGraph({ quiet = false, more = false } = {}) {
     updateGraphLegend()
     const moreBtn = document.getElementById('graph-more')
     if (moreBtn) moreBtn.style.display = data.hasMore ? '' : 'none'
-    if (S.tab === 'graph') {
+    if (memoryViewVisible('graph')) {
       buildGraphNodes()
       S.graph.alpha = 1
       if (!S.graph.running) startGraphLoop()
@@ -5098,7 +5103,7 @@ async function loadCandidateAuto(body){
   S.candidateAuto.loading=true
   try{S.candidateAuto.data=await api('/candidate-auto',body?{method:'POST',body}:{});S.candidateAuto.error=''}
   catch(e){S.candidateAuto.error=e.message}
-  finally{S.candidateAuto.loading=false;if(S.tab==='library'&&S.library.status==='candidate'){paintCurrent();if(!S.candidateAuto.timer)S.candidateAuto.timer=setInterval(()=>{if(S.tab==='library'&&S.library.status==='candidate')void loadCandidateAuto()},15000)}}
+  finally{S.candidateAuto.loading=false;if(memoryViewVisible('timeline')&&S.library.status==='candidate'){paintCurrent();if(!S.candidateAuto.timer)S.candidateAuto.timer=setInterval(()=>{if(memoryViewVisible('timeline')&&S.library.status==='candidate')void loadCandidateAuto()},15000)}}
 }
 function renderCandidateAuto(){
   const d=S.candidateAuto.data,wrap=el('section',{class:'card pad auto-review-card'})
