@@ -46,6 +46,7 @@ try {
   run(process.execPath, ['test/onboarding.test.mjs'])
   run(process.execPath, ['test/interaction-context.test.mjs'])
   run(process.execPath, ['test/memory-book-navigation.test.mjs'])
+  run(process.execPath, ['--test', 'test/recent-exploration-recall.test.mjs'])
   run(process.execPath, ['test/cost-control.test.mjs'])
   run(process.execPath, ['test/preset-sync.test.mjs'])
   if (python) {run(python.command, [...python.args, 'test/memvec_test.py']);run(python.command, [...python.args, 'test/retention_test.py']);run(python.command, [...python.args, 'test/organizer_test.py']);run(python.command, [...python.args, 'test/review_scope_test.py']);run(python.command, [...python.args, 'test/experience_memory_test.py'])}

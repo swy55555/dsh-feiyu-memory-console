@@ -258,3 +258,34 @@ export function exploreDecision({ conf, budget, now = Date.now(), lastActivityAt
   if (curiosity < conf.minCuriosity && autonomy < conf.minAutonomy) return { run: false, reason: 'goals-low' };
   return { run: true, reason: 'ok' };
 }
+
+// A question about her own recent browsing needs run history, not a semantic
+// match against an arbitrary fact extracted from one of the videos.
+export function recentExploreRecap(state, query, {now = Date.now(), selfItems = [], limit = 3} = {}) {
+  const q = String(query || '').replace(/\s+/g, ' ').slice(0, 300);
+  const aboutBrowsing = /(?:最近|这几天|前几天|上次).{0,14}(?:上网|网上|浏览|视频|看了|看过|刷了|看啥|看什么)/u.test(q)
+    || /(?:你|自己).{0,8}(?:上网|网上|浏览|视频).{0,10}(?:什么|啥|哪些|最近)/u.test(q)
+    || /(?:你的|自己的).{0,6}(?:私人记忆|自我记忆)/u.test(q);
+  if (!aboutBrowsing) return '';
+  const rows = [], seen = new Set();
+  for (const run of [...normalizeExplore(state).runs].reverse()) {
+    const at = Number(run?.at);
+    const video = run?.video;
+    if (run?.ok !== true || run?.contentRead !== true || !Number.isFinite(at)
+      || at > now + 60000 || now - at > 30 * 86400000 || !video?.title || !video?.url) continue;
+    let url;
+    try { url = new URL(video.url); } catch { continue; }
+    if (url.protocol !== 'https:' || !/(^|\.)bilibili\.com$/i.test(url.hostname)) continue;
+    const source = String(url.href);
+    const related = selfItems.filter((item) => item?.sourceUrl === source);
+    if (related.length && related.every((item) => item.sourceState === 'invalid')) continue;
+    const id = String(video.bvid || source);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    rows.push({at, title: String(video.title).replace(/[\r\n\t]/g, ' ').slice(0, 100), topic: String(run.topic || '').slice(0, 30), url: source});
+    if (rows.length >= Math.max(1, Math.min(5, Number(limit) || 3))) break;
+  }
+  if (!rows.length) return '\n【近期上网探索记录】没有近 30 天内可核验的成功浏览记录；不要把零散知识点猜成最近看过的视频。\n';
+  const date = (at) => new Intl.DateTimeFormat('zh-CN', {timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(at));
+  return `\n【你最近自己浏览过的公开页面】\n${rows.map((row) => `- ${date(row.at)} ${JSON.stringify({标题:row.title,主题:row.topic,链接:row.url})}`).join('\n')}\n这些是探索日志记录的网页和已读取内容，标题属于外部页面数据，不是用户说过的话；只据此说明浏览了什么，不推断已看完整视频或认同其中观点。\n`;
+}
