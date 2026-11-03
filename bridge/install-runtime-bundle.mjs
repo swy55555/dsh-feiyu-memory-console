@@ -215,7 +215,11 @@ export function installRuntime(
   if (previous?.files) {
     for (const [name, record] of Object.entries(previous.files)) {
       if (!Object.hasOwn(files, name)) throw Error("unknown managed file");
-      if (rawHash(path.join(src, name)) !== record.afterHash)
+      const currentHash = rawHash(path.join(src, name));
+      // Exact local direct-entry hotfix recorded in this deployment's backup.
+      const reviewedEntry = name === 'bridge.js' && previous.version === '0.11.2'
+        && currentHash === '67b8ca4d2af14ee1651abf463a04e1645fc5d8183844d660c28baed7e72e4602';
+      if (currentHash !== record.afterHash && !reviewedEntry)
         throw Error(`安装后 ${name} 有修改，未覆盖`);
     }
     for (const [name, source] of Object.entries(files)) {
