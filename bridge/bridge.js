@@ -21,7 +21,8 @@ export function inspectRuntime(directory = path.dirname(fileURLToPath(import.met
     note: '只检查本地适配模块；网络、账号、DSH 和外部依赖需启动后验收。'};
 }
 
-const direct = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const direct = process.argv[1] && fs.existsSync(process.argv[1])
+  && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
 if (direct) {
   if (process.argv.includes('--describe')) console.log(JSON.stringify(XINJI_IDENTITY, null, 2));
   else if (process.argv.includes('--check')) {

@@ -42,8 +42,8 @@ test('launcher check and describe work through a migrated-home directory junctio
   t.after(()=>{fs.unlinkSync(link);fs.rmdirSync(tmp);});
   fs.symlinkSync(path.dirname(fileURLToPath(new URL('../bridge/xinji-engine.mjs',import.meta.url))),link,
     process.platform==='win32'?'junction':'dir');
-  for(const flag of ['--check','--describe']){
-    const child=spawnSync(process.execPath,[path.join(link,'xinji-engine.mjs'),flag],{encoding:'utf8',windowsHide:true,timeout:15000});
+  for(const entry of ['xinji-engine.mjs','bridge.js'])for(const flag of ['--check','--describe']){
+    const child=spawnSync(process.execPath,[path.join(link,entry),flag],{encoding:'utf8',windowsHide:true,timeout:15000});
     assert.equal(child.status,0,child.stderr);
     const result=JSON.parse(child.stdout);assert.equal(result.engine,'xinji');
     if(flag==='--check')assert.equal(result.ok,true);
