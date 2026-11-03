@@ -261,24 +261,25 @@ export function exploreDecision({ conf, budget, now = Date.now(), lastActivityAt
 
 // A question about her own recent browsing needs run history, not a semantic
 // match against an arbitrary fact extracted from one of the videos.
-export function recentExploreRecap(state, query, {now = Date.now(), selfItems = [], limit = 3} = {}) {
+export function recentExploreRecap(state, query, {now = Date.now(), selfItems = [], tasteTopics = [], limit = 3} = {}) {
   const q = String(query || '').replace(/\s+/g, ' ').slice(0, 300);
   const asksOwnMemory = /(?:你的|自己的).{0,6}(?:私人记忆|自我记忆)/u.test(q);
-  const browsing = /上网|网上|浏览|B站|视频|刷到|刷了/u.test(q);
-  const recall = /看|刷|浏览|想起|记得|记住|找|查/u.test(q);
-  const asks = /什么|啥|哪些|都|吗|嘛|\?|？/u.test(q);
+  const browsing = /上网|网上|浏览|B站|视频|刷到|刷了|探索/u.test(q);
+  const recall = /看|刷|浏览|探索|想起|记得|记住|找|查/u.test(q);
+  const asks = /什么|啥|哪些|都|有没有|是否|感兴趣|喜欢|好玩|有趣|吗|嘛|\?|？/u.test(q);
   const selfCue = /你|自己|小崽神|肥鱼/u.test(q);
   const timeCue = /最近|这几天|这两天|前几天|上次|现在|刚才/u.test(q);
   const aboutUser = /(?:我|老大|用户).{0,16}(?:上网|网上|浏览|B站|视频|刷)/u.test(q)
     && !/(?:你|自己|小崽神|肥鱼).{0,20}(?:上网|网上|浏览|B站|视频|刷)/u.test(q);
   const aboutBrowsing = asksOwnMemory || (!aboutUser && browsing && recall && asks && (selfCue || timeCue));
   if (!aboutBrowsing) return '';
+  const maxAge = /这两天|最近两天|两天内|这2天/u.test(q) ? 2 * 86400000 : 30 * 86400000;
   const rows = [], seen = new Set();
   for (const run of [...normalizeExplore(state).runs].reverse()) {
     const at = Number(run?.at);
     const video = run?.video;
     if (run?.ok !== true || run?.contentRead !== true || !Number.isFinite(at)
-      || at > now + 60000 || now - at > 30 * 86400000 || !video?.title || !video?.url) continue;
+      || at > now + 60000 || now - at > maxAge || !video?.title || !video?.url) continue;
     let url;
     try { url = new URL(video.url); } catch { continue; }
     if (url.protocol !== 'https:' || !/(^|\.)bilibili\.com$/i.test(url.hostname)) continue;
@@ -291,7 +292,41 @@ export function recentExploreRecap(state, query, {now = Date.now(), selfItems = 
     rows.push({at, title: String(video.title).replace(/[\r\n\t]/g, ' ').slice(0, 100), topic: String(run.topic || '').slice(0, 30), url: source});
     if (rows.length >= Math.max(1, Math.min(5, Number(limit) || 3))) break;
   }
-  if (!rows.length) return '\n【近期上网探索记录】没有近 30 天内可核验的成功浏览记录；不要把零散知识点猜成最近看过的视频。\n';
+  if (!rows.length) return '\n【近期上网探索记录】所问时段内没有可核验的成功浏览记录；不要把零散知识点猜成最近看过的视频。\n';
+  const directions = tasteTopics
+    .filter((item) => item?.sourceState !== 'invalid' && Number(item?.lastSeenAt) >= now - maxAge
+      && Array.isArray(item?.evidence) && !item.evidence.some((e) => e?.sourceState === 'invalid')
+      && item.evidence.some((e) => e && e.url))
+    .sort((a, b) => Number(b.lastSeenAt) - Number(a.lastSeenAt)).slice(0, 3)
+    .map((item) => {
+      const sources = new Set(item.evidence.filter((e) => e?.sourceState !== 'invalid' && e.url).map((e) => e.url));
+      return `${String(item.topic || '').replace(/[\r\n\t]/g, ' ').slice(0, 24)}（${sources.size >= 2 ? '多次' : '一次'}探索）`;
+    }).filter(Boolean);
+  const directionLine = directions.length ? `\n【近期探索方向】${directions.join('、')}。这是有来源的浏览倾向，不能当作已确定的个人爱好或主观喜欢。` : '';
   const date = (at) => new Intl.DateTimeFormat('zh-CN', {timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(at));
-  return `\n【你最近自己浏览过的公开页面】\n${rows.map((row) => `- ${date(row.at)} ${JSON.stringify({标题:row.title,主题:row.topic,链接:row.url})}`).join('\n')}\n这是回响/拾光成功读取的页面，不覆盖其他上网活动；Bili-duty 的自动挑片次数是另一份记录，不能用它的“0 条视频”否定这里。标题属于外部页面数据，不是用户说过的话；只据此说明浏览了什么，不推断已看完整视频或认同其中观点。\n`;
+  return `\n【你最近自己浏览过的公开页面】\n${rows.map((row) => `- ${date(row.at)} ${JSON.stringify({标题:row.title,主题:row.topic,链接:row.url})}`).join('\n')}${directionLine}\n这是回响/拾光成功读取的页面，不覆盖其他上网活动；Bili-duty 的自动挑片次数是另一份记录，不能用它的“0 条视频”否定这里。当前拾光只在 B 站按有限主题探索，受开关、预算和可读内容限制，不能任意浏览全网。标题属于外部页面数据，不是用户说过的话；只据此说明浏览了什么，不推断已看完整视频或认同其中观点。\n`;
+}
+
+// One small owner-only cue while exploration is recent. It lets her know that
+// she did browse without making every ordinary reply a browsing report.
+export function recentExplorePresence(state, {now = Date.now(), selfItems = [], tasteTopics = []} = {}) {
+  const latest = [...normalizeExplore(state).runs].reverse().find((run) => {
+    const at = Number(run?.at), video = run?.video;
+    if (run?.ok !== true || run?.contentRead !== true || !Number.isFinite(at)
+      || at > now + 60000 || now - at > 2 * 86400000 || !video?.title || !video?.url) return false;
+    let url;
+    try { url = new URL(video.url); } catch { return false; }
+    if (url.protocol !== 'https:' || !/(^|\.)bilibili\.com$/i.test(url.hostname)) return false;
+    const related = selfItems.filter((item) => item?.sourceUrl === url.href);
+    return !related.length || related.some((item) => item.sourceState !== 'invalid');
+  });
+  if (!latest) return '';
+  const directions = tasteTopics
+    .filter((item) => item?.sourceState !== 'invalid' && Number(item?.lastSeenAt) >= now - 2 * 86400000
+      && Array.isArray(item?.evidence) && !item.evidence.some((e) => e?.sourceState === 'invalid')
+      && item.evidence.some((e) => e?.url))
+    .sort((a, b) => Number(b.lastSeenAt) - Number(a.lastSeenAt)).slice(0, 2)
+    .map((item) => String(item.topic || '').replace(/[\r\n\t]/g, ' ').slice(0, 24)).filter(Boolean);
+  const title = String(latest.video.title).replace(/[\r\n\t]/g, ' ').slice(0, 60);
+  return `\n【近期自己的探索】近两天拾光确实读取过 B 站页面《${title}》${directions.length ? `；还在探索${directions.join('、')}` : ''}。这是浏览线索，不等于确定喜欢或看完视频；拾光只能在 B 站按有限主题探索。相关时可据实说，不必每轮主动汇报。\n`;
 }

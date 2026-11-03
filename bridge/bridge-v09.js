@@ -29,7 +29,7 @@ import {planSelfMigration,commitSelfLedger,reconcileSelf,stableSelfKey} from './
 import {normalizeTaste,tastePage,recordExploration,resetTaste} from './taste.mjs';
 import {normalizeSelfMemory,selfMemoryPage,addSelfMemory} from './self-memory.mjs';
 import {buildAssociations} from './associations.mjs';
-import {exploreConfig,pickTopic,searchUrl,viewUrl,parseSearchResults,parseVideoView,impressionPrompt,parseImpressions,normalizeExplore,budgetState,recordRun,pickCandidates,playerUrl,subtitleRefs,parseSubtitleBody,exploreDecision,nextFocus,recentExploreRecap} from './explore.mjs';
+import {exploreConfig,pickTopic,searchUrl,viewUrl,parseSearchResults,parseVideoView,impressionPrompt,parseImpressions,normalizeExplore,budgetState,recordRun,pickCandidates,playerUrl,subtitleRefs,parseSubtitleBody,exploreDecision,nextFocus,recentExploreRecap,recentExplorePresence} from './explore.mjs';
 import {narrativeConfig,normalizeNarrativeState,currentNarrative,narrativeSources,narrativeSourcePool,narrativeDue,narrativePrompt,parseNarrativeOutput,storeNarrative,rollbackNarrative,narrativePromptLine,narrativeUsage,narrativeBudget,recordNarrativeRun} from './narrative.mjs';
 import {SharingPrivacy} from './sharing-privacy.mjs';
 import {ExpressionTeacher} from './expression-teacher.mjs';
@@ -3669,13 +3669,16 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
     if (key === ownerKey && cfg.socialV2?.selfMemory?.recall !== false && promptText) {
       try {
         const selfItems = normalizeSelfMemory(readJsonSafe(path.join(STATE_DIR, 'self-memory.json'), null)).items;
-        selfBlock = recentExploreRecap(readJsonSafe(path.join(STATE_DIR, 'explore.json'), null), promptText, {selfItems});
-        const token = selfBlock ? '' : readSelfToken();
+        const tasteTopics = normalizeTaste(readJsonSafe(path.join(STATE_DIR, 'taste.json'), null)).topics;
+        const exploreState = readJsonSafe(path.join(STATE_DIR, 'explore.json'), null);
+        const explicit = recentExploreRecap(exploreState, promptText, {selfItems,tasteTopics});
+        selfBlock = explicit || recentExplorePresence(exploreState, {selfItems,tasteTopics});
+        const token = explicit ? '' : readSelfToken();
         if (token) {
           const j = await memoryRequest('/search', { query: String(promptText).slice(0, 200), scope: 'self', k: 2, min_score: 0.45 }, 8000, { 'x-memvec-self': token });
           const rows = (j.results || []).filter((r) => r && r.text).slice(0, 2);
           if (rows.length) {
-            selfBlock = `\n【你自己记着的（来源提到，未经核实）】\n${rows.map((r) => `- ${String(r.text).slice(0, 160)}（来源 ${String(r.source_id || r.id || '未记录').slice(0, 24)}；不确定）`).join('\n')}\n`;
+            selfBlock += `\n【你自己记着的（来源提到，未经核实）】\n${rows.map((r) => `- ${String(r.text).slice(0, 160)}（来源 ${String(r.source_id || r.id || '未记录').slice(0, 24)}；不确定）`).join('\n')}\n`;
           }
         }
       } catch {}
@@ -13485,25 +13488,32 @@ function appendMemoryV2(st, category, content, extra = {}) {
     const seq=st.lastUnreadSeq;
     const latest=messages.filter(m=>m&&!m.isSelf&&Number.isSafeInteger(m.seq)).sort((a,b)=>b.seq-a.seq)[0];
     const ownerKey=cfg.ownerQQ?`private:${String(cfg.ownerQQ)}`:'';
-    if(key===ownerKey&&latest?.seq===seq&&token&&agentTokenOk(key,token)
+    const selfCurrent=()=>key===ownerKey&&latest?.seq===seq&&token&&agentTokenOk(key,token)
       &&isSessionAllowedInCurrentMode(key)&&currentMode==='reserved2'&&!socialV2.paused
       &&cfg.socialV2?.enabled!==false&&cfg.socialV2?.selfMemory?.recall!==false
-      &&socialV2.conversations.get(canonicalV2Key(key))===st&&v2ToolEnabled(toolFlag)){
+      &&socialV2.conversations.get(canonicalV2Key(key))===st&&v2ToolEnabled(toolFlag);
+    let selfActivity='';
+    if(selfCurrent()){
       const selfItems=normalizeSelfMemory(readJsonSafe(path.join(STATE_DIR,'self-memory.json'),null)).items;
-      const context=recentExploreRecap(readJsonSafe(path.join(STATE_DIR,'explore.json'),null),
-        String(latest.plain||latest.text||latest.tail||''),{selfItems});
+      const tasteTopics=normalizeTaste(readJsonSafe(path.join(STATE_DIR,'taste.json'),null)).topics;
+      const exploreState=readJsonSafe(path.join(STATE_DIR,'explore.json'),null);
+      const context=recentExploreRecap(exploreState,
+        String(latest.plain||latest.text||latest.tail||''),{selfItems,tasteTopics});
       if(context)return {messageId:String(latest.messageId||''),messageSeq:seq,scope:key,
         source:'self-explore',status:context.includes('"标题":')?'matched':'empty',context,ids:[],
         note:'这是角色自己近期探索的本地记录，只证明读过相应页面；qq_vmem_search 只查当前聊天的长期记忆，不包含这个私有探索库。'};
+      selfActivity=recentExplorePresence(exploreState,{selfItems,tasteTopics});
     }
     const current=()=>Boolean(token)&&agentTokenOk(key,token)&&isSessionAllowedInCurrentMode(key)
       &&currentMode==='reserved2'&&!socialV2.paused&&cfg.socialV2?.enabled!==false
       &&socialV2.conversations.get(canonicalV2Key(key))===st&&st.lastUnreadSeq===seq
       &&v2ToolEnabled(toolFlag)&&cfg.socialV2?.memoryRecall?.enabled!==false
       &&cfg.socialV2?.memoryRecall?.followup!==false&&cfg.socialV2?.humanContext?.enabled!==false;
-    if(!current())return undefined;
-    return followupMemory.get({key,messages,latestSeq:seq,current,options:cfg.socialV2?.humanContext||{},
+    if(!current())return selfActivity&&selfCurrent()?{messageId:String(latest.messageId||''),messageSeq:seq,scope:key,
+      status:'recent-self-activity',source:'self-explore',context:selfActivity}:undefined;
+    const reference=await followupMemory.get({key,messages,latestSeq:seq,current,options:cfg.socialV2?.humanContext||{},
       trace:data=>recordRetrievalTrace({traceId:crypto.randomUUID(),mode:'followup',...data})});
+    return selfActivity&&selfCurrent()?{...reference,selfActivity:{context:selfActivity,source:'self-explore',note:'近期自己的探索，仅在话题相关时提起，不代表已经确定喜欢。'}}:reference;
   }
 
   function noteModelMessagesV2(st, messages) {
