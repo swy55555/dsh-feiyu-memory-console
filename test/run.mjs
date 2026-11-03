@@ -5,7 +5,8 @@ import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { root, findPython } from '../bin/runtime.mjs'
 
-const tempParent = path.resolve(os.tmpdir())
+const tempParent = path.resolve(process.env.FEIYU_TEST_TEMP_PARENT || os.tmpdir())
+fs.mkdirSync(tempParent, { recursive: true })
 const temp = fs.mkdtempSync(path.join(tempParent, 'feiyu-suite-'))
 const env = { ...process.env, TEMP: temp, TMP: temp, DSH_HOME: path.join(temp, 'empty-home'), FEIYU_MEMVEC_URL: 'http://127.0.0.1:1',
   MEMVEC_API_TOKEN: randomUUID().replaceAll('-', ''), MEMVEC_API_TOKEN_FILE: path.join(temp, 'api-token'),
