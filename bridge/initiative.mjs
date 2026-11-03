@@ -98,7 +98,13 @@ export function computeInitiatives({ goals = {}, concerns = [], now = Date.now()
   } else {
     const available = executable.filter((x) => !x.blocked).sort((a, b) => b.score - a.score
       || (a.type === 'contact' && a.reason ? -1 : b.type === 'contact' && b.reason ? 1 : 0));
-    const top = available[0];
+    const highest = available[0];
+    const contact = available.find((x) => x.type === 'contact' && x.reason);
+    // Scores are rounded to two decimals. A contact that is only one or two
+    // points behind exploration must get a turn, or the same exploration score
+    // can win forever even while contact remains eligible.
+    const top = contact && contact.score >= Number(c.threshold || 0.45)
+      && highest.score - contact.score <= 0.02 ? contact : highest;
     if (!top || top.score < Number(c.threshold || 0.45)) reason = 'below-threshold';
     else { chosen = top.type; reason = `chosen:${top.score}`; }
   }
