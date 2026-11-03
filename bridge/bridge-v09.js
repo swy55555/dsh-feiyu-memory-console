@@ -12,7 +12,7 @@ import {ChatClarifications} from './chat-clarification.mjs';
 import {SourceValidity} from './source-validity.mjs';
 import {FollowupMemory} from './followup-memory.mjs';
 import {RetrievalSessions,renderEvidence} from './retrieval-session.mjs';
-import {memoryModelResult} from './evidence-model-view.mjs';
+import {memoryModelResult,evidenceBlocks} from './evidence-model-view.mjs';
 import {EvidenceConsumer,applySourceChange} from './evidence-consumer.mjs';
 import {ExpressionGuard} from './expression-guard.mjs';
 import {replyReference,allowOptionalNudges,contextualRecall,recallForCurrentContext} from './reply-context.mjs';
@@ -3724,7 +3724,7 @@ temperament 是角色稳定的性格底色，只供反应风格参考，可以�
       if(roots.size)sessionBlock=buildSessionBlock(contextBundle.messages.filter(m=>!roots.has(m.source_version)),{maxChars:Number(cfg.socialV2?.context?.budgetChars)||6000});
       const blocks=[{id:'summary',scope:key,purpose:'summary',text:summaryBlock,priority:30,fit:n=>buildSummaryBlock(contextBundle.summaries,{maxChars:n})},
         {id:'history',scope:key,purpose:'history',text:sessionBlock,priority:40,fit:n=>buildSessionBlock(contextBundle.messages.filter(m=>!roots.has(m.source_version)),{maxChars:n})},
-        ...(context.disableMemory===true||context.styleIntent==='feedback'?[]:(initialEvidence?.records||[])).map(r=>({id:'evidence:'+r.id,scope:key,purpose:'evidence',text:renderEvidence({records:[r]}),priority:90,rootIds:r.contract.rootIds})),
+        ...(context.disableMemory===true||context.styleIntent==='feedback'?[]:evidenceBlocks(initialEvidence,key)),
         ...parts.map(p=>({scope:key,...p}))];
       const enabled=cfg.socialV2?.context?.unifiedReferences!==false;
       const result=enabled&&typeof assembleReferences==='function'
@@ -10104,12 +10104,12 @@ ${roleText.slice(0, 9000)}`;
           let anchors=[];
           try{anchors=JSON.parse(url.searchParams.get('anchors')||'[]');if(!Array.isArray(anchors)||anchors.length>3||anchors.some(x=>typeof x!=='string'))throw Error();}
           catch{sendJson({ok:false,error:'无效的临时记忆编号'},400);return;}
-          const found=await retrievalSessions.search({key,turn:seq,query,anchors,
+          const found=await retrievalSessions.search({key,turn:seq,query,anchors,delivery:'manual',
             current:()=>allowed()&&socialV2.conversations.get(canonicalV2Key(key))===st&&(st.lastUnreadSeq||0)===seq});
           const memory=memoryModelResult(found);
           recordRetrievalTrace({traceId:crypto.randomUUID(),mode:'manual',key,query,status:found.status,ids:(found.records||[]).map(r=>r.id),stats:found.stats,decisions:found.trace});
           if(!allowed()){sendJson({ok:false,error:'检索期间权限发生变化'},403);return;}
-          sendJson({ok:true,memory});return;
+          sendJson({ok:true,memory,modelText:found.modelText});return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/memory') {
           const key = String(url.searchParams.get('key') ?? '').trim();

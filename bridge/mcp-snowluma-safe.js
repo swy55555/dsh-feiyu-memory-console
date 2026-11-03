@@ -1565,7 +1565,7 @@ server.tool(
     token: z.string().describe('会话令牌'),
     query: z.string().describe('想找什么（自然语言）'),
     anchors: z.array(z.string()).max(3).optional().describe('本轮搜索返回的临时 ref，最多三个，用于同一聊天的原话相邻上下文补查；不可跨轮使用'),
-    k: z.number().int().min(1).max(20).optional().describe('兼容旧调用；实际由每轮共享预算限制：默认 4 次、10 条、6000 字符，自动召回也占用预算'),
+    k: z.number().int().min(1).max(20).optional().describe('兼容旧调用；每轮共享预算默认 4 次、10 条、6000 个实际输出字符，含自动参考与本工具返回包装。预算耗尽后可能返回空内容，此时停止补查；空内容不表示记忆丢失'),
     scope: z.string().optional().describe('只能等于当前会话 key，省略时自动使用当前聊天')
   },
   async ({ key, token, query, k, scope, anchors }) => {
@@ -1576,7 +1576,8 @@ server.tool(
       const params=new URLSearchParams({key,query});
       if(anchors)params.set('anchors',JSON.stringify(anchors));
       const data=await agentApi('/api/socialV2/long-memory?'+params,{headers:{'x-agent-token':token}});
-      return {content:[{type:'text',text:serializeModelData(data)}],...(['unavailable','busy','stale'].includes(data.memory?.status)?{isError:true}:{})};
+      const text=typeof data.modelText==='string'?data.modelText:serializeModelData(data);
+      return {content:text?[{type:'text',text}]:[],...(['unavailable','busy','stale'].includes(data.memory?.status)?{isError:true}:{})};
     } catch (error) {
       return { content: [{ type: 'text', text: `查记忆失败：${error?.message ?? error}` }], isError: true };
     }

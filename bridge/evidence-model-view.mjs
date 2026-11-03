@@ -25,3 +25,13 @@ export function memoryModelResult(result){
 export function renderMemoryToolResult(result){
   return JSON.stringify({ok:true,memory:memoryModelResult(result)});
 }
+
+export function evidenceBlocks(result,key){
+  return (result?.records||[]).map(r=>({id:'evidence:'+r.id,scope:key,purpose:'evidence',
+    text:renderEvidence({records:[r]}),priority:90,rootIds:r.contract.rootIds,recordIds:[r.id]}));
+}
+
+export function deliveryChars(records,delivery,status='matched'){
+  return delivery==='manual'?renderMemoryToolResult({status,records}).length:
+    evidenceBlocks({records}).reduce((sum,b)=>sum+b.text.length,0);
+}

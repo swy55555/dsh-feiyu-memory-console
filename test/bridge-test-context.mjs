@@ -7,6 +7,7 @@ import * as rhythm from '../bridge/rhythm.mjs';
 import * as shared from '../bridge/shared-activities.mjs';
 import * as repair from '../bridge/repair.mjs';
 import {RetrievalSessions,renderEvidence} from '../bridge/retrieval-session.mjs';
+import {evidenceBlocks} from '../bridge/evidence-model-view.mjs';
 export function wireEvidenceFixture(ctx){
   ctx.renderEvidence=renderEvidence;ctx.isSessionAllowedInCurrentMode=()=>true;ctx.socialV2={paused:false};
   ctx.retrievalSessions=new RetrievalSessions({request:async(route,body)=>{
@@ -17,4 +18,4 @@ export function wireEvidenceFixture(ctx){
 }
 // These VM tests use synthetic HTTP peers; never read a live service credential.
 process.env.MEMVEC_API_TOKEN=randomUUID().replaceAll('-', '');
-export const extras={associationSnapshot:()=>({strong:[],weak:[]}),appendBroadcastTrace:()=>{},ASSEMBLER_VERSION:"test",narrativeState:{},currentNarrative:()=>null,...emotion,memvecHeaders,assembleReferences,summarizeAssembly,emotionViewFor:()=>emotion.emptyEmotion(),emotionRecoveryCfg:()=>({}),idleAssociations:{feeling:()=>null},...goals,...rhythm,...shared,...repair,goalsState:goals.normalizeGoals(null),sharedState:shared.normalizeShared(null),repairState:repair.normalizeRepairs(null),saveRepairState:()=>{},setInterval,clearInterval,setTimeout,clearTimeout};
+export const extras={evidenceBlocks,associationSnapshot:()=>({strong:[],weak:[]}),appendBroadcastTrace:()=>{},ASSEMBLER_VERSION:"test",narrativeState:{},currentNarrative:()=>null,...emotion,memvecHeaders,assembleReferences,summarizeAssembly,emotionViewFor:()=>emotion.emptyEmotion(),emotionRecoveryCfg:()=>({}),idleAssociations:{feeling:()=>null},...goals,...rhythm,...shared,...repair,goalsState:goals.normalizeGoals(null),sharedState:shared.normalizeShared(null),repairState:repair.normalizeRepairs(null),saveRepairState:()=>{},setInterval,clearInterval,setTimeout,clearTimeout};
