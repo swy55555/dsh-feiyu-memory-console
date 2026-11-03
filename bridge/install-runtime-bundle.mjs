@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.11.2";
+export const RUNTIME_VERSION = "0.11.3";
 export const templates = {
   "runtime-inspection.mjs": "runtime-inspection.mjs",
   "memory-audit.mjs": "memory-audit.mjs",

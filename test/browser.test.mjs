@@ -10,6 +10,7 @@ import { createRequire } from 'node:module'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createInterface } from 'node:readline'
+import { randomUUID } from 'node:crypto'
 import { findPython, root } from '../bin/runtime.mjs'
 
 const require = createRequire(import.meta.url)
@@ -18,6 +19,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'feiyu-browser-'))
 process.env.DSH_HOME = tmp
 process.env.FEIYU_MEMVEC_DB = path.join(tmp, 'memvec', 'memories.db')
 process.env.FEIYU_MEMVEC_URL = 'http://127.0.0.1:1'
+process.env.MEMVEC_API_TOKEN = randomUUID().replaceAll('-', '')
 const { createApiHandler } = await import('../lib/api.js')
 const { health } = await import('../lib/core.js')
 const server = http.createServer(createApiHandler())

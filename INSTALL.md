@@ -1,8 +1,8 @@
 # 安装、升级与工程运维
 
-适用：0.11.2。本文件面向部署者。功能、费用和操作见 [用户手册](manual/USER_GUIDE.md)，机制见 [技术手册](docs/TECHNICAL_MANUAL.md)。本项目不包含 DSH、QQ 登录环境和模型服务，不是一键搭建全部环境的安装器。
+适用：0.11.3。本文件面向部署者。功能、费用和操作见 [用户手册](manual/USER_GUIDE.md)，机制见 [技术手册](docs/TECHNICAL_MANUAL.md)。本项目不包含 DSH、QQ 登录环境和模型服务，不是一键搭建全部环境的安装器。
 
-证据检索开发候选须额外阅读 [迁移、配套文件升级与回退](docs/evidence-deployment.md)。本轮只准备交付，不自动切换运行中的安装。
+从 0.11.2 升级到本版须额外阅读 [来源索引、配套文件升级与回退](docs/evidence-deployment.md)。安装包不会自动切换正在运行的服务或迁走原数据。
 
 ## 1. 环境与边界
 
@@ -52,7 +52,7 @@ node bin/doctor.mjs
 
 **新用户请使用 0.11.2 或更新的完整发布包。0.11.1 缺少首次安装所需的基础桥接文件。** 本版包含本项目运行时源码、依赖锁文件、QQ MCP、三个 Agent 预设、安全守卫及 DSH 注册脚本；不包含 DSH 软件、SnowLuma 登录环境、账号、模型额度、语音库和私人记忆。包内使用的上游代码保留原 MIT 许可；其他依赖与外部服务遵循各自条款。
 
-从对应 Release 下载 `.tgz` 与 `SHA256SUMS-0.11.2.txt`，核对 SHA-256，解压后将 `package` 目录放在稳定位置。下面路径只是示例：**先确认实际 DSH_HOME 和活动 profile，不能照抄盘符，更不能把已有 E 盘数据迁回 C 盘。**
+从对应 Release 下载 `.tgz` 与 `SHA256SUMS-0.11.3.txt`，核对 SHA-256，解压后将 `package` 目录放在稳定位置。下面路径只是示例：**先确认实际 DSH_HOME 和活动 profile，不能照抄盘符，更不能把已有 E 盘数据迁回 C 盘。**
 
 ```powershell
 $env:DSH_HOME = 'E:\dsh-home'
@@ -164,7 +164,7 @@ node bridge/install-all.mjs --target 'E:\dsh-home\qq-bridge' --apply
 | 升级没变化 | 插件加载副本、运行时目标、进程是否真正重启 |
 | 数据突然变空 | 根目录、数据库真实路径、环境变量和过滤条件 |
 
-运行基础检查：`npm test`、`git diff --check`。`npm run check:engine` 递归检查当前源码中的运行依赖；0.11.2 的完整源码包应通过。安装并执行 npm ci 后，在真实目标运行 `node src/bridge.js --check --dependencies`，此检查不启动服务或发送消息。
+运行基础检查：`npm test`、`git diff --check`。`npm run check:engine` 递归检查当前源码中的运行依赖；0.11.3 的完整源码包应通过。安装并执行 npm ci 后，在真实目标运行 `node src/bridge.js --check --dependencies`，此检查不启动服务或发送消息。
 
 0.11.2 已包含原先缺失的 14 个基础模块和 MCP 的间接依赖。检查器递归检查本地字面量导入；加 `--dependencies` 检查 npm 的 ESM 解析。检查通过不等于 QQ 登录、DSH 服务和模型调用成功。不要创建空文件绕过检查。
 
