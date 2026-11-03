@@ -1983,7 +1983,10 @@ def search_evidence(body):
                 if row['id'] in seen or set(row['contract']['rootIds']).issubset(excluded):continue
                 seen.add(row['id']);combined.append(row)
             result['results']=combined
-        # Context selection changes only group delivery, never query ranking.
+        if not body.get('anchors'):
+            result['results']=evidence_store.complete_unindexed_answers(conn,scope,result['results'],MODEL,
+                str(body.get('subject','')),body.get('time'),body.get('exclude',[]))
+        # Attach context before atomic group delivery; indexed ranking is unchanged.
         held=body.get('exclude',[])
         result['results']=evidence_store.context_groups(conn,scope,result['results'],held)
         result['results']=evidence_store.limit_context_groups(result['results'],max(1,min(12,int(body.get('limit',8)))),held)

@@ -170,6 +170,45 @@ def expand(conn, scope, versions, limit=3):
     return result
 
 
+def complete_unindexed_answers(conn, scope, rows, model, subject='', time_filter=None, excluded=()):
+    """Close the background-index gap for adjacent answers to selected questions.
+
+    Only unindexed originals are added. Ranked/indexed candidates and follow-up
+    ranking stay unchanged. This attaches context, not a confirmed user fact.
+    """
+    completed = list(rows)
+    seen = {v for row in rows for v in row['contract']['rootIds']}
+    for row in rows:
+        question = source(conn, scope, row['contract'].get('sourceVersion', ''))
+        if not question or not question['text'].strip().endswith(('?', '？')) or len(question['text'].strip()) > 600:
+            continue
+        following = _rows(conn, '''SELECT * FROM evidence_source_lookup WHERE key=?
+            AND (at>? OR (at=? AND source_version>?))
+            ORDER BY at,source_version LIMIT 1''',
+            (scope,question['at'],question['at'],question['source_version']))
+        if not following:
+            continue
+        neighbour = following[0]
+        version = neighbour['source_version']
+        if version in seen or version in excluded:
+            continue
+        answer = source(conn, scope, version)
+        if (not answer or answer['user_id'] == question['user_id']
+                or not 0 < answer['at']-question['at'] <= 120000
+                or not answer['text'].strip() or len(answer['text'].strip()) > 600
+                or answer['text'].strip().endswith(('?', '？'))
+                or (subject and answer['user_id'] != subject)
+                or (time_filter and not time_filter['from'] <= answer['at'] < time_filter['to'])):
+            continue
+        if conn.execute('SELECT 1 FROM evidence_vectors WHERE source_version=? AND model=?', (version,model)).fetchone():
+            continue
+        value = contract(answer)
+        value['retrieval'] = {'method':'unindexed-adjacent-answer','via':row['id']}
+        completed.append(value)
+        seen.add(version)
+    return completed
+
+
 def context_groups(conn, scope, rows, held=()):
     """Tag only already selected, truly adjacent short question/answer candidates.
 

@@ -29,6 +29,46 @@ class EvidenceTests(unittest.TestCase):
             self.assertEqual(m.evidence_store.limit_context_groups(groups,1),[])
             self.assertEqual(len(m.evidence_store.limit_context_groups(groups,2)),2)
             self.assertEqual(groups[1]['text'],'Meat, hotpot and barbecue.')
+    def test_unindexed_short_answer_is_completed_on_first_retrieval(self):
+        q=m.add_message(SCOPE,'q','小李','10001','你最喜欢吃什么？',at=self.f.at*1000)
+        a=m.add_message(SCOPE,'a','小王','10002','肉、烤肉、火锅和烧烤。',at=(self.f.at+2)*1000)
+        result=self.search('喜欢吃什么')['results']
+        self.assertEqual({r['contract']['messageId'] for r in result},{'q','a'})
+        self.assertTrue(all(len(r['retrieval']['contextVersions'])==2 for r in result))
+        self.assertEqual(self.search('喜欢吃什么',limit=1)['results'],[])
+        self.assertEqual([r['contract']['messageId'] for r in self.search('喜欢吃什么',subject='10001')['results']],['q'])
+        self.assertEqual([r['contract']['messageId'] for r in self.search('喜欢吃什么',time={'basis':'spoken','from':self.f.at*1000,'to':(self.f.at+1)*1000})['results']],['q'])
+    def test_unindexed_completion_does_not_skip_invalid_or_foreign_neighbours(self):
+        self.qa(intervening=True)
+        m.add_message('private:20002','foreign','Other','20002','private answer',at=(self.f.at+1)*1000)
+        result=self.search('What food do you like?')['results']
+        self.assertFalse(any(r['contract']['messageId']=='a' for r in result))
+        self.assertTrue(all(r['scope']==SCOPE for r in result))
+    def test_unindexed_completion_rechecks_revocation_and_truncation(self):
+        self.qa()
+        with m.db() as c:
+            c.execute("UPDATE messages SET source_truncated=1 WHERE message_id='a'")
+        self.assertFalse(any(r['contract']['messageId']=='a' for r in self.search('food')['results']))
+        with m.db() as c:
+            c.execute("UPDATE messages SET source_truncated=0 WHERE message_id='a'")
+        mid=m.add_memory('Meat, hotpot and barbecue.',scope=SCOPE,source_id='a',subject_id='10002',
+                         source_text='Meat, hotpot and barbecue.',source_time=self.f.at+2,memory_kind='experience')['id']
+        p=m.prepare_source_correction(SCOPE,mid)
+        m.apply_source_correction(SCOPE,mid,p['sourceVersion'],p['revision'],'wrong answer')
+        self.assertFalse(any(r['contract']['messageId']=='a' for r in self.search('food')['results']))
+    def test_unindexed_completion_leaves_indexed_candidates_unchanged(self):
+        q,a=self.qa()
+        m.index_evidence()
+        with m.db() as c:
+            rows=[m.evidence_store.contract(m.evidence_store.source(c,SCOPE,q['sourceVersion']))]
+            self.assertEqual(m.evidence_store.complete_unindexed_answers(c,SCOPE,rows,m.MODEL),rows)
+    def test_unindexed_completion_respects_same_speaker_time_and_question_boundaries(self):
+        m.add_message(SCOPE,'q','小李','10001','你喜欢什么？',at=self.f.at*1000)
+        for speaker,delay,text in [('10001',2,'肉。'),('10002',121,'肉。'),('10002',2,'你呢？'),('10002',2,'肉'*601)]:
+            with self.subTest(speaker=speaker,delay=delay):
+                with m.db() as c:c.execute("DELETE FROM messages WHERE message_id='a'")
+                m.add_message(SCOPE,'a','说话人',speaker,text,at=(self.f.at+delay)*1000)
+                self.assertFalse(any(r['contract']['messageId']=='a' for r in self.search('喜欢什么')['results']))
     def test_group_completes_already_held_question_in_one_remaining_slot(self):
         q,a=self.qa()
         with m.db() as c:
