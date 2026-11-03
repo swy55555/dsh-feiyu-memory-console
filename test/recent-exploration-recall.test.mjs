@@ -25,7 +25,10 @@ test('owner browsing questions recall recent successful pages, not video fact fr
   assert.ok(text.indexOf('今天看的地理知识') < text.indexOf('昨天看的菜市场'));
   assert.doesNotMatch(text,/很久以前的网页|未读到正文|重复记录/);
   assert.match(recentExploreRecap(state,'你找找你的私人记忆？',{now}),/今天看的地理知识/);
+  assert.match(recentExploreRecap(state,'你现在能不能想起网上都看了啥嘛？',{now}),/今天看的地理知识/);
+  assert.match(recentExploreRecap(state,'你现在能想起来都在网上看了啥嘛',{now}),/今天看的地理知识/);
   assert.equal(recentExploreRecap(state,'老大喜欢吃什么？',{now}),'');
+  assert.equal(recentExploreRecap(state,'我最近在网上看了啥？',{now}),'');
 });
 
 test('invalidated sources and non-Bilibili URLs are not recalled', () => {
@@ -59,7 +62,7 @@ test('ongoing owner turn gets recent exploration despite exhausted chat-memory b
     followupMemory:{get:()=>{throw Error('ordinary chat memory was queried')}},
   });
   vm.runInContext(source.slice(start,end),context);
-  const result = await vm.runInContext("memoryReferenceV2('private:123',st,[{seq:7,messageId:'m7',text:'最近上网都看了啥'}],'token','waitMessages')",context);
+  const result = await vm.runInContext("memoryReferenceV2('private:123',st,[{seq:7,messageId:'m7',text:'你现在能不能想起网上都看了啥嘛？'}],'token','waitMessages')",context);
   assert.equal(result.source,'self-explore');
   assert.equal(result.status,'matched');
   assert.match(result.context,/真实浏览的页面/);

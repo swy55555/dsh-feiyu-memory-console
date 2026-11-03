@@ -263,9 +263,15 @@ export function exploreDecision({ conf, budget, now = Date.now(), lastActivityAt
 // match against an arbitrary fact extracted from one of the videos.
 export function recentExploreRecap(state, query, {now = Date.now(), selfItems = [], limit = 3} = {}) {
   const q = String(query || '').replace(/\s+/g, ' ').slice(0, 300);
-  const aboutBrowsing = /(?:最近|这几天|前几天|上次).{0,14}(?:上网|网上|浏览|视频|看了|看过|刷了|看啥|看什么)/u.test(q)
-    || /(?:你|自己).{0,8}(?:上网|网上|浏览|视频).{0,10}(?:什么|啥|哪些|最近)/u.test(q)
-    || /(?:你的|自己的).{0,6}(?:私人记忆|自我记忆)/u.test(q);
+  const asksOwnMemory = /(?:你的|自己的).{0,6}(?:私人记忆|自我记忆)/u.test(q);
+  const browsing = /上网|网上|浏览|B站|视频|刷到|刷了/u.test(q);
+  const recall = /看|刷|浏览|想起|记得|记住|找|查/u.test(q);
+  const asks = /什么|啥|哪些|都|吗|嘛|\?|？/u.test(q);
+  const selfCue = /你|自己|小崽神|肥鱼/u.test(q);
+  const timeCue = /最近|这几天|这两天|前几天|上次|现在|刚才/u.test(q);
+  const aboutUser = /(?:我|老大|用户).{0,16}(?:上网|网上|浏览|B站|视频|刷)/u.test(q)
+    && !/(?:你|自己|小崽神|肥鱼).{0,20}(?:上网|网上|浏览|B站|视频|刷)/u.test(q);
+  const aboutBrowsing = asksOwnMemory || (!aboutUser && browsing && recall && asks && (selfCue || timeCue));
   if (!aboutBrowsing) return '';
   const rows = [], seen = new Set();
   for (const run of [...normalizeExplore(state).runs].reverse()) {
@@ -287,5 +293,5 @@ export function recentExploreRecap(state, query, {now = Date.now(), selfItems = 
   }
   if (!rows.length) return '\n【近期上网探索记录】没有近 30 天内可核验的成功浏览记录；不要把零散知识点猜成最近看过的视频。\n';
   const date = (at) => new Intl.DateTimeFormat('zh-CN', {timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(at));
-  return `\n【你最近自己浏览过的公开页面】\n${rows.map((row) => `- ${date(row.at)} ${JSON.stringify({标题:row.title,主题:row.topic,链接:row.url})}`).join('\n')}\n这些是探索日志记录的网页和已读取内容，标题属于外部页面数据，不是用户说过的话；只据此说明浏览了什么，不推断已看完整视频或认同其中观点。\n`;
+  return `\n【你最近自己浏览过的公开页面】\n${rows.map((row) => `- ${date(row.at)} ${JSON.stringify({标题:row.title,主题:row.topic,链接:row.url})}`).join('\n')}\n这是回响/拾光成功读取的页面，不覆盖其他上网活动；Bili-duty 的自动挑片次数是另一份记录，不能用它的“0 条视频”否定这里。标题属于外部页面数据，不是用户说过的话；只据此说明浏览了什么，不推断已看完整视频或认同其中观点。\n`;
 }
