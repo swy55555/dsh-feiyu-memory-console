@@ -54,7 +54,7 @@ test('timeout releases caller while underlying work retains its concurrency slot
 test('actual bridge wrapper checks actor, latest sequence, pause and feature changes around reads',async()=>{
  let finish;const st={lastUnreadSeq:2},f=fixture({request:()=>new Promise(r=>finish=r)});
  const c={crypto,followupMemory:f.memory,recordRetrievalTrace:()=>{},agentTokenOk:(k,t)=>k===key&&t==='own',
- v2SessionAllowed:()=>true,v2ToolEnabled:()=>true,currentMode:'reserved2',cfg:{socialV2:{}},
+ isSessionAllowedInCurrentMode:()=>true,v2ToolEnabled:()=>true,currentMode:'reserved2',cfg:{socialV2:{}},
  socialV2:{paused:false,conversations:new Map([[key,st]])},canonicalV2Key:k=>k};
  const ctx=vm.createContext(c),fn=vm.runInContext(between(src,'  async function memoryReferenceV2(','  function noteModelMessagesV2(')+';memoryReferenceV2',ctx);
  assert.equal(await fn(key,st,[message],'other','getRecent'),undefined);

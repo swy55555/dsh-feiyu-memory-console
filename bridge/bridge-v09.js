@@ -13480,7 +13480,7 @@ function appendMemoryV2(st, category, content, extra = {}) {
 
   async function memoryReferenceV2(key,st,messages,token,toolFlag) {
     const seq=st.lastUnreadSeq;
-    const current=()=>Boolean(token)&&agentTokenOk(key,token)&&v2SessionAllowed(key)
+    const current=()=>Boolean(token)&&agentTokenOk(key,token)&&isSessionAllowedInCurrentMode(key)
       &&currentMode==='reserved2'&&!socialV2.paused&&cfg.socialV2?.enabled!==false
       &&socialV2.conversations.get(canonicalV2Key(key))===st&&st.lastUnreadSeq===seq
       &&v2ToolEnabled(toolFlag)&&cfg.socialV2?.memoryRecall?.enabled!==false
