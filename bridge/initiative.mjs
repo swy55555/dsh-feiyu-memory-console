@@ -31,7 +31,7 @@ function localMinutes(now, timezone) {
   }
 }
 
-export function computeInitiatives({ goals = {}, concerns = [], now = Date.now(), lastAt = 0, budget = {}, conf = {}, lastByType = {}, ownerIdleHours = 0, lastContactAt = 0, contactCountToday = 0, hasNewEvidence = false, sharedActive = false, lastSharedAt = 0 } = {}) {
+export function computeInitiatives({ goals = {}, concerns = [], now = Date.now(), lastAt = 0, budget = {}, conf = {}, lastByType = {}, ownerIdleHours = 0, lastContactAt = 0, contactCountToday = 0, hasNewEvidence = false, sharedActive = false, lastSharedAt = 0, actionableOnly = false } = {}) {
   const c = { ...INITIATIVE_DEFAULTS, ...(conf || {}) };
   const g = (k) => Math.max(0, Math.min(1, Number(goals[k]) || 0));
   const cur = localMinutes(now, c.timezone);
@@ -85,7 +85,10 @@ export function computeInitiatives({ goals = {}, concerns = [], now = Date.now()
   // 整理/反思：固定低优先级，避免永远不整理。
   candidates.push({ type: 'reflect', score: 0.46, blocked: onCooldown('reflect') ? 'cooldown' : '' });
 
-  const blockedAll = candidates.every((x) => x.blocked);
+  // Revisit/reflect are observational intentions; the live dispatcher has no
+  // handler for them. Keep them in the trace but do not let them starve actions.
+  const executable = actionableOnly ? candidates.filter(x => ['contact','explore','shared'].includes(x.type)) : candidates;
+  const blockedAll = executable.every((x) => x.blocked);
   let chosen = null;
   let reason = '';
   if (now - Number(lastAt || 0) < Number(c.minGapMinutes ?? 30) * 60000) {
@@ -93,7 +96,8 @@ export function computeInitiatives({ goals = {}, concerns = [], now = Date.now()
   } else if (blockedAll) {
     reason = 'all-blocked';
   } else {
-    const available = candidates.filter((x) => !x.blocked).sort((a, b) => b.score - a.score);
+    const available = executable.filter((x) => !x.blocked).sort((a, b) => b.score - a.score
+      || (a.type === 'contact' && a.reason ? -1 : b.type === 'contact' && b.reason ? 1 : 0));
     const top = available[0];
     if (!top || top.score < Number(c.threshold || 0.45)) reason = 'below-threshold';
     else { chosen = top.type; reason = `chosen:${top.score}`; }

@@ -1422,8 +1422,9 @@ async function main() {
         });
         if (!decision.run) return;
         const port = cfg.consolePort || 3100;
-        const url = `http://127.0.0.1:${port}/api/explore/run${consoleToken ? `?token=${encodeURIComponent(consoleToken)}` : ''}`;
-        const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+        const actionToken = String(cfg.consoleToken || '').trim() || loadOrCreateConsoleToken();
+        const url = `http://127.0.0.1:${port}/api/explore/run`;
+        const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-console-token': actionToken }, body: '{}' });
         const data = await res.json().catch(() => ({}));
         log(`[explore] canary -> ${res.status} ${data?.entry?.ok ? 'ok' : (data?.entry?.reason || data?.error || '')}`);
       } catch (error) {
@@ -1560,7 +1561,7 @@ async function main() {
     const lastContactAt = Math.max(contactSentAt, Number(ownerState?.ownerContact?.lastAt) || 0);
     const contactCountToday = contactSentToday;
     const sharedActiveNow = Boolean(activeShared(sharedState));
-    const decision = computeInitiatives({ goals, concerns, now: Date.now(), lastAt: initiativeLastAt, budget, conf, ownerIdleHours, lastContactAt, contactCountToday, hasNewEvidence: false, sharedActive: sharedActiveNow, lastSharedAt: Number(sharedState?.lastProposedAt) || 0 });
+    const decision = computeInitiatives({ goals, concerns, now: Date.now(), lastAt: initiativeLastAt, budget, conf, ownerIdleHours, lastContactAt, contactCountToday, hasNewEvidence: false, sharedActive: sharedActiveNow, lastSharedAt: Number(sharedState?.lastProposedAt) || 0, actionableOnly: conf.dryRun === false });
     const entry = {
       at: decision.at,
       chosen: decision.chosen,
@@ -1632,7 +1633,7 @@ async function main() {
         .catch((error) => log('[initiative] 探索触发失败', error?.message ?? error));
     }
     if (decision.chosen) initiativeLastAt = decision.at;
-    initiativeCount += 1;
+    if (decision.chosen) initiativeCount += 1;
     return { ok: true, ...decision };
   }
   const initiativeTimer = setInterval(() => {
