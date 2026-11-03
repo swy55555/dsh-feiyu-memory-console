@@ -62,7 +62,12 @@ test('actual semantic recall retains subject, task and source-time markers; late
  wireEvidenceFixture(ctx);
  const fn=vm.runInContext(between('  async function withMemoryContext(','  const dailyRecallQueries')+';withMemoryContext',ctx);
  const result=await fn(key,'周日有什么计划',{allowIdleAssociation:true});
- for(const s of ['plan-not-known-complete','private:1','source','如果不下雨'])assert.ok(result.includes(s),s+' missing from '+result);assert.equal(traces.at(-1).injected.length,1);
+ for(const s of ['plan-not-known-complete','如果不下雨'])assert.ok(result.includes(s),s+' missing from '+result);assert.equal(traces.at(-1).injected.length,1);
+ const evidence=JSON.parse(result.split('\n')[1]);assert.equal(evidence.speaker,'1');assert.equal(evidence.spokenAt,100);
+ assert.equal(evidence.plannedAt,null);assert.equal(evidence.sourceType,'organized-fact');assert.ok(evidence.ref);
+ // Scope remains an enforced internal property, not a repeated model-side key.
+ assert.equal(ctx.retrievalSessions.sessions.get(key).deliveries.size,1);
+ assert.equal(ctx.retrievalSessions.sessions.has('private:2'),false);
  ctx.retrievalSessions.reset();ctx.fetch=async()=>new Promise(r=>release=r);mind.begin(key,'pending');const pending=fn(key,'旧问题',{allowIdleAssociation:true});await new Promise(r=>setImmediate(r));mind.begin(key,'next');release({ok:true,json:async()=>({results:[row]})});assert.equal(await pending,'旧问题');assert.equal(traces.at(-1).injected.length,0);
 });
 

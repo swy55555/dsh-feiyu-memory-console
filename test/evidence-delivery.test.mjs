@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {evidenceModelView,renderEvidence,renderMemoryToolResult,evidenceBlocks,deliveryChars} from '../bridge/evidence-model-view.mjs';
 import {RetrievalSessions} from '../bridge/retrieval-session.mjs';
 import {assembleReferences} from '../bridge/reference-assembly.mjs';
+import fs from 'node:fs';
+import vm from 'node:vm';
 import {serializeModelData} from '../bridge/qq-model-view.js';
 const key='private:10001';
 const record=(id='one',text='原话 "引用"\n\\ 路径 😀')=>({id,ref:'opaque:'+id,text,scope:key,subject_id:'user',score:.8,
@@ -96,4 +98,32 @@ test('outer reference assembly keeps or drops the whole pair and refunds the sam
  // Even a partial release request revokes the entire pending automatic unit.
  s.releaseUndelivered(key,1,[r.records[0].id]);assert.equal(s.sessions.get(key).count,0);assert.equal(s.sessions.get(key).chars,0);
  for(const item of r.records)assert.equal((await s.search({key,turn:1,query:'again',anchors:[item.ref]})).status,'invalid-anchor');
+});
+test('actual bridge assembly maps grouped blocks back to every record and refunds omitted groups',async()=>{
+ const source=fs.readFileSync(new URL('../bridge/bridge-v09.js',import.meta.url),'utf8');
+ const start=source.indexOf('    const assembled=(parts)=>{'),end=source.indexOf('    const contextEmotionView',start);
+ assert.ok(start>0&&end>start);
+ for(const keep of [false,true]){
+  const sessions=new RetrievalSessions({request:async()=>({results:pair('q','a',1200)})});
+  const evidence=await sessions.search({key,turn:1,query:'food'});
+  const ctx=vm.createContext({key,context:{},cfg:{socialV2:{context:{referenceBudgetChars:keep?8000:2400}}},
+   contextBundle:{messages:[],summaries:[]},initialEvidence:evidence,initialEvidenceSeq:1,deliveredEvidence:[],assemblyReport:null,
+   sessionBlock:'',summaryBlock:'',promptText:'CURRENT REQUEST',buildSessionBlock:()=>'',buildSummaryBlock:()=>'',
+   evidenceBlocks,assembleReferences,retrievalSessions:sessions});
+  const output=vm.runInContext(source.slice(start,end)+";assembled([{id:'required',text:'r'.repeat(1600),required:true,priority:100}])",ctx);
+  assert.ok(output.endsWith('CURRENT REQUEST'));assert.equal(ctx.deliveredEvidence.length,keep?2:0);
+  assert.equal(sessions.sessions.get(key).count,keep?2:0);
+  assert.equal(sessions.sessions.get(key).chars,keep?evidence.outputChars:0);
+ }
+});
+test('actual MCP handler forwards the budgeted text verbatim and uses no extra wrapper',async()=>{
+ const source=fs.readFileSync(new URL('../bridge/mcp-snowluma-safe.js',import.meta.url),'utf8');
+ const start=source.indexOf('      const params=new URLSearchParams({key,query});');
+ const end=source.indexOf('    } catch (error)',start);assert.ok(start>0&&end>start);
+ for(const modelText of ['',renderMemoryToolResult({status:'matched',records:[record()]})]){
+  const data={ok:true,memory:{status:'matched'},modelText};
+  const ctx=vm.createContext({key,query:'food',anchors:[],token:'synthetic',URLSearchParams,agentApi:async()=>data,serializeModelData});
+  const result=await vm.runInContext('(async()=>{'+source.slice(start,end)+'})()',ctx);
+  assert.equal(result.content.map(c=>c.text).join(''),modelText);
+ }
 });
