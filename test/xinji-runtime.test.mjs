@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {allowed, canonicalV2Key, modeAllowed} from '../bridge/xinji-policy.mjs';
 import {retireLexiconTools} from '../bridge/retire-lexicon.mjs';
 import {inspectRuntime} from '../bridge/xinji-engine.mjs';
@@ -33,6 +34,20 @@ test('engine inspection never executes an adapter or creates state; absent modul
 test('unknown MCP implementations are rejected before changing their content; clean files remain byte-identical',()=>{
   const clean=Buffer.from('export const keep = true;\r\n');assert.equal(retireLexiconTools(clean),clean);
   assert.throws(()=>retireLexiconTools(Buffer.from("server.tool('qq_slang_query', custom);")),/版本未知/);
+});
+
+test('launcher check and describe work through a migrated-home directory junction',t=>{
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'xinji-junction-'));
+  const link=path.join(tmp,'old-home');
+  t.after(()=>{fs.unlinkSync(link);fs.rmdirSync(tmp);});
+  fs.symlinkSync(path.dirname(fileURLToPath(new URL('../bridge/xinji-engine.mjs',import.meta.url))),link,
+    process.platform==='win32'?'junction':'dir');
+  for(const flag of ['--check','--describe']){
+    const child=spawnSync(process.execPath,[path.join(link,'xinji-engine.mjs'),flag],{encoding:'utf8',windowsHide:true,timeout:15000});
+    assert.equal(child.status,0,child.stderr);
+    const result=JSON.parse(child.stdout);assert.equal(result.engine,'xinji');
+    if(flag==='--check')assert.equal(result.ok,true);
+  }
 });
 
 test('meme library remains available without the automatic slang learner',async t=>{

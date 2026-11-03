@@ -12,7 +12,10 @@ export function inspectRuntime(directory = path.dirname(fileURLToPath(import.met
     note: '递归检查桥接与三个 MCP 的字面量导入；--dependencies 另检查 npm 包解析。网络、账号、DSH 与模型能力需单独验收。'};
 }
 
-const direct = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// Migrated homes can reach the same entry through a junction. Node resolves the
+// module URL to the real path while argv retains the launcher's original path.
+const direct = process.argv[1] && fs.existsSync(process.argv[1])
+  && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
 if (direct) {
   if (process.argv.includes('--describe')) console.log(JSON.stringify(XINJI_IDENTITY, null, 2));
   else if (process.argv.includes('--check')) {
