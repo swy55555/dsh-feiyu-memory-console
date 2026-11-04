@@ -2167,6 +2167,7 @@ pre,.code-area { background:var(--surface-sunken);border-color:var(--border);fon
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="markRead"> <span><b>qq_mark_read</b><span class="meta">标记当前未读为已读（看过但决定不回复）</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="memory"> <span><b>qq_memory_append / qq_memory_query</b><span class="meta">轻量记忆：话题/想说的话/群友印象</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="longMemory"> <span><b>长期记忆检索</b><span class="meta">查询当前聊天的长期记忆；独立于轻量记忆和扩展工具。更改后重启 DSH 刷新工具清单。</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="explore"> <span><b>拾光聊天阅读工具</b><span class="meta">主人私聊可按话题读取 B 站可用字幕，也可读取公开 HTTPS 网页正文；受拾光预算与暂停约束，关掉后重启 DSH 刷新工具清单。</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="listStickers"> <span><b>qq_list_stickers</b><span class="meta">查看/搜索 QQ 收藏表情（含备注和本地笔记）</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getStickerImage"> <span><b>qq_get_sticker_image</b><span class="meta">看图理解没有备注的收藏表情</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendSticker"> <span><b>qq_send_sticker</b><span class="meta">发送收藏表情（一条消息只能一张，不能带文字）</span></span></label>
@@ -4616,7 +4617,44 @@ setInterval(() => { if (currentConsolePage !== 'usage') return; refreshUsage(); 
     feeling:'试验功能。需要空闲联想，复用其输出，不单独调用；只形成有期限的轻微主观感受。',
   };
   const entry=document.getElementById('setupOpen'),status=document.getElementById('setupGrowthStatus'),checked=document.getElementById('setupCheckedAt');
-  let data=null,inflight=null,dialog=null,step=0,draft=null,starter=null,busy=false;
+  let data=null,inflight=null,dialog=null,step=0,draft=null,starter=null,legacyCard=null,legacyPreview=null,legacySelected=null,busy=false;
+  const legacyKinds=['identity','background','style','interest'];
+  const legacyNames={identity:'旧身份与形象',background:'旧背景故事（并非真实经历）',style:'旧表达习惯',interest:'旧卡兴趣候选（不直接改变现在的喜好）'};
+  const selectedLegacyPreview=()=>legacyPreview?{...legacyPreview,...Object.fromEntries(legacyKinds.map(kind=>[kind,(legacyPreview[kind]||[]).filter((_,i)=>legacySelected?.[kind]?.[i]!==false)]))}:null;
+  function openRebaseDialog(){
+    let card='',preview=null,selected=null,values=null,revision=null,saving=false;
+    dialog=document.createElement('dialog');const rebaseDialog=dialog;dialog.className='setup-dialog';dialog.id='setupDialog';dialog.setAttribute('aria-labelledby','setupDialogTitle');
+    dialog.addEventListener('cancel',e=>{if(saving)e.preventDefault()});
+    dialog.addEventListener('close',()=>{rebaseDialog.remove();entry.focus()},{once:true});
+    document.body.append(dialog);dialog.showModal();
+    const draw=()=>{
+      dialog.innerHTML=`<div class="setup-heading"><span class="welcome-kicker">心迹 · 旧卡重建</span><button id="rebaseClose" class="icon-button" aria-label="关闭" type="button">×</button></div><h2 id="setupDialogTitle">用人设卡重建起点</h2><p class="setup-subtle">旧卡只提供可修改的过去设定，不作为真实聊天经历。生成预览会调用一次当前模型；保存前可以逐条取消。</p><label for="rebaseCard">旧人设卡</label><textarea id="rebaseCard" rows="7" maxlength="12000" placeholder="粘贴旧人设卡"></textarea><button id="rebasePreview" type="button">生成预览</button><div id="rebaseResult"></div><p id="rebaseError" class="setup-error" role="status"></p>`;
+      const get=id=>dialog.querySelector('#'+id);
+      get('rebaseClose').onclick=()=>dialog.close();get('rebaseCard').value=card;
+      get('rebaseCard').oninput=e=>{card=e.target.value;preview=null;selected=null;values=null;revision=null;get('rebaseResult').textContent='卡片已修改，请重新生成预览。'};
+      get('rebasePreview').onclick=async()=>{
+        get('rebasePreview').disabled=true;get('rebaseResult').textContent='正在提取旧卡依据…';
+        try{const r=await api('/api/onboarding/legacy-preview','POST',{card});if(!r.ok)throw Error(r.error||'提取失败');
+          preview=r.preview;values=r.starter;revision=r.rebaseRevision;selected=Object.fromEntries(legacyKinds.map(kind=>[kind,(preview[kind]||[]).map(()=>true)]));draw();
+        }catch(error){get('rebaseError').textContent=error.message;get('rebasePreview').disabled=false}
+      };
+      if(!preview)return;
+      get('rebaseResult').innerHTML=`<div class="setup-inset"><h3>六维新起点</h3><p class="setup-subtle">保存后六维的基态和当前值都会改成这里的数值。后续真实交流仍能让它继续变化。</p>${data.dimensions.map(d=>{const row=values.find(v=>v.key===d.key);return `<label class="setup-dim"><span>${esc(d.label)}<small class="setup-subtle" style="display:block">原基态 ${d.baseline} · 当前值 ${d.value} → 新值 <b data-rebase-new="${esc(d.key)}">${row.value}</b></small><small class="setup-subtle" style="display:block">原卡依据：${esc(preview.dimensions.find(v=>v.key===d.key)?.quote||'无，使用当前基态')}</small></span><input type="range" min="0" max="100" step="1" data-rebase-dim="${esc(d.key)}" value="${row.value}"><output>${row.value}</output></label>`}).join('')}</div><div class="setup-inset"><h3>旧卡参考</h3><p class="setup-subtle">身份、背景与风格是旧设定；兴趣只是候选，不会直接改变拾光选题。</p>${legacyKinds.map(kind=>`<h4>${legacyNames[kind]}</h4>${(preview[kind]||[]).map((row,i)=>`<label class="setup-option"><input type="checkbox" data-rebase-kind="${kind}" data-rebase-index="${i}" ${selected[kind][i]?'checked':''}><span>${esc(row.text)} <small>原文：${esc(row.quote)}</small></span></label>`).join('')||'<p class="setup-subtle">无条目</p>'}`).join('')}</div><div class="setup-inset"><h3>覆盖提醒</h3><p><strong>保存将覆盖原有六维基态、六维当前值、旧卡设定，以及 ${data.rebaseIdentityCount} 条身份／来历理解。</strong></p><p class="setup-subtle">聊天记录、记忆、兴趣、关系反馈、待整理原话会保留。服务器会在覆盖前保存两份原始状态的备份。</p><label class="setup-option"><input id="rebaseAcknowledge" type="checkbox"><span>我已核对预览，知道上述内容会被覆盖</span></label><label for="rebasePhrase">输入“覆盖旧基态与身份理解”确认</label><input id="rebasePhrase" type="text" autocomplete="off"><button id="rebaseSave" type="button">保存新起点</button></div>`;
+      get('rebaseResult').querySelectorAll('[data-rebase-dim]').forEach(input=>input.oninput=()=>{values.find(v=>v.key===input.dataset.rebaseDim).value=Number(input.value);input.nextElementSibling.textContent=input.value;get('rebaseResult').querySelector(`[data-rebase-new="${input.dataset.rebaseDim}"]`).textContent=input.value});
+      get('rebaseResult').querySelectorAll('[data-rebase-kind]').forEach(input=>input.onchange=()=>{selected[input.dataset.rebaseKind][Number(input.dataset.rebaseIndex)]=input.checked});
+      get('rebaseSave').onclick=async()=>{
+        if(!get('rebaseAcknowledge').checked||get('rebasePhrase').value.trim()!=='覆盖旧基态与身份理解'){get('rebaseError').textContent='请先勾选提醒，并输入完整确认文字。';return}
+        saving=true;get('rebaseSave').disabled=true;get('rebaseClose').disabled=true;get('rebaseError').textContent='';
+        try{const chosen={...preview,...Object.fromEntries(legacyKinds.map(kind=>[kind,preview[kind].filter((_,i)=>selected[kind][i])]))};
+          const r=await api('/api/onboarding/legacy-rebase','POST',{card,preview:chosen,starter:values,rebaseRevision:revision,confirmation:'覆盖旧基态与身份理解'});
+          if(!r.ok)throw Error(r.error||'保存失败');
+          dialog.innerHTML=`<h2 id="setupDialogTitle">新起点已保存</h2><p>六维与旧卡参考已更新；原有聊天、记忆和兴趣保留。</p><p class="setup-subtle">备份编号：${esc(r.backupId)}</p><button id="rebaseDone" type="button">完成</button>`;
+          get('rebaseDone').onclick=()=>dialog.close();get('rebaseDone').focus();await inspect().catch(()=>{});
+        }catch(error){get('rebaseError').textContent=error.message;get('rebaseSave').disabled=false;get('rebaseClose').disabled=false}
+        finally{saving=false}
+      };
+    };draw();
+  }
   async function inspect() {
     if(inflight)return inflight;
     inflight=(async()=>{
@@ -4643,36 +4681,50 @@ setInterval(() => { if (currentConsolePage !== 'usage') return; refreshUsage(); 
       byId('setupRecheck').onclick=async()=>{byId('setupRecheck').disabled=true;try{await inspect();render()}catch(e){byId('setupError').textContent=e.message;byId('setupRecheck').disabled=false}};
       linkActions();
     }else if(step===1){
-      body.innerHTML=`<p class="setup-subtle">先沿用已保存的开关。建议组合会开启记忆、事件理解和自我成长；试验功能由你选择。已有记忆和自然表达规则会保留。</p><button type="button" id="setupRecommended">采用建议组合</button><div class="setup-options" style="margin-top:16px">${Object.keys(labels).map(key=>`<label class="setup-option"><input id="setupFeature-${key}" type="checkbox" ${draft[key]?'checked':''}><span><strong>${labels[key]}</strong><small>${descriptions[key]}</small></span></label>`).join('')}</div><div class="setup-inset" id="setupStarter"></div><p class="setup-subtle">费用取决于模型、聊天长度和处理批次；这里不承诺固定金额。查看可塑性记忆的“花费”了解实际分项。</p>`;
+      body.innerHTML=`<p class="setup-subtle">先沿用已保存的开关。建议组合会开启记忆、事件理解和自我成长；试验功能由你选择。已有记忆和自然表达规则会保留。</p><div class="setup-inset" id="setupStarter"></div><button type="button" id="setupRecommended">采用建议组合</button><div class="setup-options" style="margin-top:16px">${Object.keys(labels).map(key=>`<label class="setup-option"><input id="setupFeature-${key}" type="checkbox" ${draft[key]?'checked':''}><span><strong>${labels[key]}</strong><small>${descriptions[key]}</small></span></label>`).join('')}</div><p class="setup-subtle">费用取决于模型、聊天长度和处理批次；这里不承诺固定金额。查看可塑性记忆的“花费”了解实际分项。</p>`;
       for(const key of Object.keys(labels))byId('setupFeature-'+key).onchange=e=>{draft[key]=e.target.checked};
       byId('setupRecommended').onclick=()=>{draft={memory:true,continuity:true,self:true,learning:false,association:false,feeling:false};render()};
       const box=byId('setupStarter');
       if(!data.starterEligible){
-        box.innerHTML='<h3>保留已有性格与经历</h3><p>已存在性格或成长记录，向导不提供重置。需要修正时，前往成长页面调整。</p><a href="http://127.0.0.1:3080/dsh-feiyu-memory/#/persona" target="_blank" rel="noopener">查看六维与自我参考 ↗</a>';
+        box.innerHTML=`<h3>用旧人设卡重新建立起点</h3><p>已有用户可以先生成预览，逐条核对后再决定是否覆盖。保存会替换六维基态、当前值与身份／来历理解，并留下备份。</p><button type="button" id="setupRebaseOpen" ${data.rebaseAllowed?'':'disabled'}>预览旧卡并重建</button>${data.rebaseAllowed?'':'<p class="setup-subtle">需要先开启自我参考并允许主要使用者私聊。</p>'}`;
+        byId('setupRebaseOpen').onclick=()=>{dialog.close();openRebaseDialog()};
       }else{
-        box.innerHTML=`<h3>选择一个可修改的起点</h3><p class="setup-subtle">数值表示表达倾向，不是亲密程度。不预设共同经历、真实身体或固定背景；名字与称呼可以在聊天中自然说明。</p><label for="setupPreset">初始倾向</label> <select id="setupPreset"><option value="keep">沿用当前起点</option><option value="balanced">均衡</option><option value="warm">温暖</option><option value="playful">轻快</option><option value="custom">自行调整</option></select><div id="setupDimensions"></div>`;
+        box.innerHTML=`<h3>选择一个可修改的起点</h3><p class="setup-subtle">数值表示表达倾向，不是亲密程度。名字与称呼可以在聊天中自然说明。</p><label for="setupPreset">初始倾向</label> <select id="setupPreset"><option value="keep">沿用当前起点</option><option value="balanced">均衡</option><option value="warm">温暖</option><option value="playful">轻快</option><option value="custom">自行调整</option></select><div id="setupDimensions"></div><div class="setup-inset"><h3>从旧人设卡建立起点</h3><p class="setup-subtle">粘贴旧卡后生成预览，会调用当前模型一次。背景仅是旧故事，不是已发生的经历；旧兴趣只作为候选，不直接改变探索选题。</p><textarea id="setupLegacyCard" rows="6" maxlength="12000" placeholder="粘贴旧人设卡"></textarea><button type="button" id="setupLegacyPreview">生成预览</button><div id="setupLegacyResult"></div></div>`;
         byId('setupPreset').value=starter?'custom':'keep';
-        const drawDimensions=()=>{byId('setupDimensions').innerHTML=starter?data.dimensions.map(d=>`<label class="setup-dim"><span>${esc(d.label)}<small class="setup-subtle" style="display:block">${esc(d.desc)}</small></span><input type="range" min="0" max="100" step="1" aria-label="${esc(d.label)}初始倾向" data-dim="${esc(d.key)}" value="${starter.find(r=>r.key===d.key).value}"><output>${starter.find(r=>r.key===d.key).value}</output></label>`).join(''):'';byId('setupDimensions').querySelectorAll('input').forEach(input=>input.oninput=()=>{starter.find(r=>r.key===input.dataset.dim).value=Number(input.value);input.nextElementSibling.textContent=input.value})};
+        const drawDimensions=()=>{byId('setupDimensions').innerHTML=starter?data.dimensions.map(d=>`<label class="setup-dim"><span>${esc(d.label)}<small class="setup-subtle" style="display:block">${esc(d.desc)}</small>${legacyPreview?`<small class="setup-subtle" style="display:block">旧卡依据：${esc(legacyPreview.dimensions.find(r=>r.key===d.key)?.quote||'无，沿用默认值')}</small>`:''}</span><input type="range" min="0" max="100" step="1" aria-label="${esc(d.label)}初始倾向" data-dim="${esc(d.key)}" value="${starter.find(r=>r.key===d.key).value}"><output>${starter.find(r=>r.key===d.key).value}</output></label>`).join(''):'';byId('setupDimensions').querySelectorAll('input').forEach(input=>input.oninput=()=>{starter.find(r=>r.key===input.dataset.dim).value=Number(input.value);input.nextElementSibling.textContent=input.value})};
         byId('setupPreset').onchange=e=>{
           const presets={balanced:{warm:50,initiative:50,clingy:40,stability:60,playful:50,proud:35},warm:{warm:65,initiative:50,clingy:45,stability:60,playful:50,proud:30},playful:{warm:55,initiative:60,clingy:40,stability:55,playful:65,proud:35}};
           starter=e.target.value==='keep'?null:data.dimensions.map(d=>({key:d.key,value:presets[e.target.value]?.[d.key]??d.value}));drawDimensions();
         };drawDimensions();
+        byId('setupLegacyCard').value=legacyCard||'';
+        byId('setupLegacyCard').oninput=e=>{legacyCard=e.target.value;legacyPreview=null;legacySelected=null;starter=null;byId('setupPreset').value='keep';byId('setupDimensions').innerHTML='';byId('setupLegacyResult').textContent='卡片已修改，请重新生成预览。'};
+        byId('setupLegacyResult').innerHTML=legacyPreview?'<p>逐条核对并取消不想保留的旧设定；这些内容不是已证实的记忆。</p>'+legacyKinds.map(kind=>`<h4>${legacyNames[kind]}</h4>${(legacyPreview[kind]||[]).map((row,index)=>`<label class="setup-option"><input type="checkbox" ${legacySelected?.[kind]?.[index]===false?'':'checked'} data-legacy-kind="${kind}" data-legacy-index="${index}"><span>${esc(row.text)} <small>依据：${esc(row.quote)}</small></span></label>`).join('')||'<p class="setup-subtle">未提取到条目</p>'}`).join(''):'';
+        byId('setupLegacyResult').querySelectorAll('[data-legacy-kind]').forEach(input=>input.onchange=()=>{legacySelected[input.dataset.legacyKind][Number(input.dataset.legacyIndex)]=input.checked});
+        byId('setupLegacyPreview').onclick=async()=>{
+          const button=byId('setupLegacyPreview');button.disabled=true;byId('setupLegacyResult').textContent='正在提取…';
+          try{
+            const r=await api('/api/onboarding/legacy-preview','POST',{card:legacyCard});
+            if(!r.ok)throw Error(r.error||'提取失败');
+            legacyPreview=r.preview;legacySelected=Object.fromEntries(legacyKinds.map(kind=>[kind,(r.preview[kind]||[]).map(()=>true)]));starter=r.starter;draft.self=true;draft.continuity=true;render();
+          }catch(error){byId('setupLegacyResult').textContent=error.message;button.disabled=false}
+        };
       }
     }else{
       body.innerHTML=`<p>请核对这次选择。保存只更新以下配置，重启心迹后生效。</p>${Object.keys(labels).map(key=>`<div class="setup-check"><strong>${labels[key]}</strong><p>当前运行：${data.activeFeatures[key]?'开启':'关闭'} → 本次保存：${draft[key]?'开启':'关闭'}</p></div>`).join('')}<div class="setup-inset"><h3>${starter?'新的初始倾向':'沿用已有起点'}</h3><p>${starter?starter.map(r=>esc(data.dimensions.find(d=>d.key===r.key).label)+' '+r.value).join(' · '):'不改动已有性格。'}</p><p class="setup-subtle">自我参考来自后续真实交流；长期六维变化需要至少三个日期的独立经历支持，并受七天变化间隔与边界限制。聊天少时成长慢是正常的，不需要编造经历补齐。</p><p class="setup-subtle">不会导入作者或其他用户的聊天，也不会自动放开白名单、改变模型和自然表达指令。</p></div>`;
+      if(legacyPreview){const chosen=selectedLegacyPreview();body.insertAdjacentHTML('beforeend',`<div class="setup-inset"><h3>旧卡设定参考</h3><p class="setup-subtle">背景不是已证实的经历；兴趣只是旧卡候选，不直接改变拾光选题。</p>${legacyKinds.map(kind=>`<h4>${legacyNames[kind]}</h4>${chosen[kind].map(row=>`<p>${esc(row.text)} <small>原文：${esc(row.quote)}</small></p>`).join('')||'<p class="setup-subtle">未选择</p>'}`).join('')}</div>`)}
     }
     byId('setupDialogTitle').tabIndex=-1;byId('setupDialogTitle').focus();
   }
   async function next() {
     if(busy)return;
     if(step===1){
-      const message=(draft.self||draft.learning)&&!draft.continuity?'自我成长和回应习惯需要勾选连续事件理解。':draft.feeling&&!draft.association?'联想感受需要勾选空闲联想。':starter&&!draft.self?'选择新的初始倾向需要勾选自我成长。':'';
+      const message=(draft.self||draft.learning)&&!draft.continuity?'自我成长和回应习惯需要勾选连续事件理解。':draft.feeling&&!draft.association?'联想感受需要勾选空闲联想。':starter&&!draft.self?'选择新的初始倾向需要勾选自我成长。':legacyPreview&&!starter?'导入旧卡需要核对六维起点。':'';
       if(message){byId('setupError').textContent=message;return}
     }
     if(step<2){step++;render();return}
     busy=true;byId('setupNext').disabled=true;byId('setupBack').disabled=true;byId('setupClose').disabled=true;
     try{
-      const result=await api('/api/onboarding','POST',{revision:data.revision,features:draft,starter});
+      const result=await api('/api/onboarding','POST',{revision:data.revision,features:draft,starter,...(legacyPreview?{legacyCard,legacyPreview:selectedLegacyPreview()}:{})});
       if(!result.ok)throw Error(result.error||'保存失败，请重新打开向导核对。');
       dialog.innerHTML=`<h2 id="setupDialogTitle">选择已保存</h2><p>${result.restartRequired?'新配置等待下次重启心迹后生效。':'配置与当前运行一致，无需重启。'}</p><p class="setup-subtle">重启请使用心迹启动器的“重启桥接”，或在运维页操作。重启后到本页检查实际状态，再在 QQ 私聊正常聊一句。</p><p class="setup-subtle">页面检查通过不等于模型已回复；真实聊天后再查看记忆处理记录。检查或保存本身不调用模型。</p><button id="setupDone" type="button">完成</button>`;
       byId('setupDone').onclick=()=>dialog.close();byId('setupDone').focus();await inspect().catch(()=>{});
@@ -4682,9 +4734,9 @@ setInterval(() => { if (currentConsolePage !== 'usage') return; refreshUsage(); 
   entry.onclick=async()=>{
     entry.disabled=true;
     try{
-      await inspect();draft={...data.features};starter=data.starterEligible&&data.savedStarter?structuredClone(data.savedStarter):null;step=0;
-      dialog=document.createElement('dialog');dialog.className='setup-dialog';dialog.id='setupDialog';dialog.setAttribute('aria-labelledby','setupDialogTitle');
-      dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault()});dialog.addEventListener('close',()=>{dialog.remove();entry.focus()},{once:true});
+      await inspect();draft={...data.features};starter=data.starterEligible&&data.savedStarter?structuredClone(data.savedStarter):null;legacyCard=null;legacyPreview=null;legacySelected=null;step=0;
+      dialog=document.createElement('dialog');const setupDialog=dialog;dialog.className='setup-dialog';dialog.id='setupDialog';dialog.setAttribute('aria-labelledby','setupDialogTitle');
+      dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault()});dialog.addEventListener('close',()=>{setupDialog.remove();entry.focus()},{once:true});
       document.body.append(dialog);dialog.showModal();render();
     }catch{}finally{entry.disabled=false}
   };

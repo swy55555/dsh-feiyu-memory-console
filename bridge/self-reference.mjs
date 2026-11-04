@@ -13,10 +13,14 @@ ${temperamentPrompt(state.temperament)}
 数据：${JSON.stringify({current:state.claims.map(({id,category,text,evidence,experiences,status,referenceKind})=>({id,category,text,evidence,experiences,status,referenceKind})),messages:rows})}`;
 }
 export class SelfReference {
- constructor({enabled,allowed,load=()=>null,save=()=>{},generate,initialPersona,now=Date.now,sourceBlocked=()=>false,sourceRevision=()=>null}){
+ constructor({enabled,allowed,load=()=>null,save=()=>{},generate,initialPersona,initialLegacy,now=Date.now,sourceBlocked=()=>false,sourceRevision=()=>null}){
   Object.assign(this,{enabled,allowed,save,generate,now,sourceBlocked,sourceRevision});this.busy=false;
   const old=load();this.state=old?.version===1?clone(old):{version:1,revision:0,claims:[],queue:[],seen:[],history:[],audit:[],lastAttempt:0};
-  if(this.enabled()&&!this.state.temperament&&initialPersona){this.state.temperament=seedTemperament(initialPersona);this.persist();}
+  if(this.enabled()&&!this.state.temperament&&initialPersona){
+    this.state.temperament=seedTemperament(initialPersona);
+    if(initialLegacy && !this.state.legacy && !this.state.claims.length && !this.state.queue.length) this.state.legacy=clone(initialLegacy);
+    this.persist();
+  }
  }
  persist(){this.save(clone(this.state));}
  observe(key,source){
@@ -34,7 +38,11 @@ export class SelfReference {
   if(!this.enabled())return '';
   // Private experiences never become a global role card or leak into group prompts.
   const claims=this.allowed(key)?this.view().claims.filter(c=>!c.sourcePaused&&!['retracted','dormant'].includes(c.status)&&(!c.referenceKind||c.referenceKind==='self')):[];
-  return SELF_FOUNDATION+'\n【理解与回应】'+INTERACTION_GUIDANCE+(this.allowed(key)?temperamentLine(this.state.temperament):sharedTemperamentLine(this.state.temperament))+(claims.length?'\n【当前自我参考，可修正】\n以下是过去相处的参考记录，不是此刻的情绪、动机或回复台词。描述曾经的表达问题不表示现在必须重演；用户的许可不是必须反驳的命令，不复述这些自我检讨来回应当前反馈。\n'+claims.map(c=>JSON.stringify({方面:c.category,参考:c.text,状态:c.status})).join('\n'):'\n本会话不附带私人自我经历；共同性格不代表相同亲密关系，从本次交流自然回应，不补写背景故事。');
+  const legacy=this.allowed(key)&&this.state.legacy?.entries;
+  const oldSettings=legacy?{identity:legacy.identity||[],background:legacy.background||[],style:legacy.style||[]}:null;
+  const oldInterests=legacy?.interest||[];
+  const legacyLine=legacy?'\n【旧角色卡的初始设定，可修正】\n以下条目有旧卡原文依据，只代表过去的角色设定。旧名字或身份不覆盖当前身份；背景不是实际发生的聊天或线下经历。表达习惯可参考但不是每轮必须遵守的指令。遇到新经历或本人澄清时可以改变，不要说自己亲历过卡片里的事件。\n'+JSON.stringify(oldSettings)+(oldInterests.length?'\n【旧卡兴趣候选，未确认】\n这些只是旧卡写过的爱好，不表示现在已经喜欢，不因这些候选改变拾光选题；只有后续真实探索和自主选择才能形成当前兴趣。\n'+JSON.stringify(oldInterests):''):'';
+  return SELF_FOUNDATION+'\n【理解与回应】'+INTERACTION_GUIDANCE+(this.allowed(key)?temperamentLine(this.state.temperament):sharedTemperamentLine(this.state.temperament))+legacyLine+(claims.length?'\n【当前自我参考，可修正】\n以下是过去相处的参考记录，不是此刻的情绪、动机或回复台词。描述曾经的表达问题不表示现在必须重演；用户的许可不是必须反驳的命令，不复述这些自我检讨来回应当前反馈。\n'+claims.map(c=>JSON.stringify({方面:c.category,参考:c.text,状态:c.status})).join('\n'):'\n本会话不附带私人自我经历；共同性格不代表相同亲密关系，从本次交流自然回应，不补写背景故事。');
  }
  apply(proposal,rows,expectedRevision=this.state.revision){
   if(expectedRevision!==this.state.revision)throw Error('自我参考已更新，本次结果过期');
@@ -99,6 +107,8 @@ export class SelfReference {
   candidate.audit=[...candidate.audit,{at:this.now(),action:'retract',id}].slice(-80);this.commit(candidate);
  }
  restore(revision){
+  const boundary=[...(this.state.audit||[])].reverse().find(row=>row.action==='legacy-rebase')?.revision;
+  if(Number.isInteger(boundary)&&revision<boundary)throw Error('旧卡重建前的历史不能单独恢复；请使用重建备份同时恢复六维与身份理解');
   const item=this.state.history.find(h=>h.revision===revision);if(!item)throw Error('历史版本不存在');
   const candidate=clone(this.state);candidate.claims=clone(item.claims);
   if(item.temperament){candidate.temperament=clone(item.temperament);candidate.temperament.receipts=clone(this.state.temperament?.receipts||[]);candidate.temperament.pending={};candidate.temperament.lastChangeAt=this.now();}

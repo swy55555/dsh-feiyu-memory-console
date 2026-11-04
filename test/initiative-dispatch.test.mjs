@@ -1,7 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {computeInitiatives} from '../bridge/initiative.mjs';
+import {computeInitiatives,contactDraftPrompt} from '../bridge/initiative.mjs';
+
+test('contact draft sees the reply and previous opening before choosing a new topic',()=>{
+ const prompt=contactDraftPrompt('有一件没放下的事（找个新爱好）',[
+  {isSelf:true,text:'老大，我想找个新爱好，从哪开始好？'},
+  {isSelf:false,text:'我喜欢搞笑视频和游戏视频，你要不要试试？'},
+ ],'老大，我想找个新爱好，从哪开始好？');
+ assert.match(prompt,/搞笑视频和游戏视频/);
+ assert.match(prompt,/上次主动开口：老大，我想找个新爱好/);
+ assert.match(prompt,/老大已经给了建议/);
+ assert.match(prompt,/SKIP/);
+});
 
 test('live intent selects a runnable contact before an unhandled revisit and later allows exploration',()=>{
  const now=Date.parse('2026-11-03T04:00:00Z');

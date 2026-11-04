@@ -31,7 +31,13 @@ export function reserveAppraisal(file, maxPerDay = null, now = Date.now()) {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file + ".stage", JSON.stringify(state) + "\n");
-    fs.renameSync(file + ".stage", file);
+    for (let attempt = 0; ; attempt++) {
+      try { fs.renameSync(file + ".stage", file); break; }
+      catch (error) {
+        if (process.platform !== "win32" || !["EPERM","EBUSY"].includes(error.code) || attempt >= 3) throw error;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, [10,25,50][attempt]);
+      }
+    }
   } catch {
     return maximum === null
       ? { ok: true, maximum: null, count: null, counterAvailable: false }

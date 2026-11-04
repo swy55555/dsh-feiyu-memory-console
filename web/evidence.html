@@ -103,6 +103,12 @@
       <section class="block" id="selfBlock"><h2>自我记忆<span class="note">fact / impression</span></h2><div class="loading">读取中…</div></section>
     </div>
     <aside>
+      <section class="block" id="biliAccount">
+        <h2>拾光 · B 站账号</h2><p id="biliState" aria-live="polite">正在核对账号…</p>
+        <button id="biliCheck">检查状态</button> <button id="biliStart">扫码登录 / 重新登录</button>
+        <button id="biliCancel" hidden>取消扫码</button>
+        <p><img id="biliQr" hidden width="210" height="210" alt="请用崽崽的哔哩哔哩账号扫码"></p>
+      </section>
       <section class="block">
         <h2>后台判断<span class="note">原因优先</span></h2>
         <div id="runBody"><div class="loading">读取中…</div></div>
@@ -171,6 +177,7 @@ function renderTaste(taste){
     return `<div class="item">
       <div class="head"><span class="name">${esc(t.topic)}</span><span class="meta">${status} · ${Number(t.strength).toFixed(2)}</span><span class="meta">· ${urls.size} 条独立来源</span></div>
       ${ev.excerpt ? `<div class="quote">“${esc(ev.excerpt).slice(0, 140)}”</div>` : ''}
+      ${ev.source==='personal-review'&&ev.reason ? `<div class="field"><span>自己留意的原因</span><span>${esc(ev.reason)}</span></div>` : ''}
       <details><summary>来源</summary>
         <div class="field"><span>类型</span><span>${esc(ev.source || t.source || '未知')}</span></div>
         <div class="field"><span>时间</span><span>${fmtTime(ev.at || t.lastSeenAt)}</span></div>
@@ -182,11 +189,12 @@ function renderTaste(taste){
 
 function renderSelf(self, status){
   const node = document.getElementById('selfBlock');
-  if(!self?.ok){ node.innerHTML = `<h2>自我记忆</h2><div class="err">${esc(self?.error || '读取失败')}</div>`; return; }
+  const scopeNote='<p class="note">这里收录拾光成功读取、带来源摘录的内容。聊天里说“想去看”或只看搜索摘要，不算已读资料。</p>';
+  if(!self?.ok){ node.innerHTML = `<h2>自我记忆</h2>${scopeNote}<div class="err">${esc(self?.error || '读取失败')}</div>`; return; }
   const items = self.data?.items || [];
   const head = status?.ok ? `<span class="note">${status.data.migrated}/${status.data.total} 已入向量库</span>` : '';
-  if(!items.length){ node.innerHTML = `<h2>自我记忆${head}</h2><div class="empty">还没有自我记忆。</div>`; return; }
-  node.innerHTML = `<h2>自我记忆${head}</h2>` + items.map((m) => {
+  if(!items.length){ node.innerHTML = `<h2>自我记忆${head}</h2>${scopeNote}<div class="empty">还没有带来源的拾光自我记忆。</div>`; return; }
+  node.innerHTML = `<h2>自我记忆${head}</h2>${scopeNote}` + items.map((m) => {
     const kind = m.kind === 'fact' ? 'fact' : 'impression';
     const hasSourceInfo = Boolean(m.sourceUrl || m.excerpt);
     const src = m.verified === 'verbatim' ? '来源逐字'
@@ -214,6 +222,8 @@ function reasonText(reason){
     'not-idle':'还没到空闲门槛', 'goals-low':'驱力权重不够', 'busy':'正在忙别的任务',
     'disabled':'功能已关闭', 'schedule-off':'定时生成关闭', 'already-running':'已在运行',
     'ok':'可以运行', 'not-due':'还没到生成条件',
+    'no-results':'搜索没有合适结果', 'no-eligible-results':'结果未通过内容筛选',
+    'only-teaching-results':'结果未通过内容筛选', 'no-readable-content':'候选视频没有可读字幕',
   })[reason] || reason || '未知';
 }
 
@@ -223,9 +233,13 @@ function renderRun(payload){
   const rhy = payload.rhythm?.ok ? payload.rhythm.data : null;
   document.getElementById('runBody').innerHTML = `
     <div class="run"><h3>探索 <span class="tag">${ex?.enabled ? '启用' : '关闭'}</span></h3>
+      ${ex?.shares?.enabled?`<div class="kv"><span>主人分享 · 最近记录</span><b>待看 ${Number(ex.shares.pending)||0} 条 · 已读字幕 ${Number(ex.shares.read)||0} 条</b></div>`:''}
       <div class="kv"><span>最近判定</span><b>${esc(reasonText(ex?.decision?.reason))}</b></div>
-      <div class="kv"><span>今日</span><b>${ex?.budget?.runsToday ?? 0} 次 · ${Number(ex?.budget?.costToday ?? 0).toFixed(4)} 元</b></div>
+      <div class="kv"><span>今日探索尝试</span><b>${ex?.budget?.runsToday ?? 0} 次 · 模型费用 ${Number(ex?.budget?.costToday ?? 0).toFixed(4)} 元</b></div>
       <div class="kv"><span>上次</span><b>${esc(ex?.last?.ok ? (ex.last.topic || '成功') : reasonText(ex?.last?.reason) || '暂无')}</b></div>
+      ${ex?.last?.reflection?`<div class="kv"><span>字幕初判</span><b>${esc(ex.last.reflection.before || '当时没有形成判断')}</b></div>
+      <div class="kv"><span>${esc(({frames:'画面观察',comments:'评论原话',danmaku:'弹幕原话'})[ex.last.reflection.kind])}</span><b>${esc(ex.last.reflection.evidence)}</b></div>
+      <div class="kv"><span>${esc(({noticed:'新留意的细节',question:'仍想弄清的问题'})[ex.last.reflection.outcome] || '再看后的理解')}</span><b>${esc(ex.last.reflection.after)}</b></div>`:''}
     </div>
     <div class="run"><h3>叙事 <span class="tag">${nar?.enabled ? '注入中' : '关闭'}</span></h3>
       <div class="kv"><span>版本</span><b>${esc(String(nar?.current?.id || '无').slice(0, 8))} · ${(nar?.current?.text || '').length} 字</b></div>
@@ -335,6 +349,31 @@ async function load(){
     }
   }
 }
+const accountState=document.getElementById('biliState'),qr=document.getElementById('biliQr');
+const startLogin=document.getElementById('biliStart'),checkLogin=document.getElementById('biliCheck'),cancelLogin=document.getElementById('biliCancel');
+let sessionId='',timer,version=0;
+function clearQr(){clearTimeout(timer);sessionId='';qr.hidden=true;qr.removeAttribute('src');cancelLogin.hidden=true;startLogin.disabled=false;checkLogin.disabled=false;}
+async function account(op,id){
+ const r=await fetch('./api/shiguang/account',{method:'POST',headers:{'content-type':'application/json','x-feiyu-console':'1'},body:JSON.stringify({op,id}),cache:'no-store'});
+ const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'账号服务暂不可用');return d;
+}
+async function updateLogin(op){
+ const rev=++version;startLogin.disabled=true;checkLogin.disabled=true;
+ try{
+  const d=await account(op,sessionId);if(rev!==version)return;
+  if(d.status==='waiting'||d.status==='scanned'){
+   if(d.qr){qr.src=d.qr;qr.hidden=false;sessionId=d.id;cancelLogin.hidden=false;}
+   accountState.textContent=d.status==='scanned'?'已扫码，请在手机上确认。':'请用拾光专用的 B 站账号扫描二维码。';
+   timer=setTimeout(()=>updateLogin('poll'),2500);return;
+  }
+  clearQr();
+  accountState.textContent=d.status==='signed-in'?'已登录 · '+d.name+'（UID '+d.uid+'）':d.status==='signed-out'?'未登录或登录已过期，请重新扫码。':d.status==='expired'?'二维码已失效，请重新获取。':'扫码已取消。';
+ }catch(e){if(rev===version){clearQr();accountState.textContent=e.message;}}
+}
+startLogin.onclick=()=>updateLogin('start');checkLogin.onclick=()=>updateLogin('status');
+cancelLogin.onclick=()=>{clearTimeout(timer);updateLogin('cancel');};
+window.addEventListener('pagehide',()=>{version++;clearQr();});
+updateLogin('status');
 document.getElementById('refresh').addEventListener('click', load);
 document.getElementById('memoryChip').addEventListener('click', (event) => {
   event.preventDefault();

@@ -17,6 +17,7 @@ export function emptyTaste() {
 
 export function normalizeTaste(raw) {
   const out = emptyTaste();
+  if(Array.isArray(raw?.reviewedBvids))out.reviewedBvids=raw.reviewedBvids.slice(0,4096);
   out._evidenceCursor=raw?._evidenceCursor||0;
   const list = Array.isArray(raw?.topics) ? raw.topics : [];
   for (const row of list) {
@@ -27,6 +28,7 @@ export function normalizeTaste(raw) {
       topic,
       sourceState:row.sourceState||'current',
       strength: clamp(row.strength ?? 0.2, 0, 1),
+      ...(row.reviewCredits ? {reviewCredits:clamp(row.reviewCredits,0,3)} : {}),
       evidence: Array.isArray(row.evidence) ? row.evidence.filter((e) => e && e.excerpt).slice(-TASTE_LIMITS.maxEvidence) : [],
       createdAt: Number(row.createdAt) || Date.now(),
       updatedAt: Number(row.updatedAt) || Date.now(),
@@ -38,15 +40,16 @@ export function normalizeTaste(raw) {
   return out;
 }
 
+function currentStrength(row,now){
+  const days=Math.max(0,(now-row.lastSeenAt)/86400000);
+  return clamp(.05+(row.strength-.05)*.5**(days/TASTE_LIMITS.halfLifeDays),0,1);
+}
+
 export function tasteView(state, now = Date.now()) {
   const s = normalizeTaste(state);
   return s.topics
     .filter(t=>t.sourceState!=='invalid' && !t.evidence.some(e=>e.sourceState==='invalid'))
-    .map((t) => {
-      const days = Math.max(0, (now - t.lastSeenAt) / 86400000);
-      const keep = 0.5 ** (days / TASTE_LIMITS.halfLifeDays);
-      return { ...t, strength: clamp(0.05 + (t.strength - 0.05) * keep, 0, 1) };
-    })
+    .map(t=>({...t,strength:currentStrength(t,now)}))
     .sort((a, b) => b.strength - a.strength);
 }
 
@@ -107,15 +110,45 @@ export function resetTaste() {
   return emptyTaste();
 }
 
+// A shared video can add a weak signal, separately from independent exploration.
+export function recordPersonalReview(state,{review,bvid,author='',now=Date.now()}){
+  const s=normalizeTaste(state);
+  const skip=reason=>({state:s,ok:false,status:reason});
+  if(review?.decision!=='add'||!review.topic||!review.quote||!review.reason||!/^BV[a-zA-Z0-9]{10}$/.test(bvid))return skip('no-credit');
+  const url='https://www.bilibili.com/video/'+bvid;
+  const seen=s.reviewedBvids||[];
+  if(seen.includes(bvid)||s.topics.some(t=>t.evidence.some(e=>e.url===url)))return skip('repeat');
+  if(seen.length>=4096)return skip('review-limit');
+  let row=s.topics.find(t=>norm(t.topic)===norm(review.topic));
+  if(!row){
+    if(s.topics.length>=TASTE_LIMITS.maxTopics||s.topics.filter(t=>t.source==='personal-review').length>=3)return skip('provisional-limit');
+    row={id:review.topic,topic:review.topic,strength:.05,evidence:[],createdAt:now,lastSeenAt:now,source:'personal-review'};
+    s.topics.push(row);
+  }
+  if(row.sourceState==='invalid'||row.evidence.some(e=>e.sourceState==='invalid'))return skip('invalid-source');
+  if((row.reviewCredits||0)>=3)return skip('review-limit');
+  // A weak signal cannot cross the confirmed threshold or remove independent evidence.
+  const effective=currentStrength(row,now);
+  const ceiling=effective<.42?.419:1;
+  const next=Math.min(ceiling,Math.round((effective+.03)*1000)/1000);
+  if(next<=effective)return skip('review-limit');
+  if(row.evidence.length>=TASTE_LIMITS.maxEvidence)return skip('evidence-full');
+  row.strength=next;row.reviewCredits=(row.reviewCredits||0)+1;
+  row.evidence.push({url,author,excerpt:review.quote,at:now,source:'personal-review',reason:review.reason,
+    contract:externalEvidence({url,author,excerpt:review.quote,at:now})});
+  row.lastSeenAt=now;row.updatedAt=now;s.updatedAt=now;s.reviewedBvids=[...seen,bvid];
+  return {state:s,ok:true,status:'personal-credit',topic:row.topic};
+}
+
 // 探索写入：一次随机只算“暂定证据”；两条独立内容（不同视频/不同作者）才升到 0.42。
-export function recordExploration(state, { topic, evidence, now = Date.now() } = {}) {
+export function recordExploration(state, { topic, evidence, now = Date.now(), exact = false } = {}) {
   const s = normalizeTaste(state);
   const name = String(topic || '').trim().slice(0, 24);
   const excerpt = String(evidence?.excerpt || '').trim();
   const url = String(evidence?.url || '').trim();
   const author = String(evidence?.author || '').trim();
   if (!name || !excerpt) return { state: s, ok: false, reason: 'need-topic-and-evidence', status: 'none' };
-  let row = findTopic(s, name);
+  let row = exact ? s.topics.find(t=>norm(t.topic)===norm(name)) : findTopic(s, name);
   if (!row) {
     row = { id: name, topic: name, strength: 0.2, evidence: [], createdAt: now, updatedAt: now, lastSeenAt: now, source: 'bilibili' };
     s.topics.push(row);
@@ -126,8 +159,10 @@ export function recordExploration(state, { topic, evidence, now = Date.now() } =
   }
   const seenUrl = row.evidence.some((e) => url ? e.url === url : !e.url && e.excerpt === excerpt);
   if (seenUrl) return { state: s, ok: true, status: 'repeat', strength: row.strength };
-  const otherContent = row.evidence.some((e) => (url && e.url !== url) || (!url && e.excerpt !== excerpt));
-  const otherAuthor = author && row.evidence.some((e) => e.author && e.author !== author);
+  const independent=row.evidence.filter(e=>e.source!=='personal-review');
+  if(row.source==='personal-review')row.source='bilibili';
+  const otherContent = independent.some((e) => (url && e.url !== url) || (!url && e.excerpt !== excerpt));
+  const otherAuthor = author && independent.some((e) => e.author && e.author !== author);
   row.evidence = [...row.evidence, { url, excerpt: excerpt.slice(0, 300), at: now, author,contract:externalEvidence({url,author,excerpt,at:now}) }].slice(-TASTE_LIMITS.maxEvidence);
   row.updatedAt = now;
   row.lastSeenAt = now;

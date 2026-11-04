@@ -1,6 +1,6 @@
 # 回响／心迹技术手册
 
-适用版本：0.11.3。最后核对：2026-11-03。本文解释模块、状态、联动与研究依据；操作见 [用户手册](../manual/USER_GUIDE.md)，部署见 [INSTALL](../INSTALL.md)。图是逻辑机制示意，不是逐函数调用图、心理测量模型或实际部署拓扑。
+适用版本：0.11.4。最后核对：2026-11-04。本文解释模块、状态、联动与研究依据；操作见 [用户手册](../manual/USER_GUIDE.md)，部署见 [INSTALL](../INSTALL.md)。图是逻辑机制示意，不是逐函数调用图、心理测量模型或实际部署拓扑。
 
 0.11.3 的证据契约、五模块读写/修正传播、检索预算与覆盖边界见 [统一证据与检索](evidence-memory.md)。原有架构图用于模块概览；具体通知顺序和时间字段以该补充说明为准。
 
@@ -25,9 +25,11 @@
 
 `web/evidence.html` 加载 evidence context 与 associations；`taste.mjs` 管理兴趣；`self-memory.mjs` 表达带出处的事实或印象；`self-migrate.mjs` 迁移符合条件的自我记忆；`source-validity.mjs`、`source-retention.mjs` 与数据库来源表检查有效性。
 
+主人私聊的 `qq_shiguang_explore` 经会话令牌、当前模式、主人身份及工具开关校验后，按模型选择的短话题调用 B 站拾光读取路径。`qq_shiguang_read_web` 复用这些权限与日次数、费用、暂停、并发边界，先用安全抓取检查 HTTPS、DNS、每次重定向、超时和体积，再抽取网页正文。模型只可返回连续原文引句；`parseImpressions` 核验引句确实存在后，才调用 `addSelfMemory` 保存来源。读取成功而无合格引句时，仅保存阅读记录，不生成自我记忆。普通网页阅读不写兴趣，也不消费或清除 B 站探索焦点。通用 `web_search` 只提供搜索结果标题与摘要；主人私聊的通用 `web_fetch` 已被工具守卫拦下，正文阅读走拾光。聊天自述保留在聊天与轻量话题中，不被提升为已验证外部经历。
+
 探索链由 `explore.mjs` 与桥接路由配合：选题、搜索、有限候选、读取内容、模型提炼、引用验证、有界写入。`explore-fetch.mjs` 限制 HTTPS 域名；Cookie 只发给准确匹配的 API 主机，字幕请求不带 Cookie，重定向不自动跟随；每次请求有超时和体积上限。
 
-选题优先来自 `taste.json` 中已有方向，否则从固定的广度种子池抽取；这使探索可重复审计，也意味着它不是开放网页代理。搜索、详情、WBI 播放信息及字幕经 B 站接口取得，桥接只读使用配置的 B 站凭证路径，不能把 `bili-duty` 的自动挑片统计当作拾光探索统计。只有读到足够字幕并通过原文引用验证，才写入 `explore.json`、`taste.json` 与 `self-memory.json`。这些文件各自原子替换，整体不具备跨文件事务。
+定时 B 站探索选题优先来自 `taste.json` 中已有方向，否则从固定的广度种子池抽取；主人私聊还可按需要读取一个公开 HTTPS 网页，但不执行任意网页操作或页面中的指令。搜索、详情、WBI 播放信息及字幕经 B 站接口取得，桥接只读使用配置的 B 站凭证路径，不能把 `bili-duty` 的自动挑片统计当作拾光探索统计。只有读到足够字幕并通过原文引用验证，才写入 `explore.json`、`taste.json` 与 `self-memory.json`。这些文件各自原子替换，整体不具备跨文件事务。
 
 主人私聊的 `withMemoryContext` 会为近期探索装配简短 `recentExplorePresence`；`memoryReferenceV2` 在 QQ 工具读取路径处理明确的浏览询问时使用 `recentExploreRecap`，从成功记录给出标题、主题、链接与有限的兴趣方向，并复核 owner、会话代次和来源状态。这是可供模型使用的参考，不是模型一定会表述正确的保证；`qq_vmem_search` 查询当前聊天长期记忆，不直接遍历私人探索 JSON。
 

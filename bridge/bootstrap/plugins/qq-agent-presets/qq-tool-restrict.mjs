@@ -102,7 +102,6 @@ const GROUP_EXTRA_TOOLS = new Set([
   'qq_vmem_add',
   'qq_vmem_search',
   'qq_pick_image',
-  'qq_bili_cover',
   // fishtalk：把群里读到的真人发言喂进语料（只写本地语料，不发东西出去）
   'fishtalk_feed',
 ])
@@ -360,23 +359,11 @@ const SAFE_PREFIXES = [
 
 // 无害模型侧工具：ask_user_question 用于把问题转给管理员/用户，
 // todo_write 仅维护任务列表。若后续 preset 不再挂载这些工具，保留无害。
-// 2026-10-25：放行「鱼的记忆」的 remember 与「刷B站」的工具（用户要求 QQ 里的她也能用这几个插件）。
-// 用户明确同意后，连"会真的往 B 站发东西"的写操作也放行（bili_reply / bili_send_message / bili_triple / bili_config）。
-// 仍然不放行：bili_login_start / bili_login_poll（换号扫码）、bili_setup（装 Python 环境）——这两个属于本机管理动作。
+// 独立 B 站工具停用；拾光通过桥接执行只读探索。
 const SAFE_EXACT = new Set([
   'ask_user_question',
   'todo_write',
   'remember',
-  'bili_status',
-  'bili_search',
-  'bili_subtitle',
-  'bili_comments',
-  'bili_scan',
-  'bili_whoami',
-  'bili_reply',
-  'bili_send_message',
-  'bili_triple',
-  'bili_config',
   // fishtalk：去 B 站分区自动学语料（走网络）/ 深度蒸馏要烧模型，按「B 站操作只在管理员私聊」的
   // 口径处理，只给管理员私聊和内部调度会话。
   'fishtalk_learn',
@@ -393,6 +380,8 @@ export function apply(ctx) {
   ctx.systemPrompt.context({name:'dsh-soul:memory',order:950,text:()=>''})
   ctx.systemPrompt.context({name:'qq-memory-routing',order:951,text:()=>
     '本 QQ 会话的长期记忆使用 qq_vmem_search；qq_memory_query 只查轻量话题/印象，近期聊天不是全库。等待或读取消息返回的 memoryReference 是当前消息的有限检索参考，当前原话优先。未查询、查询失败与无匹配必须区分；未匹配不证明记忆丢失，不声称翻遍全库。不调用 learning_search/learning_get/learning_propose；它们属于普通 DSH 的另一套记忆。'})
+  ctx.systemPrompt.context({name:'qq-shiguang-evidence',order:952,text:()=>
+    'web_search 只返回标题、网址与摘要，不能说已经翻阅文章、看过视频。主人私聊要读普通网页正文，用 qq_shiguang_read_web 留下拾光来源；按话题看 B 站用 qq_shiguang_explore 读取可用字幕。只有工具返回成功读取回执才能说读过，并区分是否保存了自我记忆。工具失败、没调用或只看到搜索摘要时，如实说仍未读到。'})
   // 1) 把已知危险全局工具从 schema 隐藏（restrict 只影响继承的全局层，
   //    不会误删 preset 自己注册的 scoped 工具）。
   // 逐个 restrict：当前 DSH 版本不存在的工具名会单独抛错并跳过，
@@ -436,7 +425,9 @@ export function apply(ctx) {
     //   ③ 其它（陌生人私聊、非白名单群）→ 只能聊天
     //      判断依据：DSH 会话 id → 桥接 state/sessions.json 的会话 key。
     //      ⚠️ exec.name 带命名空间前缀（mcp__snowluma__qq_send_message），比对要剥前缀。
+    if (/(?:^|__)bili_[a-z_]+$/.test(name) || bare === 'qq_bili_cover') return '独立 B 站工具已停用，请使用拾光';
     const sessionKey = sessionKeyOf(exec)
+    if(name==='mcp__web-search-safe__web_fetch'&&(!sessionKey||isOwnerKey(sessionKey)))return '主人私聊读网页正文请使用 qq_shiguang_read_web，让拾光保留来源；无法确认会话身份时禁止抓取网页'
     // 2026-11-01 自查后收紧：解析不出会话身份（sessions.json 过期/被换掉/DSH 换了 session id）时，
     // 以前会直接落到下面的 SAFE_PREFIXES，等于**给任何会话全开** QQ 工具；现在按最保守档 fail-closed。
     if (!sessionKey) {

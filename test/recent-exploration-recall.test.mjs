@@ -2,10 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {recentExploreRecap,recentExplorePresence} from '../bridge/explore.mjs';
+import {recentExploreRecap,recentExplorePresence,readExploreAudience} from '../bridge/explore.mjs';
 
 const now = Date.parse('2026-11-03T10:00:00Z');
 const url = (id) => `https://www.bilibili.com/video/${id}`;
+
+test('audience selection reaches beyond the prefix, keeps zero likes eligible and separates sampled speech',async()=>{
+ let seed=37;const random=()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)/2**32);
+ const replies=Array.from({length:20},(_,i)=>({rpid:i+1,like:i===19?2000:0,content:{message:'C'+i}}));
+ let hot=0,cold=0;for(let i=0;i<500;i++){
+  const a=await readExploreAudience('comments',{aid:'1'},async()=>({code:0,data:{replies}}),random);
+  assert.equal(new Set(a.texts).size,4);hot+=Number(a.texts.includes('C19'));cold+=Number(a.texts.includes('C0'));
+ }
+ assert.ok(cold>0&&hot>cold*2);
+ const xml='<i>'+Array.from({length:300},(_,i)=>`<d p="1">${i}</d>`).join('')+'</i>';
+ const dm=await readExploreAudience('danmaku',{cid:2},async(u,f)=>{assert.equal(f,'xml');return xml;},random);
+ assert.equal(dm.available,300);assert.equal(dm.texts.length,8);assert.ok(dm.texts.some(t=>Number(t)>100));
+ const state={runs:[run('x','露营',1,{audience:{...dm,noticed:1}})]};
+ assert.match(recentExploreRecap(state,'上次视频的弹幕说了什么？',{now}),/抽样原话/);
+ assert.doesNotMatch(recentExploreRecap(state,'上次视频的评论说了什么？',{now}),/抽样原话/);
+ assert.doesNotMatch(recentExploreRecap(state,'上次视频的弹幕说了什么？',{now,selfItems:[{sourceUrl:url('x'),sourceState:'invalid'}]}),/抽样原话/);
+ assert.match(recentExploreRecap({},'你能用拾光刷B站吗？',{now,exploreEnabled:false}),/已关闭/);
+});
 const run = (id, title, hoursAgo, more = {}) => ({
   at: now - hoursAgo * 3600000, ok: true, contentRead: true,
   topic: '菜市场', video: {bvid:id,title,url:url(id)}, ...more,
@@ -89,10 +107,12 @@ test('ongoing owner turn gets recent exploration despite exhausted chat-memory b
   assert.match(result.context,/真实浏览的页面/);
   assert.match(result.context,/地理冷知识/);
   assert.equal(result.messageId,'m7');
+  const capability=await vm.runInContext("memoryReferenceV2('private:123',st,[{seq:7,messageId:'cap',text:'你知道自己可以用拾光刷B站吗？'}],'token','getUnread')",context);
+  assert.equal(capability.status,'matched');assert.match(capability.context,/实际读取回执/);
   context.followupMemory.get=async()=>({status:'empty',context:''});
   const ordinary=await vm.runInContext("memoryReferenceV2('private:123',st,[{seq:7,messageId:'m8',text:'你好'}],'token','getUnread')",context);
   assert.equal(ordinary.status,'empty');
-  assert.match(ordinary.selfActivity.context,/近期自己的探索/);
+  assert.equal(ordinary.selfActivity,undefined);
   context.socialV2.conversations.set('private:456',st);
   const other=await vm.runInContext("memoryReferenceV2('private:456',st,[{seq:7,messageId:'m9',text:'你好'}],'token','getUnread')",context);
   assert.equal(other.selfActivity,undefined);

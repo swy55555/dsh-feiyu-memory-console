@@ -16,6 +16,22 @@ export const INITIATIVE_DEFAULTS = Object.freeze({
   timezone: 'Asia/Shanghai',
 });
 
+export function contactDraftPrompt(reason, recentMessages = [], previousDraft = '') {
+  const recent = recentMessages.slice(-8).map(message => ({
+    谁: message?.isSelf ? '自己' : '老大',
+    说: String(message?.plain || message?.text || '').replace(/\s+/g, ' ').slice(0, 120),
+  })).filter(message => message.说);
+  return [
+    '【场景】普通 QQ 私聊。给老大发一条主动消息，不超过 30 字。',
+    '想联系他的缘由：' + String(reason || '想聊聊').slice(0, 100),
+    '最近的对话：' + JSON.stringify(recent),
+    '上次主动开口：' + String(previousDraft || '没有记录').slice(0, 100),
+    '先读懂老大的回答与当前进展。挂念只是一条旧线索，不能照着标题重复提问；老大已经给了建议，就顺着建议继续，或说自己下一步想试什么。不要把老大喜欢的事直接说成你自己的喜好。',
+    '这次确实有新话想说才发。没有可接的内容、只想到同一个问题时，只输出 SKIP。否则只输出发给老大的话，不加引号。',
+    '像平时说话，不要提熬夜、催睡，也不要写“记录/整理/草稿”。',
+  ].join('\n');
+}
+
 const toMinutes = (hhmm) => {
   const [h, m] = String(hhmm || '00:00').split(':').map(Number);
   return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
@@ -47,7 +63,7 @@ export function computeInitiatives({ goals = {}, concerns = [], now = Date.now()
   candidates.push({
     type: 'explore',
     score: Number(exploreScore.toFixed(2)),
-    blocked: !c.allowExplore ? 'disabled' : used >= Number(c.maxPerDay || 6) ? 'daily-budget' : quiet ? 'quiet-hours' : onCooldown('explore') ? 'cooldown' : '',
+    blocked: !c.allowExplore ? 'disabled' : (budget.exploreBlocked ?? (used >= Number(c.maxPerDay || 6))) ? 'daily-budget' : quiet ? 'quiet-hours' : onCooldown('explore') ? 'cooldown' : '',
   });
   // 主动联系：联结为主；P1 默认关闭。
   const contactScore = 0.8 * g('relatedness') + 0.2 * g('autonomy') + (Number(ownerIdleHours) >= Number(c.contactIdleHours || 12) ? 0.05 : 0);

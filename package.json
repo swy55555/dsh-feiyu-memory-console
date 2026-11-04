@@ -1,6 +1,6 @@
 {
   "name": "dsh-feiyu-memory-console",
-  "version": "0.11.3",
+  "version": "0.11.4",
   "private": false,
   "description": "回响：基于经历、可塑记忆与当前心绪的陪伴系统，保留 QQ 通信和二代仿真兼容能力。",
   "license": "MIT",

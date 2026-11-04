@@ -95,6 +95,6 @@ test('MCP upgrade is idempotent and preserves unrelated local paths',()=>{
  const canonical=fs.readFileSync(new URL('../bridge/mcp-snowluma-safe.js',import.meta.url),'utf8');
  const old=canonical.replace("qq_vmem_search: 'longMemory'","qq_vmem_search: 'extra'")+"\n// local media path must remain unchanged\n";
  const updated=upgradeMemorySearch(Buffer.from(old));assert.ok(updated.toString().endsWith('// local media path must remain unchanged\n'));
- assert.ok(updated.toString().includes("qq_vmem_search: 'longMemory'"));assert.deepEqual(upgradeMemorySearch(updated),updated);
+ assert.ok(updated.toString().includes("qq_vmem_search: 'longMemory'"));assert.ok(updated.toString().includes("qq_shiguang_explore: 'explore'"));assert.ok(updated.toString().includes("'qq_shiguang_explore'"));assert.ok(updated.toString().includes("qq_shiguang_read_web: 'explore'"));assert.ok(updated.toString().includes("'qq_shiguang_read_web'"));assert.deepEqual(upgradeMemorySearch(updated),updated);
  assert.throws(()=>upgradeMemorySearch(Buffer.from("server.tool(\n  'qq_vmem_search',\nmalformed")),/边界/);
 });

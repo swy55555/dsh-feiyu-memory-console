@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {validateLegacyStarter} from './legacy-starter.mjs';
 
 export const SETUP_FEATURES = Object.freeze({
   memory:['dailyMemory','enabled',true],
@@ -12,7 +13,7 @@ export const setupRevision = value => createHash('sha256').update(JSON.stringify
 export function setupFeatures(cfg) {
   return Object.fromEntries(Object.entries(SETUP_FEATURES).map(([key,[group,field,def]])=>[key,def ? cfg.socialV2?.[group]?.[field]!==false : cfg.socialV2?.[group]?.[field]===true]));
 }
-const hasSelfHistory = state => Boolean(state?.temperament || state?.revision || ['claims','queue','seen','history','audit'].some(k=>state?.[k]?.length));
+const hasSelfHistory = state => Boolean(state?.temperament || state?.legacy || state?.revision || ['claims','queue','seen','history','audit'].some(k=>state?.[k]?.length));
 export function canChooseStarter(origin,state) { return origin?.freshPersona===true&&!hasSelfHistory(state); }
 const personaSignature = p => setupRevision({spec:p.spec,baseline:p.baseline,current:p.current});
 
@@ -32,6 +33,10 @@ export function setupInitialPersona(persona,setup,state,origin) {
   return result;
 }
 
+export function setupInitialLegacy(setup,state,origin) {
+  return canChooseStarter(origin,state) ? setup?.legacy || null : null;
+}
+
 export function planSetup(file,body,{origin,state,persona,ownerAllowed,now=Date.now()}) {
   const fail=(message,statusCode=400)=>{throw Object.assign(new Error(message),{statusCode})};
   if(body.revision!==setupRevision(file))fail('设置已被其他页面更新，请重新打开向导核对。',409);
@@ -43,7 +48,15 @@ export function planSetup(file,body,{origin,state,persona,ownerAllowed,now=Date.
   const next=structuredClone(file);next.socialV2??={};
   for(const [key,[group,field]]of Object.entries(SETUP_FEATURES))next.socialV2[group]={...(next.socialV2[group]||{}),[field]:f[key]};
   const setup={...(next.xinjiSetup||{}),completedAt:now};
-  if(body.starter===null&&canChooseStarter(origin,state)){delete setup.starter;delete setup.starterBaseHash;}
+  if(body.legacyCard!==undefined){
+    if(!canChooseStarter(origin,state))fail('已有性格或经历，不能导入旧卡。',409);
+    if(!f.self)fail('导入旧卡需要开启自我成长。');
+    if(typeof body.legacyCard!=='string'||body.legacyCard.length<10||body.legacyCard.length>12000)fail('旧卡长度应为 10–12000 字。');
+    if(!Array.isArray(body.starter))fail('导入旧卡时需要核对六维起点。');
+    const parsed=validateLegacyStarter(body.legacyPreview,body.legacyCard,persona.spec.dimensions.map(d=>({key:d.key,label:d.label,value:persona.current[d.key]})));
+    setup.legacy=parsed.legacy;
+  }
+  if(body.starter===null&&canChooseStarter(origin,state)){delete setup.starter;delete setup.starterBaseHash;delete setup.legacy;}
   if(body.starter!==undefined&&body.starter!==null){
     if(!canChooseStarter(origin,state))fail('已有性格或经历，请在成长页面调整，向导不会重置。',409);
     if(!f.self)fail('选择初始倾向需要同时开启自我成长。');

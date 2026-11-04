@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const RUNTIME_VERSION = "0.11.3";
+export const RUNTIME_VERSION = "0.11.4";
 export const templates = {
   "runtime-inspection.mjs": "runtime-inspection.mjs",
   "memory-audit.mjs": "memory-audit.mjs",
@@ -29,6 +29,9 @@ export const templates = {
   "voice-core.js": "voice-core.js",
   "meme-play.js": "meme-play.js",
   "explore-fetch.mjs": "explore-fetch.mjs",
+  "owner-interest.mjs": "owner-interest.mjs",
+  "explore-frames.mjs": "explore-frames.mjs",
+  "shiguang-web.mjs": "shiguang-web.mjs",
   "memvec-auth.mjs": "memvec-auth.mjs",
   "reference-assembly.mjs": "reference-assembly.mjs",
   "context-efficiency.mjs": "context-efficiency.mjs",
@@ -53,6 +56,8 @@ export const templates = {
   "expression-teacher.mjs": "expression-teacher.mjs",
   "interaction-context.mjs": "interaction-context.mjs",
   "onboarding.mjs": "onboarding.mjs",
+  "legacy-starter.mjs": "legacy-starter.mjs",
+  "legacy-rebase.mjs": "legacy-rebase.mjs",
   "self-temperament.mjs": "self-temperament.mjs",
   "xinji-console.html": "xinji-console.html",
   "self-reference.mjs": "self-reference.mjs",
@@ -106,7 +111,7 @@ const sourceHash = (file) =>
 const knownAuxiliary = { "daily-memory.js": "a71448afb1c6d23cf938b18ed618dd89fc5e4f6f7344d565a35bf754b14c9d17" };
 const recognizedAuxiliary = (name, file) => knownAuxiliary[name] && sourceHash(file) === knownAuxiliary[name];
 const receiptFile = (root) => path.join(root, "state", "runtime-bundle.json");
-// Upgrade only the memory tool in an already receipt-verified MCP file. Keep
+// Upgrade only reviewed tool blocks in an already receipt-verified MCP file. Keep
 // local media/Python paths and other integrations byte-for-byte intact.
 export function upgradeMemorySearch(bytes) {
   const text=bytes.toString('utf8');
@@ -116,7 +121,21 @@ export function upgradeMemorySearch(bytes) {
   const replacement=canonical.match(section)?.[0];
   if(!replacement||!section.test(text)||!/^  qq_vmem_search: '(extra|longMemory)',\r?$/m.test(text))throw Error('长期记忆工具边界不匹配，未覆盖 MCP');
   const newline=text.includes('\r\n')?'\r\n':'\n';
-  return Buffer.from(text.replace(section,replacement.replace(/\r?\n/g,newline)).replace("qq_vmem_search: 'extra'","qq_vmem_search: 'longMemory'"));
+  let updated=text.replace(section,replacement.replace(/\r?\n/g,newline)).replace("qq_vmem_search: 'extra'","qq_vmem_search: 'longMemory'");
+  for(const name of ['qq_shiguang_explore','qq_shiguang_read_web']){
+    const toolSection=new RegExp("server\\.tool\\(\\r?\\n  '"+name+"',[\\s\\S]*?(?=server\\.tool\\(\\r?\\n)");
+    const toolReplacement=canonical.match(toolSection)?.[0];
+    if(!toolReplacement)throw Error(`拾光工具 ${name} 缺少规范实现`);
+    const marker=/server\.tool\(\r?\n  'qq_send_burst',/;
+    if(!marker.test(updated)||!updated.includes('const flag = TOOL_CONFIG_FLAGS[name];'))throw Error('拾光工具插入边界不匹配，未覆盖 MCP');
+    updated=toolSection.test(updated)?updated.replace(toolSection,toolReplacement.replace(/\r?\n/g,newline)):updated.replace(marker,toolReplacement.replace(/\r?\n/g,newline)+`server.tool(${newline}  'qq_send_burst',`);
+    if(!updated.includes(`${name}: 'explore',`))updated=updated.replace("qq_vmem_search: 'longMemory',","qq_vmem_search: 'longMemory',"+newline+`  ${name}: 'explore',`);
+  }
+  const oldGuard=/if\(name==='qq_shiguang_explore'&&cfg\.socialV2\?\.explore\?\.ownerInfluence!==true\)/;
+  const newGuard="if((name==='qq_shiguang_explore'||name==='qq_shiguang_read_web')&&cfg.socialV2?.explore?.ownerInfluence!==true)";
+  if(oldGuard.test(updated))updated=updated.replace(oldGuard,newGuard);
+  else if(!updated.includes(newGuard))updated=updated.replace('const flag = TOOL_CONFIG_FLAGS[name];','const flag = TOOL_CONFIG_FLAGS[name];'+newline+'    '+newGuard+'{disabledTools.push(`${name}(ownerInfluence)`);return undefined;}');
+  return Buffer.from(updated);
 }
 function receipt(root) {
   try {

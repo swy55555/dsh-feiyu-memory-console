@@ -1,12 +1,12 @@
-# 交给 Agent 的完整首次安装指令（0.11.3）
+# 交给 Agent 的完整首次安装指令（0.11.4）
 
 下面整段可直接复制给能够操作本机文件和终端的 Agent。路径必须根据实际环境确定；不要把示例 E 盘当作所有用户的默认配置。已有安装应执行升级，不要重新初始化。
 
 ---
 
-请帮我安装 **回响 / 心迹 0.11.3**，包括 `dsh-feiyu-memory-console` 控制台、心迹 QQ 桥接、DSH 预设/MCP 注册以及 memvec 记忆服务。不要额外安装 DSH Soul 或 dsh-fish-memory。
+请帮我安装 **回响 / 心迹 0.11.4**，包括 `dsh-feiyu-memory-console` 控制台、心迹 QQ 桥接、DSH 预设/MCP 注册以及 memvec 记忆服务。不要额外安装 DSH Soul 或 dsh-fish-memory。
 
-官方发布页：<https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.11.3>
+官方发布页：<https://github.com/swy55555/dsh-feiyu-memory-console/releases/tag/v0.11.4>
 
 请先读这个版本的 README、INSTALL.md、manual/USER_GUIDE.md、docs/TECHNICAL_MANUAL.md、DISCLAIMER.md 和 ACKNOWLEDGEMENTS.md，然后实施安装。按实际结果报告，不要只给我计划，不要把页面能打开等同于全部功能安装成功。
 
@@ -21,7 +21,7 @@
 
 ## 二、下载并核对发布包
 
-1. 从上面的 0.11.3 Release 下载 `dsh-feiyu-memory-console-0.11.3.tgz` 和 `SHA256SUMS-0.11.3.txt`，计算 SHA-256 并逐字比对；不匹配就停止使用该包。
+1. 从上面的 0.11.4 Release 下载 `dsh-feiyu-memory-console-0.11.4.tgz` 和 `SHA256SUMS-0.11.4.txt`，计算 SHA-256 并逐字比对；不匹配就停止使用该包。
 2. 解压到稳定、可写的插件代码目录。确认目录根部有 package.json、lib、bridge、bin、memvec 和 INSTALL.md；不要误把解压外层目录当作插件根目录。
 3. 这次安装使用同一版本的代码和文档。不要用 0.11.1 包尝试空目录首次安装，也不要从作者电脑或聊天附件复制私人配置补洞。已有 0.11.2 安装应按 [升级说明](../UPGRADE.md) 一起更新桥接与 memvec，不重新初始化数据目录。
 

@@ -1,5 +1,6 @@
 import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import crypto from 'node:crypto';import vm from 'node:vm';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 import {setupFeatures,setupRevision,canChooseStarter,planSetup,growthStatus} from '../bridge/onboarding.mjs';
+import {legacyRebaseRevision} from '../bridge/legacy-rebase.mjs';
 const require=createRequire(import.meta.url),{chromium}=require(process.env.FEIYU_PLAYWRIGHT_PATH||'playwright');
 const html=fs.readFileSync(new URL('../bridge/xinji-console.html',import.meta.url),'utf8'),source=fs.readFileSync(new URL('../bridge/bridge-v09.js',import.meta.url),'utf8');
 const start=source.indexOf('const server = http.createServer(async (req, res) => {')+'const server = http.createServer('.length,end=source.indexOf("        if (req.method === 'POST' && url.pathname === '/api/memory/confirmation-review')",start);
@@ -7,7 +8,7 @@ const dims=['warm','initiative','clingy','stability','playful','proud'],labels=[
 const persona={spec:{dimensions:dims.map((key,i)=>({key,label:labels[i],desc:'低 ↔ 高',baseline:50,band:20}))},baseline:Object.fromEntries(dims.map(k=>[k,50])),current:Object.fromEntries(dims.map(k=>[k,50]))};
 let file={ownerQQ:1,allow:{private:[1]},dsh:{provider:'fixture',model:'fixture'},socialV2:{}},writes=0,storageFail=false;
 const context={URL,Buffer,AbortSignal,crypto,path,port:0,ROOT:'/fixture',consoleToken:'fixture-token-one-1234',socialV2:{},cfg:structuredClone(file),currentMode:'reserved2',isLiveAgentToken:()=>false,fs:{readFileSync:()=>html},
- setupFeatures,setupRevision,canChooseStarter,planSetup,growthStatus,setupOrigin:{freshPersona:true},selfReference:{state:{claims:[],queue:[]}},personaState:persona,effectivePersonaState:()=>persona,
+ setupFeatures,setupRevision,canChooseStarter,planSetup,growthStatus,legacyRebaseRevision,selfReferenceEnabled:()=>true,setupOrigin:{freshPersona:true},selfReference:{state:{claims:[],queue:[]}},personaState:persona,effectivePersonaState:()=>persona,
  readConfigObject:()=>structuredClone(file),atomicWriteJson:(name,next)=>{if(storageFail)throw Error('disk write failed');writes++;file=structuredClone(next)},mindAllowed:()=>true,dshReady:true,dshPresetIds:['qq-memory'],snowlumaHealthSnapshot:()=>({connected:true,good:true}),fetch:async()=>({ok:true,json:async()=>({ok:true})})};
 const handler=vm.runInNewContext('('+source.slice(start,end)+`
  sendJson({ok:true,dshReady:true,runtimeVersion:'onboarding-fixture',allow:{groups:[],private:[]},sessions:[],pending:[],presets:[],config:{},security:{},voices:[],entries:[],items:[],logs:[]});
@@ -37,8 +38,9 @@ try{
  // Existing-user case: show accumulation, never permit starter reset.
  context.cfg=structuredClone(file);context.setupOrigin={freshPersona:false};context.selfReference.state={temperament:{current:{warm:66}},claims:[],queue:[{id:'source-1'}]};
  const before=structuredClone(context.selfReference.state);await page.reload();await page.locator('#setupGrowthStatus').filter({hasText:'1/12'}).waitFor();
- await page.locator('#setupOpen').click();await page.locator('#setupNext').click();assert.equal(await page.locator('#setupPreset').count(),0);assert.match(await page.locator('#setupStarter').textContent(),/保留已有/);
- await page.locator('#setupClose').click();await page.locator('#themeToggle').click();await page.setViewportSize({width:390,height:844});
+ await page.locator('#setupOpen').click();await page.locator('#setupNext').click();assert.equal(await page.locator('#setupPreset').count(),0);assert.match(await page.locator('#setupStarter').textContent(),/用旧人设卡重新建立起点/);assert.equal(await page.locator('#setupRebaseOpen').isEnabled(),true);
+ await page.locator('#setupRebaseOpen').click();await page.locator('#rebaseCard').fill('这是至少十个字的旧人设卡。');assert.equal(await page.locator('#rebaseSave').count(),0);await page.locator('#rebaseClose').click();
+ await page.locator('#themeToggle').click();await page.setViewportSize({width:390,height:844});
  await page.locator('#setupOpen').click();await page.locator('#setupNext').click();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
  assert.ok(await page.locator('#setupDialog').evaluate(el=>el.scrollWidth<=el.clientWidth+2));
  if(out)await page.screenshot({path:path.join(out,'onboarding-mobile.png'),animations:'disabled'});

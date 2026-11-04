@@ -15,7 +15,7 @@ export function evaluateOpennessDrift({ taste = null, now = Date.now(), lastProp
   const eligible = [];
   for (const t of topics) {
     const evidence = Array.isArray(t.evidence) ? t.evidence : [];
-    const urls = new Set(evidence.map((e) => e.url).filter(Boolean));
+    const urls = new Set(evidence.filter(e=>e.source!=='personal-review'&&e.sourceState!=='invalid').map((e) => e.url).filter(Boolean));
     if (urls.size < Number(c.minEvidencePerTopic || 2)) continue;
     const firstAt = Number(t.createdAt) || Number(evidence[0]?.at) || Number(t.lastSeenAt) || 0;
     if (!firstAt) continue;

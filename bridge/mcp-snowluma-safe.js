@@ -241,12 +241,15 @@ const TOOL_CONFIG_FLAGS = {
   qq_meme_lookup: 'extra',
   qq_vmem_add: 'extra',
   qq_vmem_search: 'longMemory',
+  qq_shiguang_explore: 'explore',
+  qq_shiguang_read_web: 'explore',
 };
 const disabledTools = [];
 {
   const registerTool = server.tool.bind(server);
   server.tool = (name, ...rest) => {
     const flag = TOOL_CONFIG_FLAGS[name];
+    if((name==='qq_shiguang_explore'||name==='qq_shiguang_read_web')&&cfg.socialV2?.explore?.ownerInfluence!==true){disabledTools.push(`${name}(ownerInfluence)`);return undefined;}
     if (flag && cfg.socialV2?.tools?.[flag] === false) {
       disabledTools.push(`${name}(${flag})`);
       return undefined;
@@ -1581,6 +1584,47 @@ server.tool(
     } catch (error) {
       return { content: [{ type: 'text', text: `查记忆失败：${error?.message ?? error}` }], isError: true };
     }
+  }
+);
+
+server.tool(
+  'qq_shiguang_explore',
+  '主人私聊中按自己选的话题，用拾光读取一条 B 站视频的可用字幕并留下来源记录。可以决定暂时不看；想看时才调用。它不播放视频，不代表看过画面；只有成功回执才能说读到字幕。通用 web_search 只给标题和摘要，不能据此说翻了文章或看了视频。受拾光每日次数、费用、暂停和并发限制；失败时如实说明。',
+  {
+    key:z.string().describe('当前主人私聊 key'),
+    token:z.string().describe('当前会话令牌'),
+    topic:z.string().min(2).max(30).describe('自己想探索的具体 B 站话题，如室内耐阴植物；不要填完整句子或网址')
+  },
+  async ({key,token,topic})=>{
+    try{
+      if(!isOwnerKey(key))throw Error('拾光按话题探索只允许主人私聊');
+      await assertSessionToken(key,token);
+      const data=await agentApi('/api/explore/run',{method:'POST',body:JSON.stringify({key,topic}),headers:{'x-agent-token':token},timeoutMs:125000});
+      const entry=data?.entry;
+      if(!entry?.ok||!entry.contentRead)return {content:[{type:'text',text:serializeModelData({status:'not-read',reason:entry?.reason||'没有取得可读字幕',budget:data?.budget})}]};
+      return {content:[{type:'text',text:serializeModelData({status:'read-subtitles',title:entry.video?.title,url:entry.video?.url,topic:entry.topic,excerpts:(entry.impressions||[]).slice(0,2).map(row=>row.quote),savedSelfMemories:entry.writes?.length||0,budget:data?.budget})}]};
+    }catch(error){return {content:[{type:'text',text:`拾光没有取得新的读取回执：${error?.message??error}`}],isError:true};}
+  }
+);
+
+server.tool(
+  'qq_shiguang_read_web',
+  '主人私聊中用拾光读取一个公开 HTTPS 网页正文并留下来源记录。web_search 只能找链接；真正读正文时调用本工具。成功回执才可说读过；若未保存自我记忆，也要如实区分。B 站视频改用 qq_shiguang_explore。受拾光暂停、每日次数、费用和并发限制。',
+  {
+    key:z.string().describe('当前主人私聊 key'),
+    token:z.string().describe('当前会话令牌'),
+    url:z.string().url().describe('要实际读取的公开 HTTPS 网页 URL'),
+    topic:z.string().max(24).optional().describe('这次阅读关注的话题，可不填')
+  },
+  async ({key,token,url,topic})=>{
+    try{
+      if(!isOwnerKey(key))throw Error('拾光网页阅读只允许主人私聊');
+      await assertSessionToken(key,token);
+      const data=await agentApi('/api/explore/web-read',{method:'POST',body:JSON.stringify({key,url,topic}),headers:{'x-agent-token':token},timeoutMs:195000});
+      const entry=data?.entry;
+      if(!entry?.ok||!entry.contentRead)return {content:[{type:'text',text:serializeModelData({status:'not-read',reason:entry?.reason||'未取得可读网页正文'})}]};
+      return {content:[{type:'text',text:serializeModelData({status:'read-page',title:entry.web?.title,url:entry.web?.url,topic:entry.topic,excerpts:(entry.impressions||[]).map(row=>row.quote),savedSelfMemories:entry.writes?.length||0,budget:data?.budget})}]};
+    }catch(error){return {content:[{type:'text',text:`拾光未能读取网页：${error?.message??error}`}],isError:true};}
   }
 );
 
